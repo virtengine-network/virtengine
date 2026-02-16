@@ -444,12 +444,21 @@ export function runCodexExec(
 
     let child;
     try {
+      // Build a clean env for the codex CLI binary.  The CLI authenticates
+      // via its own ChatGPT / GitHub OAuth flow and targets api.openai.com by
+      // default.  If the user's .env sets OPENAI_BASE_URL (e.g. to an Azure
+      // Foundry endpoint), the CLI would send its OAuth token to that URL and
+      // receive a 401 because Azure expects its own api-key header.  Strip the
+      // variable so the CLI uses its built-in endpoint; the SDK wrapper in
+      // codex-shell.mjs still reads process.env for its own connections.
+      const codexEnv = { ...process.env };
+      delete codexEnv.OPENAI_BASE_URL;
       const spawnOptions = {
         cwd,
         stdio: ["pipe", "pipe", "pipe"],
         // Do NOT set spawn timeout — we manage our own setTimeout to avoid
         // Node double-killing the child with SIGTERM before our handler runs.
-        env: { ...process.env },
+        env: codexEnv,
       };
       if (process.platform === "win32") {
         // On Windows, avoid spawning via a shell with a concatenated command

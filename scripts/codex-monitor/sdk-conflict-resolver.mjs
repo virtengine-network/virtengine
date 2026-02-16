@@ -816,6 +816,11 @@ function launchCodexExec(prompt, cwd, timeoutMs) {
         args.push("--add-dir", gitDir);
       }
 
+      // Strip OPENAI_BASE_URL so the Codex CLI uses its own ChatGPT OAuth
+      // endpoint (api.openai.com) instead of an Azure URL from the .env.
+      const codexEnv = { ...process.env };
+      delete codexEnv.OPENAI_BASE_URL;
+
       if (process.platform === "win32") {
         const shellQuote = (value) =>
           /\s/.test(value) ? `"${String(value).replace(/"/g, '\\"')}"` : value;
@@ -825,7 +830,7 @@ function launchCodexExec(prompt, cwd, timeoutMs) {
           stdio: ["pipe", "pipe", "pipe"],
           shell: true,
           timeout: timeoutMs,
-          env: { ...process.env },
+          env: codexEnv,
         });
       } else {
         child = spawn("codex", args, {
@@ -833,7 +838,7 @@ function launchCodexExec(prompt, cwd, timeoutMs) {
           stdio: ["pipe", "pipe", "pipe"],
           shell: false,
           timeout: timeoutMs,
-          env: { ...process.env },
+          env: codexEnv,
         });
       }
     } catch (err) {
