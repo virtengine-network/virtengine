@@ -121,6 +121,14 @@ let TELEGRAM_RETRY_BASE_MS = Math.max(
   100,
   Number(process.env.TELEGRAM_RETRY_BASE_MS || "600") || 600,
 );
+let TELEGRAM_CURL_CONNECT_TIMEOUT_SEC = Math.max(
+  2,
+  Number(process.env.TELEGRAM_CURL_CONNECT_TIMEOUT_SEC || "8") || 8,
+);
+let TELEGRAM_CURL_POLL_TIMEOUT_SEC = Math.max(
+  1,
+  Number(process.env.TELEGRAM_CURL_POLL_TIMEOUT_SEC || "5") || 5,
+);
 let TELEGRAM_CURL_FALLBACK = !["0", "false", "no"].includes(
   String(
     process.env.TELEGRAM_CURL_FALLBACK ||
@@ -160,6 +168,14 @@ function refreshTelegramConfigFromEnv() {
   TELEGRAM_RETRY_BASE_MS = Math.max(
     100,
     Number(process.env.TELEGRAM_RETRY_BASE_MS || "600") || 600,
+  );
+  TELEGRAM_CURL_CONNECT_TIMEOUT_SEC = Math.max(
+    2,
+    Number(process.env.TELEGRAM_CURL_CONNECT_TIMEOUT_SEC || "8") || 8,
+  );
+  TELEGRAM_CURL_POLL_TIMEOUT_SEC = Math.max(
+    1,
+    Number(process.env.TELEGRAM_CURL_POLL_TIMEOUT_SEC || "5") || 5,
   );
   TELEGRAM_CURL_FALLBACK = !["0", "false", "no"].includes(
     String(
@@ -315,6 +331,12 @@ async function telegramApiFetchViaCurl(url, requestOptions = {}) {
     throw new Error("curl is not available for Telegram fallback");
   }
 
+  const maxTimeSec = Math.max(5, Math.ceil(timeoutMs / 1000));
+  const connectTimeSec = Math.max(
+    2,
+    Math.min(TELEGRAM_CURL_CONNECT_TIMEOUT_SEC, maxTimeSec - 1),
+  );
+
   const args = [
     "--silent",
     "--show-error",
@@ -322,9 +344,9 @@ async function telegramApiFetchViaCurl(url, requestOptions = {}) {
     "--request",
     String(httpMethod || "POST").toUpperCase(),
     "--connect-timeout",
-    String(Math.max(2, Math.ceil(timeoutMs / 1000))),
+    String(connectTimeSec),
     "--max-time",
-    String(Math.max(5, Math.ceil(timeoutMs / 1000))),
+    String(maxTimeSec),
     "--write-out",
     "\n__CODE__:%{http_code}",
     String(url),
@@ -419,14 +441,6 @@ async function telegramApiFetch(method, requestOptions = {}) {
   }
 
   const url = createTelegramUrl(method, query);
-  if (TELEGRAM_CURL_FALLBACK && hasCurlBinary()) {
-    return await telegramApiFetchViaCurl(url, {
-      method: httpMethod,
-      payload,
-      timeoutMs,
-      operation,
-    });
-  }
   const maxAttempts = Math.max(1, retries);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -497,20 +511,29 @@ async function telegramApiFetch(method, requestOptions = {}) {
         throw err;
       }
       const retryable = isRetryableNetworkError(err);
-      if (
-        TELEGRAM_CURL_FALLBACK &&
-        retryable &&
-        hasCurlBinary()
-      ) {
+      if (TELEGRAM_CURL_FALLBACK && hasCurlBinary()) {
         console.warn(
           `[telegram-bot] ${operation} switching to curl fallback after fetch failure: ${err?.message || err}`,
         );
-        return await telegramApiFetchViaCurl(url, {
-          method: httpMethod,
-          payload,
-          timeoutMs,
-          operation,
-        });
+        try {
+          return await telegramApiFetchViaCurl(url, {
+            method: httpMethod,
+            payload,
+            timeoutMs,
+            operation,
+          });
+        } catch (curlErr) {
+          const curlRetryable = isRetryableNetworkError(curlErr);
+          if (!curlRetryable || attempt >= maxAttempts) {
+            throw curlErr;
+          }
+          const waitMs = calcRetryDelayMs(attempt);
+          console.warn(
+            `[telegram-bot] ${operation} curl fallback retry ${attempt}/${maxAttempts}: ${curlErr?.message || curlErr} (${waitMs}ms)`,
+          );
+          await delayMs(waitMs);
+          continue;
+        }
       }
       if (!retryable || attempt >= maxAttempts) {
         throw err;
@@ -1500,21 +1523,25 @@ function consumePendingUiInput(chatId) {
 
 async function pollUpdates() {
   if (!telegramToken) return [];
+  const effectivePollTimeoutS =
+    TELEGRAM_CURL_FALLBACK && hasCurlBinary()
+      ? Math.min(POLL_TIMEOUT_S, TELEGRAM_CURL_POLL_TIMEOUT_SEC)
+      : POLL_TIMEOUT_S;
 
   pollAbort = new AbortController();
   let res;
   try {
     res = await telegramApiFetch("getUpdates", {
-      method: "GET",
-      query: {
+      method: "POST",
+      payload: {
         offset: String(lastUpdateId + 1),
-        timeout: String(POLL_TIMEOUT_S),
+        timeout: String(effectivePollTimeoutS),
         allowed_updates: JSON.stringify(["message", "callback_query"]),
       },
       signal: pollAbort.signal,
       timeoutMs: Math.max(
         TELEGRAM_HTTP_TIMEOUT_MS,
-        POLL_TIMEOUT_S * 1000 + 15_000,
+        effectivePollTimeoutS * 1000 + 15_000,
       ),
       retries: TELEGRAM_RETRY_ATTEMPTS,
       operation: "getUpdates",
