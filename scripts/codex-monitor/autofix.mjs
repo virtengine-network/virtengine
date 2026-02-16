@@ -444,14 +444,36 @@ export function runCodexExec(
 
     let child;
     try {
-      // Build a clean env for the codex CLI binary.  The CLI authenticates
-      // via its own ChatGPT / GitHub OAuth flow and targets api.openai.com by
-      // default.  If the user's .env sets OPENAI_BASE_URL (e.g. to an Azure
-      // Foundry endpoint), the CLI would send its OAuth token to that URL and
-      // receive a 401 because Azure expects its own api-key header.  Strip the
-      // variable so the CLI uses its built-in endpoint; the SDK wrapper in
-      // codex-shell.mjs still reads process.env for its own connections.
+      // Build a clean env for the codex CLI binary.
+      // Auto-detect Azure: if OPENAI_BASE_URL contains .openai.azure.com,
+      // configure the CLI for Azure via -c overrides and AZURE_OPENAI_API_KEY.
+      // Otherwise strip OPENAI_BASE_URL so the CLI uses its ChatGPT OAuth.
       const codexEnv = { ...process.env };
+      const baseUrl = codexEnv.OPENAI_BASE_URL || "";
+      const isAzure = baseUrl.includes(".openai.azure.com");
+      if (isAzure) {
+        // Map OPENAI_API_KEY → AZURE_OPENAI_API_KEY for Azure auth header
+        if (codexEnv.OPENAI_API_KEY && !codexEnv.AZURE_OPENAI_API_KEY) {
+          codexEnv.AZURE_OPENAI_API_KEY = codexEnv.OPENAI_API_KEY;
+        }
+        // Inject Azure provider config via -c overrides
+        args.push(
+          "-c", 'model_provider="azure"',
+          "-c", 'model_providers.azure.name="Azure OpenAI"',
+          "-c", `model_providers.azure.base_url="${baseUrl}"`,
+          "-c", 'model_providers.azure.env_key="AZURE_OPENAI_API_KEY"',
+          "-c", 'model_providers.azure.wire_api="responses"',
+        );
+        // Override model from CODEX_MODEL env var — Azure deployment names
+        // often differ from the config.toml model (e.g. "gpt-5.2-codex" vs
+        // "gpt-5.3-codex"). The user sets the correct deployment name in .env.
+        const azureModel = codexEnv.CODEX_MODEL;
+        if (azureModel) {
+          args.push("-m", azureModel);
+        }
+      }
+      // Always strip OPENAI_BASE_URL — for Azure we use -c overrides above,
+      // for non-Azure the CLI should use its built-in endpoint.
       delete codexEnv.OPENAI_BASE_URL;
       const spawnOptions = {
         cwd,

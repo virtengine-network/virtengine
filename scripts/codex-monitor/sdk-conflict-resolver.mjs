@@ -816,9 +816,27 @@ function launchCodexExec(prompt, cwd, timeoutMs) {
         args.push("--add-dir", gitDir);
       }
 
-      // Strip OPENAI_BASE_URL so the Codex CLI uses its own ChatGPT OAuth
-      // endpoint (api.openai.com) instead of an Azure URL from the .env.
+      // Auto-detect Azure: configure Codex CLI for Azure via -c overrides,
+      // or strip OPENAI_BASE_URL so it uses ChatGPT OAuth for non-Azure.
       const codexEnv = { ...process.env };
+      const baseUrl = codexEnv.OPENAI_BASE_URL || "";
+      const isAzure = baseUrl.includes(".openai.azure.com");
+      if (isAzure) {
+        if (codexEnv.OPENAI_API_KEY && !codexEnv.AZURE_OPENAI_API_KEY) {
+          codexEnv.AZURE_OPENAI_API_KEY = codexEnv.OPENAI_API_KEY;
+        }
+        args.push(
+          "-c", 'model_provider="azure"',
+          "-c", 'model_providers.azure.name="Azure OpenAI"',
+          "-c", `model_providers.azure.base_url="${baseUrl}"`,
+          "-c", 'model_providers.azure.env_key="AZURE_OPENAI_API_KEY"',
+          "-c", 'model_providers.azure.wire_api="responses"',
+        );
+        const azureModel = codexEnv.CODEX_MODEL;
+        if (azureModel) {
+          args.push("-m", azureModel);
+        }
+      }
       delete codexEnv.OPENAI_BASE_URL;
 
       if (process.platform === "win32") {
