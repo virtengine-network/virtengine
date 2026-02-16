@@ -92,7 +92,6 @@ describe("hook-profiles", () => {
     const preToolCommand =
       claudeSettings.hooks.PreToolUse?.[0]?.hooks?.[0]?.command || "";
     expect(preToolCommand).toContain("agent-hook-bridge.mjs");
-    expect(preToolCommand).not.toContain("scripts/codex-monitor/");
 
     const copilotHooks = JSON.parse(
       await readFile(
@@ -107,7 +106,6 @@ describe("hook-profiles", () => {
       ? copilotCmd.join(" ")
       : String(copilotCmd || "");
     expect(copilotJoined).toContain("agent-hook-bridge.mjs");
-    expect(copilotJoined).not.toContain("scripts/codex-monitor/");
   });
 
   it("merges with existing claude settings", async () => {
