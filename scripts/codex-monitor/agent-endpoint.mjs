@@ -293,45 +293,81 @@ export class AgentEndpoint {
   async _killProcessOnPort(port) {
     try {
       const { execSync } = await import("node:child_process");
-      // Find PID holding the port on Windows
-      const output = execSync(`netstat -ano | findstr ":${port}"`, {
-        encoding: "utf8",
-        timeout: 5000,
-      }).trim();
-      const lines = output.split("\n").filter((l) => l.includes("LISTENING"));
-      const pids = new Set();
-      for (const line of lines) {
-        const parts = line.trim().split(/\s+/);
-        const pid = parts[parts.length - 1];
-        if (pid && /^\d+$/.test(pid) && pid !== String(process.pid)) {
-          pids.add(pid);
+      const isWindows = process.platform === "win32";
+      let output;
+      let pids = new Set();
+
+      if (isWindows) {
+        // Windows: netstat -ano | findstr
+        output = execSync(`netstat -ano | findstr ":${port}"`, {
+          encoding: "utf8",
+          timeout: 5000,
+        }).trim();
+        const lines = output.split("\n").filter((l) => l.includes("LISTENING"));
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          const pid = parts[parts.length - 1];
+          if (pid && /^\d+$/.test(pid) && pid !== String(process.pid)) {
+            pids.add(pid);
+          }
+        }
+      } else {
+        // Linux/macOS: lsof -i
+        try {
+          output = execSync(`lsof -ti :${port}`, {
+            encoding: "utf8",
+            timeout: 5000,
+          }).trim();
+          const pidList = output.split("\n").filter((p) => p.trim());
+          for (const pid of pidList) {
+            if (pid && /^\d+$/.test(pid) && pid !== String(process.pid)) {
+              pids.add(pid);
+            }
+          }
+        } catch (lsofErr) {
+          // lsof returns exit code 1 when no processes found (port is free)
+          if (lsofErr.status === 1) {
+            return; // Port is already free
+          }
+          throw lsofErr;
         }
       }
+
       for (const pid of pids) {
         console.log(`${TAG} Killing stale process PID ${pid} on port ${port}`);
         try {
-          execSync(`taskkill /F /PID ${pid}`, {
-            encoding: "utf8",
-            timeout: 5000,
-          });
+          if (isWindows) {
+            execSync(`taskkill /F /PID ${pid}`, {
+              encoding: "utf8",
+              timeout: 5000,
+            });
+          } else {
+            execSync(`kill -9 ${pid}`, {
+              encoding: "utf8",
+              timeout: 5000,
+            });
+          }
         } catch (killErr) {
           /* may already be dead — log for diagnostics */
           const stderrText = String(killErr.stderr || "");
-          if (stderrText.toLowerCase().includes("access is denied")) {
+          if (
+            stderrText.toLowerCase().includes("access is denied") ||
+            stderrText.toLowerCase().includes("operation not permitted")
+          ) {
             accessDeniedPorts.set(port, Date.now());
             persistAccessDeniedCache();
           }
           console.warn(
-            `${TAG} taskkill PID ${pid} failed: ${killErr.stderr?.trim() || killErr.message || "unknown error"}`,
+            `${TAG} kill PID ${pid} failed: ${killErr.stderr?.trim() || killErr.message || "unknown error"}`,
           );
         }
       }
       // Give OS time to release the port
       await new Promise((r) => setTimeout(r, 1000));
     } catch (outerErr) {
-      // netstat/taskkill may fail on non-Windows or if port already free
+      // Commands may fail if port already free
       if (outerErr.status !== 1) {
-        // status 1 = no matching netstat entries (port already free)
+        // status 1 = no matching entries (port already free)
         console.warn(
           `${TAG} _killProcessOnPort(${port}) failed: ${outerErr.message || "unknown error"}`,
         );

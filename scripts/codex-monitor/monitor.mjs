@@ -1740,21 +1740,47 @@ async function startVibeKanbanProcess() {
 
   // ── Kill any stale process holding the port ───────────────────────
   try {
-    const portCheck = execSync(
-      `netstat -aon | findstr ":${vkRecoveryPort}.*LISTENING"`,
-      { encoding: "utf8", timeout: 5000, stdio: "pipe" },
-    ).trim();
-    const pidMatch = portCheck.match(/(\d+)\s*$/);
-    if (pidMatch) {
-      const stalePid = pidMatch[1];
+    const isWindows = process.platform === "win32";
+    let stalePid;
+
+    if (isWindows) {
+      const portCheck = execSync(
+        `netstat -aon | findstr ":${vkRecoveryPort}.*LISTENING"`,
+        { encoding: "utf8", timeout: 5000, stdio: "pipe" },
+      ).trim();
+      const pidMatch = portCheck.match(/(\d+)\s*$/);
+      if (pidMatch) {
+        stalePid = pidMatch[1];
+      }
+    } else {
+      // Linux/macOS: use lsof
+      const portCheck = execSync(`lsof -ti :${vkRecoveryPort}`, {
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: "pipe",
+      }).trim();
+      const pids = portCheck.split("\n").filter((p) => p.trim());
+      if (pids.length > 0) {
+        stalePid = pids[0]; // Take first PID if multiple
+      }
+    }
+
+    if (stalePid) {
       console.log(
         `[monitor] killing stale process ${stalePid} on port ${vkRecoveryPort}`,
       );
       try {
-        execSync(`taskkill /F /PID ${stalePid}`, {
-          timeout: 5000,
-          stdio: "pipe",
-        });
+        if (isWindows) {
+          execSync(`taskkill /F /PID ${stalePid}`, {
+            timeout: 5000,
+            stdio: "pipe",
+          });
+        } else {
+          execSync(`kill -9 ${stalePid}`, {
+            timeout: 5000,
+            stdio: "pipe",
+          });
+        }
       } catch {
         /* best effort */
       }
