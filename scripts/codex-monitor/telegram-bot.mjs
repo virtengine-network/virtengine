@@ -127,6 +127,22 @@ let TELEGRAM_CURL_FALLBACK = !["0", "false", "no"].includes(
       (process.platform === "win32" ? "false" : "true"),
   ).toLowerCase(),
 );
+let telegramAllowedChatIds = new Set();
+
+function parseAllowedTelegramIds(rawValue) {
+  return String(rawValue || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isAuthorizedTelegramActor(chatId, fromId) {
+  if (!telegramAllowedChatIds || telegramAllowedChatIds.size === 0) return true;
+  if (chatId && telegramAllowedChatIds.has(String(chatId))) return true;
+  if (fromId && telegramAllowedChatIds.has(String(fromId))) return true;
+  return false;
+}
+
 function refreshTelegramConfigFromEnv() {
   telegramToken = process.env.TELEGRAM_BOT_TOKEN;
   telegramChatId = process.env.TELEGRAM_CHAT_ID;
@@ -151,6 +167,13 @@ function refreshTelegramConfigFromEnv() {
         (process.platform === "win32" ? "false" : "true"),
     ).toLowerCase(),
   );
+  const allowedIds = new Set([
+    ...parseAllowedTelegramIds(
+      process.env.TELEGRAM_ALLOWED_CHAT_IDS || process.env.TELEGRAM_CHAT_IDS,
+    ),
+    ...parseAllowedTelegramIds(process.env.TELEGRAM_CHAT_ID),
+  ]);
+  telegramAllowedChatIds = allowedIds;
 }
 const AGENT_TIMEOUT_MS = (() => {
   const minRaw = Number(process.env.TELEGRAM_AGENT_TIMEOUT_MIN || "");
@@ -1537,11 +1560,12 @@ async function pollUpdates() {
  */
 async function handleCallbackQuery(query) {
   const chatId = String(query.message?.chat?.id || "");
+  const fromId = String(query.from?.id || "");
   const data = query.data || "";
   const callbackId = query.id;
 
-  // Security: only accept from configured chat
-  if (telegramChatId && chatId !== String(telegramChatId)) {
+  // Security: only accept from configured chat/user allow-list
+  if (!isAuthorizedTelegramActor(chatId, fromId)) {
     await answerCallbackQuery(callbackId, "Unauthorized", true);
     return;
   }
@@ -1611,6 +1635,7 @@ async function handleUpdate(update) {
 
   const msg = update.message;
   const chatId = String(msg.chat?.id);
+  const fromId = String(msg.from?.id || "");
   const text = (msg.text || "").trim();
 
   const presencePayload = text ? parsePresenceMessage(text) : null;
@@ -1632,10 +1657,10 @@ async function handleUpdate(update) {
     return;
   }
 
-  // Security: only accept from configured chat
-  if (telegramChatId && chatId !== String(telegramChatId)) {
+  // Security: only accept from configured chat/user allow-list
+  if (!isAuthorizedTelegramActor(chatId, fromId)) {
     console.warn(
-      `[telegram-bot] rejected message from chat ${chatId} (expected ${telegramChatId})`,
+      `[telegram-bot] rejected message from chat ${chatId} user ${fromId || "unknown"} (allowed: ${Array.from(telegramAllowedChatIds).join(",") || "none"})`,
     );
     return;
   }
