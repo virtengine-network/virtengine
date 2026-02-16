@@ -109,6 +109,7 @@ let TELEGRAM_API_BASE = String(
 const POLL_TIMEOUT_S = 30; // long-poll timeout
 const MAX_MESSAGE_LEN = 4000; // Telegram max is 4096, leave margin
 const POLL_ERROR_BACKOFF_MS = 5000;
+const TELEGRAM_FETCH_FAILURE_COOLDOWN_MS = 10 * 60 * 1000;
 let TELEGRAM_HTTP_TIMEOUT_MS = Math.max(
   2000,
   Number(process.env.TELEGRAM_HTTP_TIMEOUT_MS || "15000") || 15000,
@@ -136,6 +137,9 @@ let TELEGRAM_CURL_FALLBACK = !["0", "false", "no"].includes(
   ).toLowerCase(),
 );
 let telegramAllowedChatIds = new Set();
+let telegramPreferCurlUntilMs = 0;
+let lastPollErrorLogAtMs = 0;
+let pollFailureStreak = 0;
 
 function parseAllowedTelegramIds(rawValue) {
   return String(rawValue || "")
@@ -258,27 +262,86 @@ function delayMs(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
+function shouldUseCurlPrimary() {
+  return (
+    TELEGRAM_CURL_FALLBACK &&
+    hasCurlBinary() &&
+    Date.now() < telegramPreferCurlUntilMs
+  );
+}
+
+function shouldPinCurlFallback(operation) {
+  return [
+    "sendMessage",
+    "editMessageText",
+    "deleteMessage",
+    "answerCallbackQuery",
+  ].includes(String(operation || ""));
+}
+
 function toErrorCode(err) {
   return String(
     err?.cause?.code || err?.code || err?.cause?.name || err?.name || "",
   ).toUpperCase();
 }
 
+function isRetryableCurlFailure(err) {
+  const message = String(err?.message || err || "").toLowerCase();
+  if (!message.includes("curl")) return false;
+  if (/curl:\s*\((6|7|28|35|52|56)\)/.test(message)) return true;
+  return [
+    "timed out",
+    "timeout",
+    "failed to connect",
+    "couldn't connect",
+    "could not resolve",
+    "empty reply",
+    "network is unreachable",
+    "ssl connection timeout",
+  ].some((fragment) => message.includes(fragment));
+}
+
 function isRetryableNetworkError(err) {
   const code = toErrorCode(err);
-  return [
-    "ABORTERROR",
-    "ETIMEDOUT",
-    "ECONNRESET",
-    "ECONNREFUSED",
-    "ENETUNREACH",
-    "EHOSTUNREACH",
-    "ENOTFOUND",
-    "EAI_AGAIN",
-    "UND_ERR_CONNECT_TIMEOUT",
-    "UND_ERR_HEADERS_TIMEOUT",
-    "UND_ERR_SOCKET",
-  ].includes(code);
+  if (
+    [
+      "ABORTERROR",
+      "ETIMEDOUT",
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "ENETUNREACH",
+      "EHOSTUNREACH",
+      "ENOTFOUND",
+      "EAI_AGAIN",
+      "UND_ERR_CONNECT_TIMEOUT",
+      "UND_ERR_HEADERS_TIMEOUT",
+      "UND_ERR_SOCKET",
+    ].includes(code)
+  ) {
+    return true;
+  }
+  return isRetryableCurlFailure(err);
+}
+
+function getPollBackoffMs() {
+  return Math.min(
+    60_000,
+    POLL_ERROR_BACKOFF_MS * 2 ** Math.min(5, Math.max(0, pollFailureStreak - 1)),
+  );
+}
+
+function resetPollFailureStreak() {
+  pollFailureStreak = 0;
+}
+
+function markPollFailure() {
+  pollFailureStreak += 1;
+}
+
+function shouldLogPollError(now = Date.now()) {
+  if (now - lastPollErrorLogAtMs < 60_000) return false;
+  lastPollErrorLogAtMs = now;
+  return true;
 }
 
 function isRetryableStatus(status) {
@@ -441,6 +504,19 @@ async function telegramApiFetch(method, requestOptions = {}) {
   }
 
   const url = createTelegramUrl(method, query);
+  if (shouldPinCurlFallback(operation) && shouldUseCurlPrimary()) {
+    try {
+      return await telegramApiFetchViaCurl(url, {
+        method: httpMethod,
+        payload,
+        timeoutMs,
+        operation,
+      });
+    } catch (curlErr) {
+      if (!isRetryableNetworkError(curlErr)) throw curlErr;
+      telegramPreferCurlUntilMs = 0;
+    }
+  }
   const maxAttempts = Math.max(1, retries);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -512,9 +588,17 @@ async function telegramApiFetch(method, requestOptions = {}) {
       }
       const retryable = isRetryableNetworkError(err);
       if (TELEGRAM_CURL_FALLBACK && hasCurlBinary()) {
-        console.warn(
-          `[telegram-bot] ${operation} switching to curl fallback after fetch failure: ${err?.message || err}`,
-        );
+        const shouldPinCurl = shouldPinCurlFallback(operation);
+        const wasPreferCurl = Date.now() < telegramPreferCurlUntilMs;
+        if (shouldPinCurl) {
+          telegramPreferCurlUntilMs =
+            Date.now() + TELEGRAM_FETCH_FAILURE_COOLDOWN_MS;
+        }
+        if (!wasPreferCurl && operation !== "getUpdates") {
+          console.warn(
+            `[telegram-bot] ${operation} switched to curl fallback for ${Math.round(TELEGRAM_FETCH_FAILURE_COOLDOWN_MS / 60000)}m after fetch failure: ${err?.message || err}`,
+          );
+        }
         try {
           return await telegramApiFetchViaCurl(url, {
             method: httpMethod,
@@ -523,14 +607,17 @@ async function telegramApiFetch(method, requestOptions = {}) {
             operation,
           });
         } catch (curlErr) {
+          telegramPreferCurlUntilMs = 0;
           const curlRetryable = isRetryableNetworkError(curlErr);
           if (!curlRetryable || attempt >= maxAttempts) {
             throw curlErr;
           }
           const waitMs = calcRetryDelayMs(attempt);
-          console.warn(
-            `[telegram-bot] ${operation} curl fallback retry ${attempt}/${maxAttempts}: ${curlErr?.message || curlErr} (${waitMs}ms)`,
-          );
+          if (operation !== "getUpdates") {
+            console.warn(
+              `[telegram-bot] ${operation} curl fallback retry ${attempt}/${maxAttempts}: ${curlErr?.message || curlErr} (${waitMs}ms)`,
+            );
+          }
           await delayMs(waitMs);
           continue;
         }
@@ -1524,7 +1611,7 @@ function consumePendingUiInput(chatId) {
 async function pollUpdates() {
   if (!telegramToken) return [];
   const effectivePollTimeoutS =
-    TELEGRAM_CURL_FALLBACK && hasCurlBinary()
+    shouldUseCurlPrimary()
       ? Math.min(POLL_TIMEOUT_S, TELEGRAM_CURL_POLL_TIMEOUT_SEC)
       : POLL_TIMEOUT_S;
 
@@ -1548,7 +1635,12 @@ async function pollUpdates() {
     });
   } catch (err) {
     if (err.name === "AbortError" || !polling) return [];
-    console.warn(`[telegram-bot] poll error: ${err.message}`);
+    markPollFailure();
+    const now = Date.now();
+    if (shouldLogPollError(now)) {
+      console.warn(`[telegram-bot] poll error: ${err.message}`);
+    }
+    if (polling) await delayMs(getPollBackoffMs());
     return [];
   } finally {
     pollAbort = null;
@@ -1556,19 +1648,25 @@ async function pollUpdates() {
 
   // Safety: validate response object
   if (!res || typeof res.ok === "undefined") {
+    markPollFailure();
     console.warn(`[telegram-bot] poll error: invalid response object`);
+    if (polling) await delayMs(getPollBackoffMs());
     return [];
   }
 
   if (!res.ok) {
+    markPollFailure();
     const body = await res.text().catch(() => "");
     console.warn(`[telegram-bot] getUpdates failed: ${res.status} ${body}`);
     if (res.status === 409) {
       polling = false;
       await releaseTelegramPollLock();
+      return [];
     }
+    if (polling) await delayMs(getPollBackoffMs());
     return [];
   }
+  resetPollFailureStreak();
 
   try {
     const data = await res.json();
