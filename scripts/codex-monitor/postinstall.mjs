@@ -93,7 +93,9 @@ const RECOMMENDED = [
         "sudo apt install powershell  # or: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-linux",
     },
     url: "https://github.com/PowerShell/PowerShell",
-    why: "Required for the orchestrator script (ve-orchestrator.ps1)",
+    why: isWin
+      ? "Required on Windows for PowerShell orchestrator scripts"
+      : "Optional on macOS/Linux (only needed when using .ps1 orchestrator scripts)",
   },
 ];
 

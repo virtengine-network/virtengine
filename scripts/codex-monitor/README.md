@@ -34,7 +34,7 @@ Requires:
 
 - Node.js 18+
 - git
-- PowerShell (`pwsh`) for VirtEngine default scripts
+- PowerShell (`pwsh`) on Windows (optional on Linux/macOS unless using `.ps1` scripts)
 - GitHub CLI (`gh`) recommended
 
 ---

@@ -14,9 +14,17 @@
 
 import { execSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRepoRoot } from "./repo-root.mjs";
 import {
   execPrimaryPrompt,
   isPrimaryBusy,
@@ -82,7 +90,7 @@ import {
 } from "./presence.mjs";
 
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
-const repoRoot = resolve(__dirname, "..", "..");
+const repoRoot = resolveRepoRoot();
 const statusPath = resolve(repoRoot, ".cache", "ve-orchestrator-status.json");
 const telegramPollLockPath = resolve(
   repoRoot,
@@ -93,32 +101,57 @@ const liveDigestStatePath = resolve(repoRoot, ".cache", "ve-live-digest.json");
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
-const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-const telegramChatId = process.env.TELEGRAM_CHAT_ID;
-const TELEGRAM_API_BASE = String(
+let telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+let telegramChatId = process.env.TELEGRAM_CHAT_ID;
+let TELEGRAM_API_BASE = String(
   process.env.TELEGRAM_API_BASE_URL || "https://api.telegram.org",
 ).replace(/\/+$/, "");
 const POLL_TIMEOUT_S = 30; // long-poll timeout
 const MAX_MESSAGE_LEN = 4000; // Telegram max is 4096, leave margin
 const POLL_ERROR_BACKOFF_MS = 5000;
-const TELEGRAM_HTTP_TIMEOUT_MS = Math.max(
+let TELEGRAM_HTTP_TIMEOUT_MS = Math.max(
   2000,
   Number(process.env.TELEGRAM_HTTP_TIMEOUT_MS || "15000") || 15000,
 );
-const TELEGRAM_RETRY_ATTEMPTS = Math.max(
+let TELEGRAM_RETRY_ATTEMPTS = Math.max(
   1,
   Number(process.env.TELEGRAM_RETRY_ATTEMPTS || "4") || 4,
 );
-const TELEGRAM_RETRY_BASE_MS = Math.max(
+let TELEGRAM_RETRY_BASE_MS = Math.max(
   100,
   Number(process.env.TELEGRAM_RETRY_BASE_MS || "600") || 600,
 );
-const TELEGRAM_CURL_FALLBACK = !["0", "false", "no"].includes(
+let TELEGRAM_CURL_FALLBACK = !["0", "false", "no"].includes(
   String(
     process.env.TELEGRAM_CURL_FALLBACK ||
-      (process.env.WSL_DISTRO_NAME ? "true" : "false"),
+      (process.platform === "win32" ? "false" : "true"),
   ).toLowerCase(),
 );
+function refreshTelegramConfigFromEnv() {
+  telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+  telegramChatId = process.env.TELEGRAM_CHAT_ID;
+  TELEGRAM_API_BASE = String(
+    process.env.TELEGRAM_API_BASE_URL || "https://api.telegram.org",
+  ).replace(/\/+$/, "");
+  TELEGRAM_HTTP_TIMEOUT_MS = Math.max(
+    2000,
+    Number(process.env.TELEGRAM_HTTP_TIMEOUT_MS || "15000") || 15000,
+  );
+  TELEGRAM_RETRY_ATTEMPTS = Math.max(
+    1,
+    Number(process.env.TELEGRAM_RETRY_ATTEMPTS || "4") || 4,
+  );
+  TELEGRAM_RETRY_BASE_MS = Math.max(
+    100,
+    Number(process.env.TELEGRAM_RETRY_BASE_MS || "600") || 600,
+  );
+  TELEGRAM_CURL_FALLBACK = !["0", "false", "no"].includes(
+    String(
+      process.env.TELEGRAM_CURL_FALLBACK ||
+        (process.platform === "win32" ? "false" : "true"),
+    ).toLowerCase(),
+  );
+}
 const AGENT_TIMEOUT_MS = (() => {
   const minRaw = Number(process.env.TELEGRAM_AGENT_TIMEOUT_MIN || "");
   if (Number.isFinite(minRaw) && minRaw > 0) return minRaw * 60 * 1000;
@@ -266,7 +299,7 @@ async function telegramApiFetchViaCurl(url, requestOptions = {}) {
     "--request",
     String(httpMethod || "POST").toUpperCase(),
     "--connect-timeout",
-    String(Math.max(2, Math.ceil(timeoutMs / 2000))),
+    String(Math.max(2, Math.ceil(timeoutMs / 1000))),
     "--max-time",
     String(Math.max(5, Math.ceil(timeoutMs / 1000))),
     "--write-out",
@@ -346,6 +379,7 @@ function createTelegramUrl(method, query = null) {
 }
 
 async function telegramApiFetch(method, requestOptions = {}) {
+  refreshTelegramConfigFromEnv();
   const {
     method: httpMethod = "POST",
     payload,
@@ -362,6 +396,14 @@ async function telegramApiFetch(method, requestOptions = {}) {
   }
 
   const url = createTelegramUrl(method, query);
+  if (TELEGRAM_CURL_FALLBACK && hasCurlBinary()) {
+    return await telegramApiFetchViaCurl(url, {
+      method: httpMethod,
+      payload,
+      timeoutMs,
+      operation,
+    });
+  }
   const maxAttempts = Math.max(1, retries);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -435,8 +477,7 @@ async function telegramApiFetch(method, requestOptions = {}) {
       if (
         TELEGRAM_CURL_FALLBACK &&
         retryable &&
-        hasCurlBinary() &&
-        attempt >= maxAttempts
+        hasCurlBinary()
       ) {
         console.warn(
           `[telegram-bot] ${operation} switching to curl fallback after fetch failure: ${err?.message || err}`,
@@ -655,6 +696,7 @@ export function injectMonitorFunctions({
   getTaskStoreStats,
   getTasksPendingReview,
 }) {
+  refreshTelegramConfigFromEnv();
   _sendTelegramMessage = sendTelegramMessage;
   _readStatusData = readStatusData;
   _readStatusSummary = readStatusSummary;
@@ -1455,7 +1497,7 @@ async function pollUpdates() {
       operation: "getUpdates",
     });
   } catch (err) {
-    if (err.name === "AbortError") return [];
+    if (err.name === "AbortError" || !polling) return [];
     console.warn(`[telegram-bot] poll error: ${err.message}`);
     return [];
   } finally {
@@ -2073,14 +2115,13 @@ async function clearAllBotCommands() {
 
   for (const body of scopes) {
     try {
-      await fetch(
-        `https://api.telegram.org/bot${telegramToken}/deleteMyCommands`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-      );
+      await telegramApiFetch("deleteMyCommands", {
+        method: "POST",
+        payload: body,
+        retries: 1,
+        retryOnStatus: false,
+        operation: "deleteMyCommands",
+      });
     } catch {
       /* best effort — scope may not have had commands */
     }
@@ -2116,14 +2157,11 @@ async function registerBotCommands() {
 
   let res;
   try {
-    res = await fetch(
-      `https://api.telegram.org/bot${telegramToken}/setMyCommands`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ commands }),
-      },
-    );
+    res = await telegramApiFetch("setMyCommands", {
+      method: "POST",
+      payload: { commands },
+      operation: "setMyCommands",
+    });
   } catch (err) {
     console.warn(`[telegram-bot] setMyCommands error: ${err.message}`);
     return;
@@ -7258,6 +7296,7 @@ function stopBatchFlushLoop() {
  * Call injectMonitorFunctions() first if you want full integration.
  */
 export async function startTelegramBot() {
+  refreshTelegramConfigFromEnv();
   if (!telegramToken || !telegramChatId) {
     console.warn(
       "[telegram-bot] disabled (missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID)",
@@ -7434,12 +7473,14 @@ let _statusWriterTimer = null;
 
 export function startStatusFileWriter(intervalMs = 30000) {
   if (_statusWriterTimer) return;
+  const statusDir = dirname(statusPath);
   _statusWriterTimer = setInterval(async () => {
     try {
       const executor = _getInternalExecutor?.();
       if (!executor) return;
       const status = executor.getStatus?.();
       if (!status) return;
+      await mkdir(statusDir, { recursive: true });
 
       let data = {};
       try {

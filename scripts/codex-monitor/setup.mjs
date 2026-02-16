@@ -2004,8 +2004,22 @@ async function main() {
       ),
     );
 
-    // Check for default scripts in codex-monitor directory
-    const orchestratorDefaults = getDefaultOrchestratorScripts();
+    // Check for default scripts in repo first, then package fallback.
+    const repoScriptDefaults = getDefaultOrchestratorScripts(
+      process.platform,
+      resolve(repoRoot, "scripts", "codex-monitor"),
+    );
+    const packageScriptDefaults = getDefaultOrchestratorScripts();
+    const orchestratorDefaults =
+      [repoScriptDefaults, packageScriptDefaults].find((defaults) =>
+        defaults.variants.some(
+          (variant) => variant.ext === defaults.preferredExt,
+        ),
+      ) ||
+      [repoScriptDefaults, packageScriptDefaults].find(
+        (defaults) => defaults.variants.length > 0,
+      ) ||
+      packageScriptDefaults;
     const hasDefaultScripts = orchestratorDefaults.variants.length > 0;
     const selectedDefault = orchestratorDefaults.selectedDefault;
 
