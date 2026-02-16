@@ -139,7 +139,9 @@ let TELEGRAM_CURL_FALLBACK = !["0", "false", "no"].includes(
 let telegramAllowedChatIds = new Set();
 let telegramPreferCurlUntilMs = 0;
 let lastPollErrorLogAtMs = 0;
+let lastFallbackSwitchLogMs = 0;
 let pollFailureStreak = 0;
+let telegramApiReachable = null; // null = unknown, true/false after probe
 
 function parseAllowedTelegramIds(rawValue) {
   return String(rawValue || "")
@@ -271,12 +273,7 @@ function shouldUseCurlPrimary() {
 }
 
 function shouldPinCurlFallback(operation) {
-  return [
-    "sendMessage",
-    "editMessageText",
-    "deleteMessage",
-    "answerCallbackQuery",
-  ].includes(String(operation || ""));
+  return String(operation || "") !== "getUpdates";
 }
 
 function toErrorCode(err) {
@@ -578,9 +575,11 @@ async function telegramApiFetch(method, requestOptions = {}) {
       }
 
       const waitMs = calcRetryDelayMs(attempt, response);
-      console.warn(
-        `[telegram-bot] ${operation} retry ${attempt}/${maxAttempts} after HTTP ${response.status} (${waitMs}ms)`,
-      );
+      if (Date.now() - lastFallbackSwitchLogMs >= 300_000) {
+        console.warn(
+          `[telegram-bot] ${operation} retry ${attempt}/${maxAttempts} after HTTP ${response.status} (${waitMs}ms)`,
+        );
+      }
       await delayMs(waitMs);
     } catch (err) {
       if (signal?.aborted) {
@@ -589,14 +588,15 @@ async function telegramApiFetch(method, requestOptions = {}) {
       const retryable = isRetryableNetworkError(err);
       if (TELEGRAM_CURL_FALLBACK && hasCurlBinary()) {
         const shouldPinCurl = shouldPinCurlFallback(operation);
-        const wasPreferCurl = Date.now() < telegramPreferCurlUntilMs;
         if (shouldPinCurl) {
           telegramPreferCurlUntilMs =
             Date.now() + TELEGRAM_FETCH_FAILURE_COOLDOWN_MS;
         }
-        if (!wasPreferCurl && operation !== "getUpdates") {
+        const now = Date.now();
+        if (now - lastFallbackSwitchLogMs >= 300_000) {
+          lastFallbackSwitchLogMs = now;
           console.warn(
-            `[telegram-bot] ${operation} switched to curl fallback for ${Math.round(TELEGRAM_FETCH_FAILURE_COOLDOWN_MS / 60000)}m after fetch failure: ${err?.message || err}`,
+            `[telegram-bot] fetch unavailable, using curl fallback: ${err?.message || err}`,
           );
         }
         try {
@@ -613,11 +613,7 @@ async function telegramApiFetch(method, requestOptions = {}) {
             throw curlErr;
           }
           const waitMs = calcRetryDelayMs(attempt);
-          if (operation !== "getUpdates") {
-            console.warn(
-              `[telegram-bot] ${operation} curl fallback retry ${attempt}/${maxAttempts}: ${curlErr?.message || curlErr} (${waitMs}ms)`,
-            );
-          }
+          // Curl retry logging suppressed — the overall failure is logged once above
           await delayMs(waitMs);
           continue;
         }
@@ -627,9 +623,11 @@ async function telegramApiFetch(method, requestOptions = {}) {
       }
 
       const waitMs = calcRetryDelayMs(attempt);
-      console.warn(
-        `[telegram-bot] ${operation} network retry ${attempt}/${maxAttempts}: ${err?.message || err} (${waitMs}ms)`,
-      );
+      if (Date.now() - lastFallbackSwitchLogMs >= 300_000) {
+        console.warn(
+          `[telegram-bot] ${operation} network retry ${attempt}/${maxAttempts}: ${err?.message || err} (${waitMs}ms)`,
+        );
+      }
       await delayMs(waitMs);
     } finally {
       clearTimeout(timeoutHandle);
@@ -1667,6 +1665,11 @@ async function pollUpdates() {
     return [];
   }
   resetPollFailureStreak();
+  if (!telegramApiReachable) {
+    telegramApiReachable = true;
+    // API came back — register commands that were deferred at startup
+    registerBotCommands().catch(() => {});
+  }
 
   try {
     const data = await res.json();
@@ -2252,6 +2255,28 @@ const COMMANDS = {
 };
 
 /**
+ * Quick connectivity probe — calls getMe with minimal retries.
+ * Returns true if Telegram API is reachable, false otherwise.
+ */
+async function probeTelegramConnectivity() {
+  try {
+    const res = await telegramApiFetch("getMe", {
+      method: "GET",
+      retries: 1,
+      retryOnStatus: false,
+      timeoutMs: 10_000,
+      operation: "getMe",
+    });
+    const ok = res && res.ok;
+    telegramApiReachable = !!ok;
+    return telegramApiReachable;
+  } catch {
+    telegramApiReachable = false;
+    return false;
+  }
+}
+
+/**
  * Delete all existing bot commands from every scope to clear stale/old entries.
  * Telegram stores commands per-scope, so we must clear each one explicitly.
  */
@@ -2313,7 +2338,10 @@ async function registerBotCommands() {
       operation: "setMyCommands",
     });
   } catch (err) {
-    console.warn(`[telegram-bot] setMyCommands error: ${err.message}`);
+    // Suppress if we already know the API is unreachable
+    if (telegramApiReachable !== false) {
+      console.warn(`[telegram-bot] setMyCommands error: ${err.message}`);
+    }
     return;
   }
 
@@ -2351,7 +2379,9 @@ async function setWebAppMenuButton(url) {
     });
     console.log(`[telegram-bot] chat menu button set to ${url}`);
   } catch (err) {
-    console.warn(`[telegram-bot] setChatMenuButton error: ${err.message}`);
+    if (telegramApiReachable !== false) {
+      console.warn(`[telegram-bot] setChatMenuButton error: ${err.message}`);
+    }
   }
 }
 
@@ -7465,8 +7495,15 @@ export async function startTelegramBot() {
   // Initialize the primary agent context
   await initPrimaryAgent();
 
-  // Register bot commands with Telegram (updates the / menu)
-  await registerBotCommands();
+  // Probe Telegram API connectivity before startup registration
+  const reachable = await probeTelegramConnectivity();
+  if (reachable) {
+    await registerBotCommands();
+  } else {
+    console.warn(
+      "[telegram-bot] Telegram API unreachable at startup — command registration deferred",
+    );
+  }
 
   // Start Telegram UI server (Mini App) when configured
   const miniAppEnabled = ["1", "true", "yes"].includes(
@@ -7483,15 +7520,15 @@ export async function startTelegramBot() {
         },
       });
       telegramUiUrl = getTelegramUiUrl();
-      if (telegramUiUrl) {
+      if (reachable && telegramUiUrl) {
         await setWebAppMenuButton(telegramUiUrl);
-      } else {
+      } else if (reachable) {
         await clearWebAppMenuButton();
       }
     } catch (err) {
       console.warn(`[telegram-bot] UI server start failed: ${err.message}`);
     }
-  } else {
+  } else if (reachable) {
     await clearWebAppMenuButton();
   }
 
