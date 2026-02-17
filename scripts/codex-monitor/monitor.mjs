@@ -1666,6 +1666,11 @@ function notifyErrorLine(line) {
 }
 
 function notifyVkError(line) {
+  // In GitHub/Jira/internal-only modes, VK outages are non-actionable noise.
+  // Suppress alerts to avoid false-positive reliability digests.
+  if (!isVkRuntimeRequired()) {
+    return;
+  }
   const key = "vibe-kanban-unavailable";
   const now = Date.now();
   const last = vkErrorNotified.get(key) || 0;
@@ -1990,6 +1995,68 @@ function restartVibeKanbanProcess() {
   }
 }
 
+function ensureAnomalyDetector() {
+  if (anomalyDetector) return anomalyDetector;
+  if (process.env.VITEST) return null;
+  anomalyDetector = createAnomalyDetector({
+    onAnomaly: (anomaly) => {
+      const icon =
+        anomaly.severity === "CRITICAL"
+          ? "🔴"
+          : anomaly.severity === "HIGH"
+            ? "🟠"
+            : "🟡";
+      console.warn(
+        `[anomaly-detector] ${icon} ${anomaly.severity} ${anomaly.type} [${anomaly.shortId}]: ${anomaly.message}`,
+      );
+
+      // Act on kill/restart actions — write signal file for the orchestrator
+      // AND directly kill the VK process WebSocket to stop further resource
+      // wastage immediately. The signal file ensures the orchestrator also
+      // archives and retries the attempt on its next loop.
+      if (anomaly.action === "kill" || anomaly.action === "restart") {
+        console.warn(
+          `[anomaly-detector] writing signal for action="${anomaly.action}" ${anomaly.type} on process ${anomaly.shortId}`,
+        );
+        writeAnomalySignal(anomaly);
+
+        // Directly kill the VK log stream for this process so the agent
+        // stops consuming compute immediately. Don't wait for the
+        // orchestrator's next poll cycle.
+        if (vkLogStream && anomaly.processId) {
+          const killed = vkLogStream.killProcess(
+            anomaly.processId,
+            `anomaly: ${anomaly.type} (${anomaly.action})`,
+          );
+          if (killed) {
+            console.warn(
+              `[anomaly-detector] killed VK process stream ${anomaly.shortId} directly`,
+            );
+          }
+        }
+      }
+    },
+    notify: (text, options) => {
+      sendTelegramMessage(text, options).catch(() => {});
+    },
+  });
+  console.log("[monitor] anomaly detector started");
+  return anomalyDetector;
+}
+
+function getAnomalyStatusReport() {
+  if (!isVkRuntimeRequired()) {
+    const backend = getActiveKanbanBackend();
+    return `Anomaly detector inactive (VK runtime not required; backend=${backend}, executorMode=${executorMode}).`;
+  }
+  if (!anomalyDetector) {
+    ensureAnomalyDetector();
+  }
+  return anomalyDetector
+    ? anomalyDetector.getStatusReport()
+    : "Anomaly detector not running.";
+}
+
 /**
  * Ensure the VK log stream is running. Creates a new VkLogStream instance
  * if one doesn't exist, connecting to VK's execution-process WebSocket
@@ -2010,52 +2077,8 @@ function ensureVkLogStream() {
   if (vkLogStream) return;
   console.log("[monitor] ensureVkLogStream: creating VkLogStream instance");
 
-  // Initialize anomaly detector if not already running
-  if (!anomalyDetector) {
-    anomalyDetector = createAnomalyDetector({
-      onAnomaly: (anomaly) => {
-        const icon =
-          anomaly.severity === "CRITICAL"
-            ? "🔴"
-            : anomaly.severity === "HIGH"
-              ? "🟠"
-              : "🟡";
-        console.warn(
-          `[anomaly-detector] ${icon} ${anomaly.severity} ${anomaly.type} [${anomaly.shortId}]: ${anomaly.message}`,
-        );
-
-        // Act on kill/restart actions — write signal file for the orchestrator
-        // AND directly kill the VK process WebSocket to stop further resource
-        // wastage immediately. The signal file ensures the orchestrator also
-        // archives and retries the attempt on its next loop.
-        if (anomaly.action === "kill" || anomaly.action === "restart") {
-          console.warn(
-            `[anomaly-detector] writing signal for action="${anomaly.action}" ${anomaly.type} on process ${anomaly.shortId}`,
-          );
-          writeAnomalySignal(anomaly);
-
-          // Directly kill the VK log stream for this process so the agent
-          // stops consuming compute immediately. Don't wait for the
-          // orchestrator's next poll cycle.
-          if (vkLogStream && anomaly.processId) {
-            const killed = vkLogStream.killProcess(
-              anomaly.processId,
-              `anomaly: ${anomaly.type} (${anomaly.action})`,
-            );
-            if (killed) {
-              console.warn(
-                `[anomaly-detector] killed VK process stream ${anomaly.shortId} directly`,
-              );
-            }
-          }
-        }
-      },
-      notify: (text, options) => {
-        sendTelegramMessage(text, options).catch(() => {});
-      },
-    });
-    console.log("[monitor] anomaly detector started");
-  }
+  // Keep the detector running even when VK stream is reconnecting.
+  ensureAnomalyDetector();
 
   const agentLogDir = resolve(repoRoot, ".cache", "agent-logs");
   const sessionLogDir = resolve(__dirname, "logs", "vk-sessions");
@@ -9085,9 +9108,7 @@ async function buildMonitorMonitorPrompt({ trigger, entries, text }) {
     maxChars: 12000,
   });
 
-  const anomalyReport = anomalyDetector
-    ? anomalyDetector.getStatusReport()
-    : "Anomaly detector not running.";
+  const anomalyReport = getAnomalyStatusReport();
   const monitorPrompt = agentPrompts?.monitorMonitor || "";
   const claudeTools = getMonitorClaudeAllowedTools();
 
@@ -10398,6 +10419,7 @@ function isStreamNoise(msg) {
     msg.includes("AbortError") ||
     msg.includes("The operation was aborted") ||
     msg.includes("This operation was aborted") ||
+    msg.includes("setRawMode EIO") ||
     msg.includes("hard_timeout") ||
     msg.includes("watchdog-timeout")
   );
@@ -10590,6 +10612,9 @@ startWatcher();
 startEnvWatchers();
 startSelfWatcher();
 startInteractiveShell();
+if (isVkRuntimeRequired()) {
+  ensureAnomalyDetector();
+}
 if (isVkSpawnAllowed()) {
   void ensureVibeKanbanRunning();
 }
@@ -11134,10 +11159,7 @@ injectMonitorFunctions({
   triggerTaskPlanner,
   reconcileTaskStatuses,
   onDigestSealed: handleDigestSealed,
-  getAnomalyReport: () =>
-    anomalyDetector
-      ? anomalyDetector.getStatusReport()
-      : "Anomaly detector not running.",
+  getAnomalyReport: () => getAnomalyStatusReport(),
   getInternalExecutor: () => internalTaskExecutor,
   getExecutorMode: () => executorMode,
   getAgentEndpoint: () => agentEndpoint,

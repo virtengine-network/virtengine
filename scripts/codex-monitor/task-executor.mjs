@@ -610,6 +610,12 @@ class TaskExecutor {
     this._listTasksFailureCount = 0;
     this._listTasksBackoffUntil = 0;
     this._listTasksBackoffReason = "";
+    this._projectResolveFailureWindowStart = 0;
+    this._projectResolveFailureCount = 0;
+    this._projectResolveBackoffUntil = 0;
+    this._projectResolveBackoffReason = "";
+    this._projectResolvePromise = null;
+    this._noProjectsWarnedAt = 0;
 
     /** @type {Map<string, { taskId: string, taskTitle: string, branch: string, sdk: string, attempt: number, startedAt: number, agentInstanceId: number|null, status: string, updatedAt: number }>} */
     this._slotRuntimeState = new Map();
@@ -824,6 +830,13 @@ class TaskExecutor {
     );
   }
 
+  _shouldBackoffProjectResolution() {
+    return (
+      this._projectResolveBackoffUntil &&
+      Date.now() < this._projectResolveBackoffUntil
+    );
+  }
+
   _resetListTasksBackoff() {
     this._listTasksFailureWindowStart = 0;
     this._listTasksFailureCount = 0;
@@ -858,6 +871,63 @@ class TaskExecutor {
       return;
     }
     console.warn(`${TAG} failed to list tasks: ${message}`);
+  }
+
+  _resetProjectResolutionBackoff() {
+    this._projectResolveFailureWindowStart = 0;
+    this._projectResolveFailureCount = 0;
+    this._projectResolveBackoffUntil = 0;
+    this._projectResolveBackoffReason = "";
+  }
+
+  _noteProjectResolutionFailure(err) {
+    const now = Date.now();
+    const windowMs = 60_000;
+    const threshold = 3;
+    const backoffMs = 2 * 60_000;
+    if (
+      !this._projectResolveFailureWindowStart ||
+      now - this._projectResolveFailureWindowStart > windowMs
+    ) {
+      this._projectResolveFailureWindowStart = now;
+      this._projectResolveFailureCount = 0;
+    }
+    this._projectResolveFailureCount += 1;
+    const message = err?.message || String(err);
+    if (this._projectResolveFailureCount >= threshold) {
+      this._projectResolveBackoffUntil = now + backoffMs;
+      this._projectResolveBackoffReason = message;
+      this._projectResolveFailureCount = 0;
+      this._projectResolveFailureWindowStart = now;
+      console.warn(
+        `${TAG} project resolution backing off for ${Math.round(
+          backoffMs / 1000,
+        )}s after repeated failures: ${message}`,
+      );
+      return;
+    }
+    console.warn(`${TAG} failed to list projects: ${message}`);
+  }
+
+  _warnNoProjects() {
+    const now = Date.now();
+    if (now - this._noProjectsWarnedAt < 60_000) {
+      return;
+    }
+    this._noProjectsWarnedAt = now;
+    if (this._shouldBackoffProjectResolution()) {
+      const waitMs = Math.max(0, this._projectResolveBackoffUntil - now);
+      const reason = this._projectResolveBackoffReason
+        ? ` (${this._projectResolveBackoffReason})`
+        : "";
+      console.warn(
+        `${TAG} no projects found — skipping poll for ${Math.round(
+          waitMs / 1000,
+        )}s${reason}`,
+      );
+      return;
+    }
+    console.warn(`${TAG} no projects found — skipping poll`);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -1341,43 +1411,56 @@ class TaskExecutor {
   }
 
   async _ensureResolvedProjectId() {
-    if (this._resolvedProjectId) {
-      return this._resolvedProjectId;
-    }
+    if (this._resolvedProjectId) return this._resolvedProjectId;
     if (this.projectId) {
       this._resolvedProjectId = this.projectId;
       return this._resolvedProjectId;
     }
-    try {
-      const projects = await listProjects();
-      if (projects && projects.length > 0) {
-        const wantName = (
-          process.env.PROJECT_NAME ||
-          process.env.VK_PROJECT_NAME ||
-          ""
-        ).toLowerCase();
-        let matched;
-        if (wantName) {
-          matched = projects.find(
-            (p) => (p.name || p.title || "").toLowerCase() === wantName,
-          );
-        }
-        if (matched) {
-          this._resolvedProjectId = matched.id || matched.project_id;
-          console.log(
-            `${TAG} matched project by name "${wantName}": ${this._resolvedProjectId}`,
-          );
-        } else {
-          this._resolvedProjectId = projects[0].id || projects[0].project_id;
-          console.log(
-            `${TAG} auto-detected project (first): ${this._resolvedProjectId}`,
-          );
-        }
-      }
-    } catch (err) {
-      console.warn(`${TAG} failed to list projects: ${err.message}`);
+    if (this._shouldBackoffProjectResolution()) {
+      return null;
     }
-    return this._resolvedProjectId || null;
+    if (this._projectResolvePromise) {
+      return this._projectResolvePromise;
+    }
+
+    this._projectResolvePromise = (async () => {
+      try {
+        const projects = await listProjects();
+        if (projects && projects.length > 0) {
+          const wantName = (
+            process.env.PROJECT_NAME ||
+            process.env.VK_PROJECT_NAME ||
+            ""
+          ).toLowerCase();
+          let matched;
+          if (wantName) {
+            matched = projects.find(
+              (p) => (p.name || p.title || "").toLowerCase() === wantName,
+            );
+          }
+          if (matched) {
+            this._resolvedProjectId = matched.id || matched.project_id;
+            console.log(
+              `${TAG} matched project by name "${wantName}": ${this._resolvedProjectId}`,
+            );
+          } else {
+            this._resolvedProjectId = projects[0].id || projects[0].project_id;
+            console.log(
+              `${TAG} auto-detected project (first): ${this._resolvedProjectId}`,
+            );
+          }
+          this._resetProjectResolutionBackoff();
+        }
+        return this._resolvedProjectId || null;
+      } catch (err) {
+        this._noteProjectResolutionFailure(err);
+        return null;
+      } finally {
+        this._projectResolvePromise = null;
+      }
+    })();
+
+    return this._projectResolvePromise;
   }
 
   async _recoverInterruptedInProgressTasks() {
@@ -1747,7 +1830,7 @@ class TaskExecutor {
     try {
       const projectId = await this._ensureResolvedProjectId();
       if (!projectId) {
-        console.warn(`${TAG} no projects found — skipping poll`);
+        this._warnNoProjects();
         return;
       }
 

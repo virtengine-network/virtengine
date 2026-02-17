@@ -101,6 +101,9 @@ export function setFileLevel(level) {
 export function setLogFile(path) {
   logFilePath = path;
   logDirEnsured = false;
+  ensureLogFile(logFilePath, (value) => {
+    logDirEnsured = value;
+  });
 }
 
 /**
@@ -111,6 +114,9 @@ export function setLogFile(path) {
 export function setErrorLogFile(path) {
   errorLogFilePath = path;
   errorLogDirEnsured = false;
+  ensureLogFile(errorLogFilePath, (value) => {
+    errorLogDirEnsured = value;
+  });
 }
 
 /**
@@ -180,6 +186,17 @@ function timestamp() {
 
 function datestamp() {
   return new Date().toISOString();
+}
+
+function ensureLogFile(path, markEnsured) {
+  if (!path) return;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, "");
+    if (markEnsured) markEnsured(true);
+  } catch {
+    if (markEnsured) markEnsured(false);
+  }
 }
 
 // ── File writing ────────────────────────────────────────────────────────────

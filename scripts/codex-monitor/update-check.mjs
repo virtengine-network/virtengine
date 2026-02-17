@@ -450,7 +450,14 @@ function promptConfirm(question) {
       terminal: process.stdin.isTTY && process.stdout.isTTY,
     });
     rl.question(question, (answer) => {
-      rl.close();
+      try {
+        rl.close();
+      } catch (err) {
+        const msg = err?.message || String(err || "");
+        if (!msg.includes("setRawMode EIO")) {
+          throw err;
+        }
+      }
       const a = answer.trim().toLowerCase();
       res(!a || a === "y" || a === "yes");
     });
