@@ -1,13 +1,15 @@
 import { execSync, spawn } from "node:child_process";
 import { createHmac, randomBytes, X509Certificate } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, chmodSync, createWriteStream } from "node:fs";
 import { open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { get as httpsGet } from "node:https";
 import { createServer as createHttpsServer } from "node:https";
 import { networkInterfaces } from "node:os";
 import { connect as netConnect } from "node:net";
 import { resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { arch as osArch, platform as osPlatform } from "node:os";
 
 function getLocalLanIp() {
   const nets = networkInterfaces();
@@ -322,18 +324,95 @@ export function getTunnelUrl() {
   return tunnelUrl;
 }
 
+// ── Cloudflared binary auto-download ─────────────────────────────────
+
+const CF_CACHE_DIR = resolve(__dirname, ".cache", "bin");
+const CF_BIN_NAME = osPlatform() === "win32" ? "cloudflared.exe" : "cloudflared";
+const CF_CACHED_PATH = resolve(CF_CACHE_DIR, CF_BIN_NAME);
+
 /**
- * Detect if cloudflared binary is available.
+ * Get the cloudflared download URL for the current platform+arch.
+ * Uses GitHub releases (no account needed).
  */
-function findCloudflared() {
+function getCloudflaredDownloadUrl() {
+  const plat = osPlatform();
+  const ar = osArch();
+  const base = "https://github.com/cloudflare/cloudflared/releases/latest/download";
+  if (plat === "linux") {
+    if (ar === "arm64" || ar === "aarch64") return `${base}/cloudflared-linux-arm64`;
+    return `${base}/cloudflared-linux-amd64`;
+  }
+  if (plat === "win32") {
+    return `${base}/cloudflared-windows-amd64.exe`;
+  }
+  if (plat === "darwin") {
+    if (ar === "arm64") return `${base}/cloudflared-darwin-arm64.tgz`;
+    return `${base}/cloudflared-darwin-amd64.tgz`;
+  }
+  return null;
+}
+
+/**
+ * Download a file from URL, following redirects (GitHub releases use 302).
+ * Returns a promise that resolves when the file is written.
+ */
+function downloadFile(url, destPath, maxRedirects = 5) {
+  return new Promise((res, rej) => {
+    if (maxRedirects <= 0) return rej(new Error("Too many redirects"));
+    httpsGet(url, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        return downloadFile(response.headers.location, destPath, maxRedirects - 1).then(res, rej);
+      }
+      if (response.statusCode !== 200) {
+        response.resume();
+        return rej(new Error(`HTTP ${response.statusCode}`));
+      }
+      const stream = createWriteStream(destPath);
+      response.pipe(stream);
+      stream.on("finish", () => { stream.close(); res(); });
+      stream.on("error", rej);
+    }).on("error", rej);
+  });
+}
+
+/**
+ * Find cloudflared binary — checks system PATH first, then cached download.
+ * If not found anywhere and mode=auto, auto-downloads to .cache/bin/.
+ */
+async function findCloudflared() {
+  // 1. Check system PATH
   try {
-    const path = execSync("which cloudflared 2>/dev/null || where cloudflared 2>nul", {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-    return path || null;
-  } catch {
+    const cmd = osPlatform() === "win32"
+      ? "where cloudflared 2>nul"
+      : "which cloudflared 2>/dev/null";
+    const found = execSync(cmd, { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] }).trim();
+    if (found) return found.split(/\r?\n/)[0]; // `where` may return multiple lines
+  } catch { /* not on PATH */ }
+
+  // 2. Check cached binary
+  if (existsSync(CF_CACHED_PATH)) {
+    return CF_CACHED_PATH;
+  }
+
+  // 3. Auto-download
+  const dlUrl = getCloudflaredDownloadUrl();
+  if (!dlUrl) {
+    console.warn("[telegram-ui] cloudflared: unsupported platform/arch for auto-download");
+    return null;
+  }
+
+  console.log("[telegram-ui] cloudflared not found — auto-downloading...");
+  try {
+    mkdirSync(CF_CACHE_DIR, { recursive: true });
+    await downloadFile(dlUrl, CF_CACHED_PATH);
+    if (osPlatform() !== "win32") {
+      chmodSync(CF_CACHED_PATH, 0o755);
+    }
+    console.log(`[telegram-ui] cloudflared downloaded to ${CF_CACHED_PATH}`);
+    return CF_CACHED_PATH;
+  } catch (err) {
+    console.warn(`[telegram-ui] cloudflared auto-download failed: ${err.message}`);
     return null;
   }
 }
@@ -351,12 +430,11 @@ async function startTunnel(localPort) {
     return null;
   }
 
-  const cfBin = findCloudflared();
+  const cfBin = await findCloudflared();
   if (!cfBin) {
     if (tunnelMode === "auto") {
       console.log(
-        "[telegram-ui] cloudflared not found — Telegram Mini App will use self-signed cert (may be rejected).\n" +
-        "[telegram-ui] Install cloudflared for automatic trusted HTTPS: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
+        "[telegram-ui] cloudflared unavailable — Telegram Mini App will use self-signed cert (may be rejected by Telegram webview).",
       );
       return null;
     }
