@@ -709,6 +709,8 @@ let presenceReady = false;
 let workspaceRegistryPromise = null;
 let localWorkspaceCache = null;
 let telegramUiUrl = null;
+let telegramWebAppUrl = null;
+let telegramWebAppUrlWarned = "";
 const UI_TOKEN_TTL_MS = 30 * 60 * 1000;
 const UI_INPUT_TTL_MS = 15 * 60 * 1000;
 const uiTokenRegistry = new Map();
@@ -926,7 +928,7 @@ async function sendDirect(chatId, text, options = {}) {
     }
     payload.disable_web_page_preview = true;
     if (options.reply_markup) {
-      payload.reply_markup = options.reply_markup;
+      payload.reply_markup = sanitizeWebAppButtons(options.reply_markup);
     }
 
     let res;
@@ -994,7 +996,7 @@ async function editDirect(chatId, messageId, text, options = {}) {
     payload.parse_mode = options.parseMode;
   }
   if (options.reply_markup) {
-    payload.reply_markup = options.reply_markup;
+    payload.reply_markup = sanitizeWebAppButtons(options.reply_markup);
   }
 
   let res;
@@ -1515,6 +1517,30 @@ function extractGoPackages(command) {
   if (!pkgs.length) return "";
   const unique = [...new Set(pkgs)];
   return unique.slice(0, 3).join(" ") + (unique.length > 3 ? " …" : "");
+}
+
+/**
+ * Strip web_app buttons whose URL is not HTTPS — Telegram rejects non-HTTPS
+ * web_app URLs with a 400 error.  Returns the sanitized reply_markup object.
+ */
+function sanitizeWebAppButtons(markup) {
+  if (!markup || !markup.inline_keyboard) return markup;
+  const filtered = markup.inline_keyboard
+    .map((row) =>
+      row.filter((btn) => {
+        if (btn.web_app && btn.web_app.url) {
+          try {
+            const u = new URL(btn.web_app.url);
+            if (u.protocol !== "https:") return false;
+          } catch {
+            return false;
+          }
+        }
+        return true;
+      }),
+    )
+    .filter((row) => row.length > 0);
+  return { ...markup, inline_keyboard: filtered };
 }
 
 function splitMessage(text, maxLen) {
@@ -2365,19 +2391,29 @@ async function registerBotCommands() {
 
 async function setWebAppMenuButton(url) {
   if (!telegramToken || !url) return;
+  const webAppUrl = getTelegramWebAppUrl(url);
+  if (!webAppUrl) return;
   try {
-    await telegramApiFetch("setChatMenuButton", {
+    const res = await telegramApiFetch("setChatMenuButton", {
       method: "POST",
       payload: {
         menu_button: {
           type: "web_app",
           text: "Control Center",
-          web_app: { url },
+          web_app: { url: webAppUrl },
         },
       },
       operation: "setChatMenuButton",
     });
-    console.log(`[telegram-bot] chat menu button set to ${url}`);
+    if (!res || typeof res.ok === "undefined") {
+      throw new Error("invalid response object");
+    }
+    const data = await res.json().catch(() => null);
+    if (!res.ok || data?.ok === false) {
+      const details = data?.description || `${res.status} ${res.statusText || ""}`;
+      throw new Error(details.trim());
+    }
+    console.log(`[telegram-bot] chat menu button set to ${webAppUrl}`);
   } catch (err) {
     if (telegramApiReachable !== false) {
       console.warn(`[telegram-bot] setChatMenuButton error: ${err.message}`);
@@ -2418,6 +2454,34 @@ const FAST_COMMANDS = new Set([
   "/whatsapp",
   "/container",
 ]);
+
+function getTelegramWebAppUrl(url) {
+  const normalized = String(url || "")
+    .trim()
+    .replace(/\/+$/, "");
+  if (!normalized) return null;
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== "https:") {
+      if (telegramWebAppUrlWarned !== normalized) {
+        telegramWebAppUrlWarned = normalized;
+        console.warn(
+          `[telegram-bot] mini app URL must be HTTPS for Telegram WebApp buttons; got "${normalized}". Falling back to normal URL buttons only.`,
+        );
+      }
+      return null;
+    }
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    if (telegramWebAppUrlWarned !== normalized) {
+      telegramWebAppUrlWarned = normalized;
+      console.warn(
+        `[telegram-bot] mini app URL is invalid: "${normalized}". Falling back to normal URL buttons only.`,
+      );
+    }
+    return null;
+  }
+}
 
 async function handleCommand(text, chatId) {
   const parts = text.split(/\s+/);
@@ -2752,13 +2816,15 @@ Object.assign(UI_SCREENS, {
           uiButton("📖 All Commands", uiCmdAction("/helpfull")),
         ],
       ];
-      if (telegramUiUrl) {
+      if (telegramWebAppUrl) {
         rows.unshift([
           {
             text: "📱 Open Control Center",
-            web_app: { url: telegramUiUrl },
+            web_app: { url: telegramWebAppUrl },
           },
         ]);
+      } else if (telegramUiUrl) {
+        rows.unshift([{ text: "🌐 Open Control Center", url: telegramUiUrl }]);
       }
       return buildKeyboard(rows);
     },
@@ -3907,13 +3973,13 @@ async function cmdApp(chatId) {
     );
     return;
   }
+  const webAppUrl = getTelegramWebAppUrl(uiUrl);
 
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: "📱 Open Control Center", web_app: { url: uiUrl } }],
-      [{ text: "🌐 Open in Browser", url: uiUrl }],
-    ],
-  };
+  const rows = [[{ text: "🌐 Open in Browser", url: uiUrl }]];
+  if (webAppUrl) {
+    rows.unshift([{ text: "📱 Open Control Center", web_app: { url: webAppUrl } }]);
+  }
+  const keyboard = { inline_keyboard: rows };
 
   await sendDirect(
     chatId,
@@ -7519,9 +7585,10 @@ export async function startTelegramBot() {
           getExecutorMode: _getExecutorMode,
         },
       });
-      telegramUiUrl = getTelegramUiUrl();
-      if (reachable && telegramUiUrl) {
-        await setWebAppMenuButton(telegramUiUrl);
+      telegramUiUrl = getTelegramUiUrl() || null;
+      telegramWebAppUrl = getTelegramWebAppUrl(telegramUiUrl);
+      if (reachable && telegramWebAppUrl) {
+        await setWebAppMenuButton(telegramWebAppUrl);
       } else if (reachable) {
         await clearWebAppMenuButton();
       }
