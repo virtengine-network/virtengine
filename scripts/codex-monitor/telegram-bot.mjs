@@ -718,6 +718,8 @@ let localWorkspaceCache = null;
 let telegramUiUrl = null;
 let telegramWebAppUrl = null;
 let telegramWebAppUrlWarned = "";
+let lastMenuButtonUrl = null;
+let menuButtonRefreshTimer = null;
 const UI_TOKEN_TTL_MS = 30 * 60 * 1000;
 const UI_INPUT_TTL_MS = 15 * 60 * 1000;
 const uiTokenRegistry = new Map();
@@ -2488,6 +2490,20 @@ async function clearWebAppMenuButton() {
     });
   } catch {
     /* best effort */
+  }
+}
+
+const MENU_BUTTON_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
+
+async function refreshMenuButton() {
+  const currentUiUrl = getTelegramUiUrl() || null;
+  const currentUrl = getTelegramWebAppUrl(currentUiUrl);
+  if (currentUrl && currentUrl !== lastMenuButtonUrl) {
+    await setWebAppMenuButton(currentUrl);
+    telegramUiUrl = currentUiUrl;
+    telegramWebAppUrl = currentUrl;
+    lastMenuButtonUrl = currentUrl;
+    console.log(`[telegram-bot] menu button URL refreshed: ${currentUrl}`);
   }
 }
 
@@ -7693,8 +7709,14 @@ export async function startTelegramBot() {
       telegramWebAppUrl = getTelegramWebAppUrl(telegramUiUrl);
       if (reachable && telegramWebAppUrl) {
         await setWebAppMenuButton(telegramWebAppUrl);
+        lastMenuButtonUrl = telegramWebAppUrl;
       } else if (reachable) {
         await clearWebAppMenuButton();
+      }
+
+      // Periodically refresh the menu button URL in case the tunnel changes
+      if (reachable && !menuButtonRefreshTimer) {
+        menuButtonRefreshTimer = setInterval(() => void refreshMenuButton(), MENU_BUTTON_REFRESH_MS);
       }
 
       // Notify about firewall issues if detected (24h cooldown)
@@ -7848,6 +7870,10 @@ export function stopTelegramBot(options = {}) {
   }
   void releaseTelegramPollLock();
   stopTelegramUiServer();
+  if (menuButtonRefreshTimer) {
+    clearInterval(menuButtonRefreshTimer);
+    menuButtonRefreshTimer = null;
+  }
   console.log("[telegram-bot] stopped");
 }
 
