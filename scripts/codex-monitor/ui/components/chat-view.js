@@ -141,7 +141,7 @@ function MessageContent({ text }) {
 }
 
 /* ─── Chat View component ─── */
-export function ChatView({ sessionId }) {
+export function ChatView({ sessionId, readOnly = false }) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -181,7 +181,7 @@ export function ChatView({ sessionId }) {
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sending || readOnly) return;
 
     /* Optimistically add user message */
     const optimistic = {
@@ -258,19 +258,35 @@ export function ChatView({ sessionId }) {
         ${loading && messages.length === 0 && html`
           <div class="chat-loading">Loading messages…</div>
         `}
-        ${messages.map(
-          (msg) => html`
+        ${messages.map((msg) => {
+          const isTool =
+            msg.type === "tool_call" || msg.type === "tool_result";
+          const role = msg.role ||
+            (isTool ? "system" : msg.type === "system" ? "system" : "assistant");
+          const bubbleClass = isTool
+            ? "tool"
+            : role === "user"
+              ? "user"
+              : role === "system"
+                ? "system"
+                : "assistant";
+          const label =
+            isTool
+              ? msg.type === "tool_call"
+                ? "TOOL CALL"
+                : "TOOL RESULT"
+              : null;
+          return html`
             <div
               key=${msg.id || msg.timestamp}
-              class="chat-bubble ${msg.role === "user"
-                ? "user"
-                : msg.role === "system"
-                  ? "system"
-                  : "assistant"}"
+              class="chat-bubble ${bubbleClass}"
             >
-              ${msg.role === "system"
+              ${role === "system" && !isTool
                 ? html`<div class="chat-system-text">${msg.content}</div>`
                 : html`
+                    ${label
+                      ? html`<div class="chat-bubble-label">${label}</div>`
+                      : null}
                     <div class="chat-bubble-content">
                       <${MessageContent} text=${msg.content} />
                     </div>
@@ -279,8 +295,8 @@ export function ChatView({ sessionId }) {
                     </div>
                   `}
             </div>
-          `,
-        )}
+          `;
+        })}
         ${sending && html`
           <div class="chat-bubble assistant">
             <div class="chat-typing">
@@ -292,6 +308,7 @@ export function ChatView({ sessionId }) {
         `}
       </div>
 
+      ${!readOnly && html`
       <div class="chat-input-bar">
         ${!isActive && session?.status &&
         html`
@@ -318,6 +335,7 @@ export function ChatView({ sessionId }) {
           </button>
         </div>
       </div>
+      `}
     </div>
   `;
 }

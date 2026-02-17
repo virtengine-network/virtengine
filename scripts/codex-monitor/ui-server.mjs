@@ -25,6 +25,7 @@ function getLocalLanIp() {
 import { WebSocketServer } from "ws";
 import { getKanbanAdapter } from "./kanban-adapter.mjs";
 import { getActiveThreads } from "./agent-pool.mjs";
+import { loadConfig } from "./config.mjs";
 import {
   listActiveWorktrees,
   getWorktreeStats,
@@ -124,6 +125,37 @@ const projectSyncWebhookMetrics = {
 };
 
 // ── Settings API: Known env keys from settings schema ──
+const CONFIG_FILE_NAMES = [
+  "codex-monitor.config.json",
+  ".codex-monitor.json",
+  "codex-monitor.json",
+];
+
+function resolveConfigFilePath(configDir) {
+  for (const name of CONFIG_FILE_NAMES) {
+    const candidate = resolve(configDir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return resolve(configDir, "codex-monitor.config.json");
+}
+
+function resolveSettingsPaths() {
+  let configDir = __dirname;
+  try {
+    const config = loadConfig();
+    if (config?.configDir) {
+      configDir = config.configDir;
+    }
+  } catch {
+    // fallback to module directory
+  }
+  return {
+    configDir,
+    envPath: resolve(configDir, ".env"),
+    configPath: resolveConfigFilePath(configDir),
+  };
+}
+
 const SETTINGS_KNOWN_KEYS = [
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_ALLOWED_CHAT_IDS",
   "TELEGRAM_INTERVAL_MIN", "TELEGRAM_COMMAND_POLL_TIMEOUT_SEC", "TELEGRAM_AGENT_TIMEOUT_MIN",
@@ -138,7 +170,11 @@ const SETTINGS_KNOWN_KEYS = [
   "INTERNAL_EXECUTOR_REVIEW_AGENT_ENABLED", "INTERNAL_EXECUTOR_REPLENISH_ENABLED",
   "PRIMARY_AGENT", "EXECUTORS", "EXECUTOR_DISTRIBUTION", "FAILOVER_STRATEGY",
   "COMPLEXITY_ROUTING_ENABLED", "PROJECT_REQUIREMENTS_PROFILE",
-  "OPENAI_API_KEY", "CODEX_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_MODEL",
+  "OPENAI_API_KEY", "AZURE_OPENAI_API_KEY", "CODEX_MODEL",
+  "CODEX_MODEL_PROFILE", "CODEX_MODEL_PROFILE_SUBAGENT",
+  "CODEX_MODEL_PROFILE_XL_PROVIDER", "CODEX_MODEL_PROFILE_XL_MODEL", "CODEX_MODEL_PROFILE_XL_BASE_URL", "CODEX_MODEL_PROFILE_XL_API_KEY",
+  "CODEX_MODEL_PROFILE_M_PROVIDER", "CODEX_MODEL_PROFILE_M_MODEL", "CODEX_MODEL_PROFILE_M_BASE_URL", "CODEX_MODEL_PROFILE_M_API_KEY",
+  "CODEX_SUBAGENT_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_MODEL",
   "COPILOT_MODEL", "COPILOT_CLI_TOKEN",
   "KANBAN_BACKEND", "KANBAN_SYNC_POLICY", "CODEX_MONITOR_TASK_LABEL",
   "CODEX_MONITOR_ENFORCE_TASK_LABEL", "STALE_TASK_AGE_HOURS",
@@ -168,17 +204,18 @@ const SETTINGS_KNOWN_KEYS = [
 
 const SETTINGS_SENSITIVE_KEYS = new Set([
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN",
-  "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "COPILOT_CLI_TOKEN",
+  "OPENAI_API_KEY", "AZURE_OPENAI_API_KEY", "CODEX_MODEL_PROFILE_XL_API_KEY", "CODEX_MODEL_PROFILE_M_API_KEY",
+  "ANTHROPIC_API_KEY", "COPILOT_CLI_TOKEN",
   "CLOUDFLARE_TUNNEL_CREDENTIALS",
 ]);
 
 const SETTINGS_KNOWN_SET = new Set(SETTINGS_KNOWN_KEYS);
 let _settingsLastUpdateTime = 0;
 
-function updateEnvFile(changes) {
-  const envPath = resolve(__dirname, '.env');
+function updateEnvFile(changes, envPath) {
+  const resolvedEnvPath = envPath || resolve(__dirname, ".env");
   let content = '';
-  try { content = readFileSync(envPath, 'utf8'); } catch { content = ''; }
+  try { content = readFileSync(resolvedEnvPath, 'utf8'); } catch { content = ''; }
 
   const lines = content.split('\n');
   const updated = new Set();
@@ -200,8 +237,254 @@ function updateEnvFile(changes) {
     }
   }
 
-  writeFileSync(envPath, lines.join('\n'), 'utf8');
+  writeFileSync(resolvedEnvPath, lines.join('\n'), 'utf8');
   return Array.from(updated);
+}
+
+function normalizePrimaryAgent(value) {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return "codex-sdk";
+  if (["codex", "codex-sdk"].includes(raw)) return "codex-sdk";
+  if (["copilot", "copilot-sdk", "github-copilot"].includes(raw))
+    return "copilot-sdk";
+  if (["claude", "claude-sdk", "claude_code", "claude-code"].includes(raw))
+    return "claude-sdk";
+  return raw;
+}
+
+function normalizeKanbanBackend(value) {
+  const backend = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (["internal", "github", "jira", "vk"].includes(backend)) {
+    return backend;
+  }
+  return "internal";
+}
+
+function normalizeKanbanSyncPolicy(value) {
+  const policy = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (policy === "internal-primary" || policy === "bidirectional") {
+    return policy;
+  }
+  return "internal-primary";
+}
+
+function normalizeExecutorMode(value) {
+  const mode = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (["vk", "internal", "hybrid", "disabled", "none", "monitor-only"].includes(mode)) {
+    return mode;
+  }
+  return "internal";
+}
+
+function normalizePlannerMode(value) {
+  const mode = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (["codex-sdk", "kanban", "disabled"].includes(mode)) {
+    return mode;
+  }
+  return "codex-sdk";
+}
+
+function normalizeProjectRequirementsProfile(value) {
+  const profile = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (["simple-feature", "feature", "large-feature", "system", "multi-system"].includes(profile)) {
+    return profile;
+  }
+  return "feature";
+}
+
+function parseExecutorsFromEnv(rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return null;
+  const entries = raw.split(",").map((e) => e.trim()).filter(Boolean);
+  if (!entries.length) return null;
+  const roles = ["primary", "backup", "tertiary"];
+  const executors = [];
+  for (let i = 0; i < entries.length; i++) {
+    const parts = entries[i].split(":").map((p) => p.trim()).filter(Boolean);
+    if (parts.length < 2) {
+      return { error: `Invalid executor entry: "${entries[i]}"` };
+    }
+    const weight = parts[2] ? Number(parts[2]) : Math.floor(100 / entries.length);
+    if (!Number.isFinite(weight) || weight <= 0) {
+      return { error: `Invalid executor weight for "${entries[i]}"` };
+    }
+    executors.push({
+      name: `${parts[0].toLowerCase()}-${parts[1].toLowerCase()}`,
+      executor: parts[0].toUpperCase(),
+      variant: parts[1],
+      weight,
+      role: roles[i] || `executor-${i + 1}`,
+      enabled: true,
+    });
+  }
+  return { executors };
+}
+
+function setNestedValue(target, path, value) {
+  if (!target || !Array.isArray(path) || path.length === 0) return;
+  let current = target;
+  for (let i = 0; i < path.length - 1; i++) {
+    const key = path[i];
+    if (!current[key] || typeof current[key] !== "object") {
+      current[key] = {};
+    }
+    current = current[key];
+  }
+  current[path[path.length - 1]] = value;
+}
+
+function loadConfigJson(configPath) {
+  try {
+    if (existsSync(configPath)) {
+      return JSON.parse(readFileSync(configPath, "utf8"));
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function resolveConfigFallback(configDir) {
+  const examplePath = resolve(__dirname, "codex-monitor.config.example.json");
+  if (existsSync(examplePath)) {
+    try {
+      const raw = JSON.parse(readFileSync(examplePath, "utf8"));
+      return { ...raw, $schema: "./codex-monitor.schema.json" };
+    } catch {
+      // fall through
+    }
+  }
+  return { $schema: "./codex-monitor.schema.json" };
+}
+
+function updateConfigFileFromSettings(changes, paths) {
+  const { configDir, configPath } = paths;
+  const handlers = {
+    PROJECT_NAME: (config, value) =>
+      setNestedValue(config, ["projectName"], String(value || "").trim()),
+    PRIMARY_AGENT: (config, value) =>
+      setNestedValue(config, ["primaryAgent"], normalizePrimaryAgent(value)),
+    EXECUTOR_MODE: (config, value) =>
+      setNestedValue(config, ["internalExecutor", "mode"], normalizeExecutorMode(value)),
+    INTERNAL_EXECUTOR_PARALLEL: (config, value) =>
+      setNestedValue(config, ["internalExecutor", "maxParallel"], Number(value)),
+    INTERNAL_EXECUTOR_TIMEOUT_MS: (config, value) =>
+      setNestedValue(config, ["internalExecutor", "timeoutMs"], Number(value)),
+    INTERNAL_EXECUTOR_MAX_RETRIES: (config, value) =>
+      setNestedValue(config, ["internalExecutor", "maxRetries"], Number(value)),
+    INTERNAL_EXECUTOR_POLL_MS: (config, value) =>
+      setNestedValue(config, ["internalExecutor", "pollIntervalMs"], Number(value)),
+    INTERNAL_EXECUTOR_REVIEW_AGENT_ENABLED: (config, value) =>
+      setNestedValue(
+        config,
+        ["internalExecutor", "reviewAgentEnabled"],
+        String(value).trim().toLowerCase() === "true",
+      ),
+    INTERNAL_EXECUTOR_REPLENISH_ENABLED: (config, value) =>
+      setNestedValue(
+        config,
+        ["internalExecutor", "backlogReplenishment", "enabled"],
+        String(value).trim().toLowerCase() === "true",
+      ),
+    KANBAN_BACKEND: (config, value) =>
+      setNestedValue(config, ["kanban", "backend"], normalizeKanbanBackend(value)),
+    KANBAN_SYNC_POLICY: (config, value) =>
+      setNestedValue(config, ["kanban", "syncPolicy"], normalizeKanbanSyncPolicy(value)),
+    TASK_PLANNER_MODE: (config, value) =>
+      setNestedValue(config, ["plannerMode"], normalizePlannerMode(value)),
+    PROJECT_REQUIREMENTS_PROFILE: (config, value) =>
+      setNestedValue(
+        config,
+        ["projectRequirements", "profile"],
+        normalizeProjectRequirementsProfile(value),
+      ),
+    EXECUTOR_DISTRIBUTION: (config, value) =>
+      setNestedValue(
+        config,
+        ["distribution"],
+        String(value || "").trim().toLowerCase(),
+      ),
+    FAILOVER_STRATEGY: (config, value) =>
+      setNestedValue(
+        config,
+        ["failover", "strategy"],
+        String(value || "").trim().toLowerCase(),
+      ),
+    EXECUTORS: (config, value) => {
+      const parsed = parseExecutorsFromEnv(value);
+      if (parsed?.error) return parsed;
+      if (parsed?.executors) {
+        setNestedValue(config, ["executors"], parsed.executors);
+      }
+      return null;
+    },
+    CODEX_MONITOR_HOOK_PROFILE: (config, value) =>
+      setNestedValue(
+        config,
+        ["hookProfiles", "profile"],
+        String(value || "").trim().toLowerCase(),
+      ),
+    CODEX_MONITOR_HOOK_TARGETS: (config, value) => {
+      const targets = String(value || "")
+        .split(",")
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean);
+      setNestedValue(config, ["hookProfiles", "targets"], targets);
+    },
+    CODEX_MONITOR_HOOKS_ENABLED: (config, value) =>
+      setNestedValue(
+        config,
+        ["hookProfiles", "enabled"],
+        String(value).trim().toLowerCase() === "true",
+      ),
+    CODEX_MONITOR_HOOKS_OVERWRITE: (config, value) =>
+      setNestedValue(
+        config,
+        ["hookProfiles", "overwriteExisting"],
+        String(value).trim().toLowerCase() === "true",
+      ),
+  };
+
+  const keysToUpdate = Object.keys(changes).filter((k) => handlers[k]);
+  if (keysToUpdate.length === 0) {
+    return { updatedKeys: [], path: configPath };
+  }
+
+  const existing = loadConfigJson(configPath);
+  const config = existing && typeof existing === "object"
+    ? existing
+    : resolveConfigFallback(configDir);
+
+  const updatedKeys = [];
+  for (const key of keysToUpdate) {
+    const handler = handlers[key];
+    if (!handler) continue;
+    const result = handler(config, changes[key]);
+    if (result?.error) {
+      return { error: result.error };
+    }
+    updatedKeys.push(key);
+  }
+
+  try {
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+    return { updatedKeys, path: configPath };
+  } catch (err) {
+    return { error: err?.message || "Failed to write config file." };
+  }
 }
 
 // ── Simple rate limiter for mutation endpoints ──
@@ -1735,6 +2018,8 @@ async function handleApi(req, res, url) {
     try {
       const body = await readJsonBody(req);
       const taskId = body?.taskId || body?.id;
+      const sdk = typeof body?.sdk === "string" ? body.sdk.trim() : "";
+      const model = typeof body?.model === "string" ? body.model.trim() : "";
       if (!taskId) {
         jsonResponse(res, 400, { ok: false, error: "taskId is required" });
         return;
@@ -1754,7 +2039,21 @@ async function handleApi(req, res, url) {
         jsonResponse(res, 404, { ok: false, error: "Task not found." });
         return;
       }
-      executor.executeTask(task).catch((error) => {
+      try {
+        if (typeof adapter.updateTaskStatus === "function") {
+          await adapter.updateTaskStatus(taskId, "inprogress");
+        } else if (typeof adapter.updateTask === "function") {
+          await adapter.updateTask(taskId, { status: "inprogress" });
+        }
+      } catch (err) {
+        console.warn(
+          `[telegram-ui] failed to mark task ${taskId} inprogress: ${err.message}`,
+        );
+      }
+      executor.executeTask(task, {
+        ...(sdk ? { sdk } : {}),
+        ...(model ? { model } : {}),
+      }).catch((error) => {
         console.warn(
           `[telegram-ui] failed to execute task ${taskId}: ${error.message}`,
         );
@@ -2268,17 +2567,55 @@ async function handleApi(req, res, url) {
         jsonResponse(res, 200, { ok: true, data: null });
         return;
       }
+      const queryLower = query.toLowerCase();
       const worktreeDir = resolve(repoRoot, ".cache", "worktrees");
-      const dirs = await readdir(worktreeDir).catch(() => []);
-      const matches = dirs.filter((d) =>
-        d.toLowerCase().includes(query.toLowerCase()),
-      );
-      if (!matches.length) {
-        jsonResponse(res, 200, { ok: true, data: { matches: [], context: null } });
-        return;
+
+      const worktreeMatches = [];
+      let matchedWorktree = null;
+      try {
+        const active = await listActiveWorktrees();
+        for (const wt of active || []) {
+          const branch = String(wt.branch || "").toLowerCase();
+          const taskKey = String(wt.taskKey || "").toLowerCase();
+          const name = String(wt.name || wt.branch || "").toLowerCase();
+          if (
+            branch.includes(queryLower) ||
+            taskKey === queryLower ||
+            taskKey.includes(queryLower) ||
+            name.includes(queryLower)
+          ) {
+            matchedWorktree = wt;
+            worktreeMatches.push(wt.branch || wt.taskKey || wt.path || wt.name || "");
+            break;
+          }
+        }
+      } catch {
+        /* best effort */
       }
-      const wtName = matches[0];
-      const wtPath = resolve(worktreeDir, wtName);
+
+      let wtName =
+        matchedWorktree?.name ||
+        matchedWorktree?.branch ||
+        matchedWorktree?.taskKey ||
+        "";
+      let wtPath = matchedWorktree?.path || "";
+
+      if (!wtPath) {
+        const dirs = await readdir(worktreeDir).catch(() => []);
+        const directMatches = dirs.filter((d) => d.toLowerCase().includes(queryLower));
+        const shortQuery = queryLower.length > 8 ? queryLower.slice(0, 8) : "";
+        const shortMatches = shortQuery
+          ? dirs.filter((d) => d.toLowerCase().includes(shortQuery))
+          : [];
+        const matches = directMatches.length ? directMatches : shortMatches;
+        if (!matches.length) {
+          jsonResponse(res, 200, { ok: true, data: { matches: [], context: null } });
+          return;
+        }
+        wtName = matches[0];
+        wtPath = resolve(worktreeDir, wtName);
+        worktreeMatches.push(...matches);
+      }
       const runWtGit = (args) => {
         try {
           return execSync(`git ${args}`, { cwd: wtPath, encoding: "utf8", timeout: 5000 }).trim();
@@ -2290,9 +2627,59 @@ async function handleApi(req, res, url) {
       const gitBranch = runWtGit("rev-parse --abbrev-ref HEAD");
       const gitDiffStat = runWtGit("diff --stat");
       const gitAheadBehind = runWtGit("rev-list --left-right --count HEAD...@{upstream} 2>/dev/null");
+      const changedFiles = gitStatus
+        ? gitStatus
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => ({
+              code: line.substring(0, 2).trim() || "?",
+              file: line.substring(3).trim(),
+            }))
+        : [];
+      const commitRows = gitLogDetailed
+        ? gitLogDetailed.split("\n").filter(Boolean).map((line) => {
+            const [hash, message, time] = line.split("||");
+            return { hash, message, time };
+          })
+        : [];
+      const sessionTracker = getSessionTracker();
+      const sessions = sessionTracker?.listAllSessions?.() || [];
+      let session =
+        sessions.find((s) => String(s.id || "").toLowerCase() === queryLower) ||
+        sessions.find((s) => String(s.taskId || "").toLowerCase() === queryLower);
+      if (!session && matchedWorktree?.taskKey) {
+        const taskKey = String(matchedWorktree.taskKey || "").toLowerCase();
+        session =
+          sessions.find((s) => String(s.id || "").toLowerCase() === taskKey) ||
+          sessions.find((s) => String(s.taskId || "").toLowerCase() === taskKey);
+      }
+      if (!session && queryLower.length > 8) {
+        const short = queryLower.slice(0, 8);
+        session = sessions.find(
+          (s) =>
+            String(s.id || "").toLowerCase().includes(short) ||
+            String(s.taskId || "").toLowerCase().includes(short),
+        );
+      }
       jsonResponse(res, 200, {
         ok: true,
-        data: { matches, context: { name: wtName, path: wtPath, gitLog, gitLogDetailed, gitStatus, gitBranch, gitDiffStat, gitAheadBehind } },
+        data: {
+          matches: worktreeMatches,
+          session: session || null,
+          context: {
+            name: wtName,
+            path: wtPath,
+            gitLog,
+            gitLogDetailed,
+            gitStatus,
+            gitBranch,
+            gitDiffStat,
+            gitAheadBehind,
+            changedFiles,
+            diffSummary: gitDiffStat,
+            recentCommits: commitRows,
+          },
+        },
       });
     } catch (err) {
       jsonResponse(res, 200, { ok: true, data: null });
@@ -2308,6 +2695,95 @@ async function handleApi(req, res, url) {
         .map((line) => line.trim())
         .filter(Boolean);
       jsonResponse(res, 200, { ok: true, data: lines.slice(0, 40) });
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
+  if (path === "/api/git/branch-detail") {
+    try {
+      const rawBranch = url.searchParams.get("branch") || "";
+      const cleaned = rawBranch.replace(/^\*\s*/, "").trim();
+      const safe = cleaned.replace(/^remotes\//, "").replace(/[^\w./-]/g, "");
+      if (!safe) {
+        jsonResponse(res, 400, { ok: false, error: "branch is required" });
+        return;
+      }
+      const hasRef = (ref) => {
+        try {
+          execSync(`git show-ref --verify --quiet ${ref}`, {
+            cwd: repoRoot,
+            timeout: 5000,
+            stdio: "ignore",
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const baseRef =
+        (hasRef("refs/heads/main") && "main") ||
+        (hasRef("refs/remotes/origin/main") && "origin/main") ||
+        (hasRef("refs/heads/master") && "master") ||
+        (hasRef("refs/remotes/origin/master") && "origin/master") ||
+        null;
+      const diffRange = baseRef ? `${baseRef}...${safe}` : `${safe}~1..${safe}`;
+      const commitsRaw = runGit(`log ${safe} --format=%h||%s||%cr -20`, 15000);
+      const commits = commitsRaw
+        ? commitsRaw.split("\n").filter(Boolean).map((line) => {
+            const [hash, message, time] = line.split("||");
+            return { hash, message, time };
+          })
+        : [];
+      const diffStat = runGit(`diff --stat ${diffRange}`, 15000);
+      const filesRaw = runGit(`diff --name-only ${diffRange}`, 15000);
+      const files = filesRaw ? filesRaw.split("\n").filter(Boolean) : [];
+
+      let worktree = null;
+      try {
+        const active = await listActiveWorktrees();
+        const match = (active || []).find((wt) => {
+          const branch = String(wt.branch || "").replace(/^refs\/heads\//, "");
+          return branch === safe || branch === cleaned || branch.endsWith(`/${safe}`);
+        });
+        if (match) {
+          worktree = {
+            path: match.path,
+            taskKey: match.taskKey || null,
+            branch: match.branch || safe,
+            status: match.status || null,
+          };
+        }
+      } catch {
+        /* best effort */
+      }
+
+      let activeSlot = null;
+      const executor = uiDeps.getInternalExecutor?.();
+      if (executor?.getStatus) {
+        const status = executor.getStatus();
+        const slotMatch = (status?.slots || []).find((s) => {
+          const slotBranch = String(s.branch || "").replace(/^refs\/heads\//, "");
+          return slotBranch === safe || slotBranch === cleaned || slotBranch.endsWith(`/${safe}`);
+        });
+        if (slotMatch) {
+          activeSlot = slotMatch;
+        }
+      }
+
+      jsonResponse(res, 200, {
+        ok: true,
+        data: {
+          branch: safe,
+          base: baseRef,
+          commits,
+          diffStat,
+          files,
+          worktree,
+          activeSlot,
+        },
+      });
     } catch (err) {
       jsonResponse(res, 500, { ok: false, error: err.message });
     }
@@ -2385,6 +2861,7 @@ async function handleApi(req, res, url) {
 
   if (path === "/api/settings") {
     try {
+      const { envPath, configPath, configDir } = resolveSettingsPaths();
       const data = {};
       for (const key of SETTINGS_KNOWN_KEYS) {
         const val = process.env[key];
@@ -2394,7 +2871,15 @@ async function handleApi(req, res, url) {
           data[key] = val || "";
         }
       }
-      jsonResponse(res, 200, { ok: true, data });
+      jsonResponse(res, 200, {
+        ok: true,
+        data,
+        meta: {
+          envPath,
+          configPath,
+          configDir,
+        },
+      });
     } catch (err) {
       jsonResponse(res, 500, { ok: false, error: err.message });
     }
@@ -2431,18 +2916,37 @@ async function handleApi(req, res, url) {
           return;
         }
       }
-      // Apply to process.env
       const strChanges = {};
       for (const [key, value] of Object.entries(changes)) {
         const strVal = String(value);
-        process.env[key] = strVal;
         strChanges[key] = strVal;
       }
+
+      const paths = resolveSettingsPaths();
+      const configResult = updateConfigFileFromSettings(strChanges, paths);
+      if (configResult?.error) {
+        jsonResponse(res, 400, { ok: false, error: configResult.error });
+        return;
+      }
+
+      // Apply to process.env
+      for (const [key, value] of Object.entries(strChanges)) {
+        process.env[key] = value;
+      }
+
       // Write to .env file
-      const updated = updateEnvFile(strChanges);
+      const updated = updateEnvFile(strChanges, paths.envPath);
       _settingsLastUpdateTime = now;
-      broadcastUiEvent(["settings", "overview"], "invalidate", { reason: "settings-updated", keys: updated });
-      jsonResponse(res, 200, { ok: true, updated });
+      broadcastUiEvent(["settings", "overview"], "invalidate", {
+        reason: "settings-updated",
+        keys: updated,
+      });
+      jsonResponse(res, 200, {
+        ok: true,
+        updated,
+        configUpdated: configResult?.updatedKeys || [],
+        configPath: configResult?.path || paths.configPath,
+      });
     } catch (err) {
       jsonResponse(res, 500, { ok: false, error: err.message });
     }
@@ -2502,7 +3006,30 @@ async function handleApi(req, res, url) {
         jsonResponse(res, 400, { ok: false, error: "command is required" });
         return;
       }
-      const ALLOWED_CMD_PREFIXES = ["/status", "/start", "/stop", "/pause", "/resume", "/sdk", "/kanban", "/region", "/deploy", "/help", "/starttask", "/stoptask", "/retrytask", "/parallelism", "/sentinel", "/hooks", "/version"];
+      const ALLOWED_CMD_PREFIXES = [
+        "/status",
+        "/health",
+        "/plan",
+        "/logs",
+        "/menu",
+        "/tasks",
+        "/start",
+        "/stop",
+        "/pause",
+        "/resume",
+        "/sdk",
+        "/kanban",
+        "/region",
+        "/deploy",
+        "/help",
+        "/starttask",
+        "/stoptask",
+        "/retrytask",
+        "/parallelism",
+        "/sentinel",
+        "/hooks",
+        "/version",
+      ];
       const cmdBase = command.split(/\s/)[0].toLowerCase();
       if (!ALLOWED_CMD_PREFIXES.some(p => cmdBase === p || cmdBase.startsWith(p + " "))) {
         jsonResponse(res, 400, { ok: false, error: `Command not allowed: ${cmdBase}` });

@@ -14,6 +14,7 @@ import {
   agentsData,
   agentLogQuery,
   agentLogFile,
+  agentWorkspaceTarget,
   showToast,
   refreshTab,
   scheduleRefresh,
@@ -72,9 +73,12 @@ function WorkspaceViewer({ agent, onClose }) {
   const [logText, setLogText] = useState("Loading…");
   const [contextData, setContextData] = useState(null);
   const [steerInput, setSteerInput] = useState("");
+  const [activeTab, setActiveTab] = useState("stream");
   const logRef = useRef(null);
 
-  const query = agent.branch || agent.taskId || "";
+  const query = agent.branch || agent.taskId || agent.sessionId || "";
+  const sessionId =
+    contextData?.session?.id || agent.taskId || agent.sessionId || null;
 
   useEffect(() => {
     if (!query) return;
@@ -85,7 +89,14 @@ function WorkspaceViewer({ agent, onClose }) {
         .then((res) => {
           if (!active) return;
           const data = res.data ?? res ?? "";
-          setLogText(typeof data === "string" ? data : (data.lines || []).join("\n") || JSON.stringify(data, null, 2));
+          const content =
+            typeof data === "string"
+              ? data
+              : data?.content || data?.lines || data?.data || "";
+          const text = Array.isArray(content)
+            ? content.join("\n")
+            : content || "";
+          setLogText(text || "(no logs yet)");
           if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
         })
         .catch(() => { if (active) setLogText("(failed to load logs)"); });
@@ -104,6 +115,7 @@ function WorkspaceViewer({ agent, onClose }) {
   }, [query]);
 
   const handleStop = async () => {
+    if (agent.index == null) return;
     const ok = await showConfirm(`Force-stop agent on "${truncate(agent.taskTitle || agent.taskId || "task", 40)}"?`);
     if (!ok) return;
     haptic("heavy");
@@ -125,6 +137,61 @@ function WorkspaceViewer({ agent, onClose }) {
     setSteerInput("");
   };
 
+  const renderChanges = () => {
+    const ctx = contextData?.context;
+    if (!ctx) {
+      return html`
+        <div class="chat-view chat-empty-state">
+          <div class="session-empty-icon">📋</div>
+          <div class="session-empty-text">No workspace context available</div>
+        </div>
+      `;
+    }
+    const files = ctx.changedFiles || [];
+    const commits = ctx.recentCommits || [];
+    return html`
+      <div class="workspace-context">
+        <div class="card mb-sm">
+          <div class="card-title">Branch</div>
+          <div class="meta-text">${ctx.gitBranch || agent.branch || "unknown"}</div>
+          <div class="meta-text mt-xs">${ctx.path || "unknown path"}</div>
+        </div>
+        ${commits.length > 0 &&
+        html`
+          <div class="card mb-sm">
+            <div class="card-title">Recent Commits</div>
+            ${commits.map(
+              (cm) => html`
+                <div class="meta-text" key=${cm.hash}>
+                  <span class="mono">${cm.hash}</span> ${cm.message || ""} ${cm.time ? `· ${cm.time}` : ""}
+                </div>
+              `,
+            )}
+          </div>
+        `}
+        <div class="card mb-sm">
+          <div class="card-title">Changed Files</div>
+          ${files.length === 0 &&
+          html`<div class="meta-text">Clean working tree</div>`}
+          ${files.map(
+            (f) => html`
+              <div class="meta-text" key=${f.file}>
+                <span class="mono">${f.code}</span> ${f.file}
+              </div>
+            `,
+          )}
+        </div>
+        ${ctx.diffSummary &&
+        html`
+          <div class="card">
+            <div class="card-title">Diff Summary</div>
+            <pre class="workspace-diff">${ctx.diffSummary}</pre>
+          </div>
+        `}
+      </div>
+    `;
+  };
+
   return html`
     <div class="modal-overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
       <div class="modal-content">
@@ -142,23 +209,35 @@ function WorkspaceViewer({ agent, onClose }) {
             </div>
             <button class="btn btn-ghost btn-sm" onClick=${onClose}>✕</button>
           </div>
+          <div class="session-detail-tabs workspace-tabs">
+            <button
+              class="session-detail-tab ${activeTab === "stream" ? "active" : ""}"
+              onClick=${() => setActiveTab("stream")}
+            >💬 Stream</button>
+            <button
+              class="session-detail-tab ${activeTab === "changes" ? "active" : ""}"
+              onClick=${() => setActiveTab("changes")}
+            >📝 Changes</button>
+            <button
+              class="session-detail-tab ${activeTab === "logs" ? "active" : ""}"
+              onClick=${() => setActiveTab("logs")}
+            >📄 Logs</button>
+          </div>
 
-          <div class="workspace-log" ref=${logRef}>${logText}</div>
-
-          ${contextData && html`
-            <div style="padding:12px 16px;">
-              <div class="card-subtitle">Workspace Context</div>
-              ${contextData.changedFiles?.length > 0 && html`
-                <div class="meta-text mb-sm">Changed: ${contextData.changedFiles.join(", ")}</div>
-              `}
-              ${contextData.diffSummary && html`
-                <div class="meta-text">${contextData.diffSummary}</div>
-              `}
-              ${!contextData.changedFiles && !contextData.diffSummary && html`
-                <div class="meta-text">No workspace context available.</div>
-              `}
-            </div>
+          ${activeTab === "stream" &&
+          html`
+            ${sessionId
+              ? html`<${ChatView} sessionId=${sessionId} readOnly=${true} />`
+              : html`
+                  <div class="chat-view chat-empty-state">
+                    <div class="session-empty-icon">💬</div>
+                    <div class="session-empty-text">No session stream available</div>
+                  </div>
+                `}
           `}
+          ${activeTab === "changes" && renderChanges()}
+          ${activeTab === "logs" &&
+          html`<div class="workspace-log" ref=${logRef}>${logText}</div>`}
 
           <div class="workspace-controls">
             <input
@@ -169,7 +248,11 @@ function WorkspaceViewer({ agent, onClose }) {
               onKeyDown=${(e) => e.key === "Enter" && handleSteer()}
             />
             <button class="btn btn-primary btn-sm" onClick=${handleSteer}>🎯</button>
-            <button class="btn btn-danger btn-sm" onClick=${handleStop}>⛔ Stop</button>
+            <button
+              class="btn btn-danger btn-sm"
+              disabled=${agent.index == null}
+              onClick=${handleStop}
+            >⛔ Stop</button>
           </div>
         </div>
       </div>
@@ -257,6 +340,31 @@ export function AgentsTab() {
 
   const [expandedSlot, setExpandedSlot] = useState(null);
   const [selectedAgent, setSelectedAgent] = useState(null);
+  const workspaceTarget = agentWorkspaceTarget.value;
+
+  useEffect(() => {
+    if (!workspaceTarget) return;
+    const slotIndex = slots.findIndex((s) => {
+      const targetTask = workspaceTarget.taskId || "";
+      const targetBranch = workspaceTarget.branch || "";
+      return (
+        (targetTask && s.taskId === targetTask) ||
+        (targetBranch && s.branch === targetBranch)
+      );
+    });
+    if (slotIndex >= 0) {
+      setSelectedAgent({ ...slots[slotIndex], index: slotIndex });
+    } else {
+      setSelectedAgent({
+        taskId: workspaceTarget.taskId || null,
+        taskTitle: workspaceTarget.taskTitle || workspaceTarget.branch || "Workspace",
+        branch: workspaceTarget.branch || null,
+        status: "idle",
+        index: null,
+      });
+    }
+    agentWorkspaceTarget.value = null;
+  }, [workspaceTarget, slots]);
 
   /* Navigate to logs tab with agent query pre-filled */
   const viewAgentLogs = (query) => {
@@ -388,7 +496,7 @@ export function AgentsTab() {
                     </div>
                     <div class="task-card-meta">
                       ${slot.taskId || "?"} · Agent
-                      ${slot.agentInstanceId || "n/a"} · ${slot.sdk || "?"}
+                      ${slot.agentInstanceId || "n/a"} · ${slot.sdk || "?"}${slot.model ? ` · ${slot.model}` : ""}
                     </div>
                   </div>
                   <${Badge}
@@ -431,6 +539,8 @@ export function AgentsTab() {
                     html`<div class="meta-text">
                       Avg: ${Math.round(slot.avgDurationMs / 1000)}s
                     </div>`}
+                    ${slot.model &&
+                    html`<div class="meta-text">Model: ${slot.model}</div>`}
                     ${slot.lastError &&
                     html`<div
                       class="meta-text"

@@ -193,7 +193,14 @@ function Header() {
   const user = getTelegramUser();
   const latency = wsLatency.value;
   const reconnect = wsReconnectIn.value;
-  const freshness = dataFreshness.value;
+  const freshnessRaw = dataFreshness.value;
+  let freshness = null;
+  if (typeof freshnessRaw === "number") {
+    freshness = freshnessRaw;
+  } else if (freshnessRaw && typeof freshnessRaw === "object") {
+    const vals = Object.values(freshnessRaw).filter((v) => typeof v === "number");
+    freshness = vals.length ? Math.max(...vals) : null;
+  }
 
   // Connection quality label
   let connLabel = "Offline";
@@ -211,7 +218,7 @@ function Header() {
 
   // Freshness label
   let freshnessLabel = "";
-  if (freshness != null) {
+  if (freshness != null && Number.isFinite(freshness)) {
     const ago = Math.round((Date.now() - freshness) / 1000);
     if (ago < 5) freshnessLabel = "Updated just now";
     else if (ago < 60) freshnessLabel = `Updated ${ago}s ago`;

@@ -89,6 +89,7 @@ export const tasksTotalPages = signal(1);
 
 // ── Agents
 export const agentsData = signal([]);
+export const agentWorkspaceTarget = signal(null);
 
 // ── Infra
 export const worktreeData = signal([]);

@@ -84,8 +84,67 @@ const SORT_OPTIONS = [
   { value: "title", label: "Title" },
 ];
 
+function StartTaskModal({ task, defaultSdk = "auto", onClose, onStart }) {
+  const [sdk, setSdk] = useState(defaultSdk || "auto");
+  const [model, setModel] = useState("");
+  const [starting, setStarting] = useState(false);
+
+  useEffect(() => {
+    setSdk(defaultSdk || "auto");
+  }, [defaultSdk]);
+
+  const canModel = sdk && sdk !== "auto";
+
+  const handleStart = async () => {
+    if (!task?.id || starting) return;
+    setStarting(true);
+    try {
+      await onStart?.({
+        taskId: task.id,
+        sdk: sdk && sdk !== "auto" ? sdk : undefined,
+        model: model.trim() ? model.trim() : undefined,
+      });
+      onClose();
+    } catch {
+      /* toast via apiFetch */
+    }
+    setStarting(false);
+  };
+
+  return html`
+    <${Modal} title="Start Task" onClose=${onClose}>
+      <div class="meta-text mb-sm">
+        ${task?.title || "(untitled)"} · ${task?.id}
+      </div>
+      <div class="flex-col gap-md">
+        <div class="card-subtitle">Executor SDK</div>
+        <select class="input" value=${sdk} onChange=${(e) => setSdk(e.target.value)}>
+          ${["auto", "codex", "copilot", "claude"].map(
+            (opt) => html`<option value=${opt}>${opt}</option>`,
+          )}
+        </select>
+        <div class="card-subtitle">Model Override (optional)</div>
+        <input
+          class="input"
+          placeholder=${canModel ? "e.g. gpt-5.3-codex" : "Select SDK to enable"}
+          value=${model}
+          disabled=${!canModel}
+          onInput=${(e) => setModel(e.target.value)}
+        />
+        <button
+          class="btn btn-primary"
+          onClick=${handleStart}
+          disabled=${starting}
+        >
+          ${starting ? "Starting…" : "▶ Start Task"}
+        </button>
+      </div>
+    <//>
+  `;
+}
+
 /* ─── TaskDetailModal ─── */
-export function TaskDetailModal({ task, onClose }) {
+export function TaskDetailModal({ task, onClose, onStart }) {
   const [title, setTitle] = useState(task?.title || "");
   const [description, setDescription] = useState(task?.description || "");
   const [status, setStatus] = useState(task?.status || "todo");
@@ -166,30 +225,8 @@ export function TaskDetailModal({ task, onClose }) {
     }
   };
 
-  const handleStart = async () => {
-    haptic("medium");
-    const prev = cloneValue(tasksData.value);
-    try {
-      await runOptimistic(
-        () => {
-          tasksData.value = tasksData.value.map((t) =>
-            t.id === task.id ? { ...t, status: "inprogress" } : t,
-          );
-        },
-        () =>
-          apiFetch("/api/tasks/start", {
-            method: "POST",
-            body: JSON.stringify({ taskId: task.id }),
-          }),
-        () => {
-          tasksData.value = prev;
-        },
-      );
-      onClose();
-    } catch {
-      /* toast */
-    }
-    scheduleRefresh(150);
+  const handleStart = () => {
+    if (onStart) onStart(task);
   };
 
   const handleRetry = async () => {
@@ -284,6 +321,7 @@ export function TaskDetailModal({ task, onClose }) {
         <!-- Action buttons -->
         <div class="btn-row">
           ${task?.status === "todo" &&
+          onStart &&
           html`
             <button class="btn btn-primary btn-sm" onClick=${handleStart}>
               ▶ Start
@@ -348,6 +386,7 @@ export function TaskDetailModal({ task, onClose }) {
 export function TasksTab() {
   const [showCreate, setShowCreate] = useState(false);
   const [detailTask, setDetailTask] = useState(null);
+  const [startTarget, setStartTarget] = useState(null);
   const [manualMode, setManualMode] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -372,6 +411,7 @@ export function TasksTab() {
   const page = tasksPage?.value ?? 0;
   const pageSize = tasksPageSize?.value ?? 8;
   const totalPages = tasksTotalPages?.value ?? 1;
+  const defaultSdk = executorData.value?.data?.sdk || "auto";
 
   /* Search (local fuzzy filter on already-loaded data) */
   const searchLower = searchVal.trim().toLowerCase();
@@ -485,7 +525,7 @@ export function TasksTab() {
     ).catch(() => {});
   };
 
-  const handleStart = async (taskId) => {
+  const startTask = async ({ taskId, sdk, model }) => {
     haptic("medium");
     const prev = cloneValue(tasks);
     await runOptimistic(
@@ -497,13 +537,22 @@ export function TasksTab() {
       () =>
         apiFetch("/api/tasks/start", {
           method: "POST",
-          body: JSON.stringify({ taskId }),
+          body: JSON.stringify({
+            taskId,
+            ...(sdk ? { sdk } : {}),
+            ...(model ? { model } : {}),
+          }),
         }),
       () => {
         tasksData.value = prev;
       },
     ).catch(() => {});
     scheduleRefresh(150);
+  };
+
+  const openStartModal = (task) => {
+    haptic("medium");
+    setStartTarget(task);
   };
 
   const openDetail = async (taskId) => {
@@ -830,7 +879,7 @@ export function TasksTab() {
               html`
                 <button
                   class="btn btn-primary btn-sm"
-                  onClick=${() => handleStart(task.id)}
+                  onClick=${() => openStartModal(task)}
                 >
                   ▶ Start
                 </button>
@@ -896,6 +945,16 @@ export function TasksTab() {
       <${TaskDetailModal}
         task=${detailTask}
         onClose=${() => setDetailTask(null)}
+        onStart=${manualMode && canManual ? (task) => openStartModal(task) : null}
+      />
+    `}
+    ${startTarget &&
+    html`
+      <${StartTaskModal}
+        task=${startTarget}
+        defaultSdk=${defaultSdk}
+        onClose=${() => setStartTarget(null)}
+        onStart=${startTask}
       />
     `}
   `;

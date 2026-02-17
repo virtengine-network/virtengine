@@ -117,6 +117,17 @@ function normalizeModel(value) {
   return model ? model : null;
 }
 
+function normalizeSdkOverride(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === "auto") return "auto";
+  if (raw === "codex-sdk") return "codex";
+  if (raw === "copilot-sdk") return "copilot";
+  if (raw === "claude-sdk") return "claude";
+  if (["codex", "copilot", "claude"].includes(raw)) return raw;
+  return null;
+}
+
 // ── Stream-Based Health Monitoring Constants ──────────────────────────────
 /** How long an agent can be truly silent (zero events) before we consider intervention */
 const STREAM_SILENT_THRESHOLD_MS = 10 * 60_000; // 10 minutes of absolute silence
@@ -554,8 +565,11 @@ async function commentOnIssue(task, commentBody) {
  * @property {number} startedAt       - timestamp
  * @property {number|null} agentInstanceId - monotonic task-agent instance ID
  * @property {string} sdk             - which SDK is running this
+ * @property {string} model           - model override (if any)
  * @property {number} attempt         - current attempt number
  * @property {"running"|"completing"|"failed"} status
+ * @property {string|null} executorProfile - executor profile name, if resolved
+ * @property {object|null} complexity - complexity decision metadata
  */
 
 // ── TaskExecutor Class ──────────────────────────────────────────────────────
@@ -732,7 +746,7 @@ class TaskExecutor {
     this._projectResolvePromise = null;
     this._noProjectsWarnedAt = 0;
 
-    /** @type {Map<string, { taskId: string, taskTitle: string, branch: string, sdk: string, attempt: number, startedAt: number, agentInstanceId: number|null, status: string, updatedAt: number }>} */
+    /** @type {Map<string, { taskId: string, taskTitle: string, branch: string, sdk: string, model: string, attempt: number, startedAt: number, agentInstanceId: number|null, status: string, updatedAt: number }>} */
     this._slotRuntimeState = new Map();
     this._nextAgentInstanceId = 1;
 
@@ -819,6 +833,16 @@ class TaskExecutor {
       if (!existsSync(RUNTIME_STATE_FILE)) return;
       const raw = readFileSync(RUNTIME_STATE_FILE, "utf8");
       const parsed = JSON.parse(raw);
+      if (typeof parsed?.paused === "boolean") {
+        this._paused = parsed.paused;
+        const pausedAt = Number(parsed?.pausedAt || 0);
+        this._pausedAt =
+          parsed.paused && Number.isFinite(pausedAt) && pausedAt > 0
+            ? pausedAt
+            : parsed.paused
+              ? Date.now()
+              : null;
+      }
       const nextId = Number(parsed?.nextAgentInstanceId || 1);
       if (Number.isFinite(nextId) && nextId > 0) {
         this._nextAgentInstanceId = Math.floor(nextId);
@@ -845,6 +869,7 @@ class TaskExecutor {
           taskTitle: String(entry?.taskTitle || ""),
           branch: String(entry?.branch || ""),
           sdk: String(entry?.sdk || ""),
+          model: String(entry?.model || ""),
           attempt: Number(entry?.attempt || 0),
           startedAt,
           agentInstanceId,
@@ -876,12 +901,13 @@ class TaskExecutor {
           taskTitle: entry.taskTitle || "",
           branch: entry.branch || "",
           sdk: entry.sdk || "",
+          model: entry.model || "",
           attempt: Number(entry.attempt || 0),
           startedAt: Number(entry.startedAt || Date.now()),
           agentInstanceId:
             Number.isFinite(entry.agentInstanceId) && entry.agentInstanceId > 0
               ? Number(entry.agentInstanceId)
-              : null,
+            : null,
           status: entry.status || "running",
           updatedAt: Number(entry.updatedAt || Date.now()),
         };
@@ -891,6 +917,8 @@ class TaskExecutor {
         RUNTIME_STATE_FILE,
         JSON.stringify(
           {
+            paused: this._paused,
+            pausedAt: this._pausedAt,
             nextAgentInstanceId: this._nextAgentInstanceId,
             slots,
             savedAt: new Date().toISOString(),
@@ -916,6 +944,7 @@ class TaskExecutor {
       taskTitle: slot.taskTitle || "",
       branch: slot.branch || "",
       sdk: slot.sdk || "",
+      model: slot.model || "",
       attempt: Number(slot.attempt || 0),
       startedAt: Number(slot.startedAt || Date.now()),
       agentInstanceId:
@@ -1148,6 +1177,7 @@ class TaskExecutor {
     if (this._paused) return false;
     this._paused = true;
     this._pausedAt = Date.now();
+    this._saveRuntimeState();
     console.log(
       `${TAG} paused — no new tasks will be dispatched (active: ${this._activeSlots.size})`,
     );
@@ -1165,6 +1195,7 @@ class TaskExecutor {
       : 0;
     this._paused = false;
     this._pausedAt = null;
+    this._saveRuntimeState();
     console.log(
       `${TAG} resumed after ${pauseDuration}s pause — will pick up tasks on next poll`,
     );
@@ -1701,6 +1732,7 @@ class TaskExecutor {
         taskTitle: s.taskTitle,
         branch: s.branch,
         sdk: s.sdk,
+        model: s.model || "",
         attempt: s.attempt,
         agentInstanceId: s.agentInstanceId ?? null,
         startedAt: s.startedAt,
@@ -2114,7 +2146,7 @@ class TaskExecutor {
    * @param {Object} task - Task object from kanban adapter
    * @returns {Promise<void>}
    */
-  async executeTask(task) {
+  async executeTask(task, options = {}) {
     const taskId = task.id || task.task_id;
     const taskTitle = task.title || "(untitled)";
     const branch =
@@ -2145,6 +2177,8 @@ class TaskExecutor {
     let resolvedSdk = this.sdk;
     let executorProfile = null;
     let complexityInfo = null;
+    const overrideSdk = normalizeSdkOverride(options?.sdk);
+    const overrideModel = normalizeModel(options?.model);
 
     if (this.sdk === "auto" && this._executorScheduler) {
       // Pick executor profile from scheduler (weighted/round-robin/primary)
@@ -2189,6 +2223,21 @@ class TaskExecutor {
       selectedModel = configuredClaudeModel;
     }
 
+    if (overrideSdk && overrideSdk !== "auto") {
+      resolvedSdk = overrideSdk;
+      executorProfile = null;
+      complexityInfo = null;
+      console.log(
+        `${TAG} manual SDK override for "${taskTitle}" → sdk=${resolvedSdk}`,
+      );
+    }
+    if (overrideModel) {
+      selectedModel = overrideModel;
+      console.log(
+        `${TAG} manual model override for "${taskTitle}" → model=${selectedModel}`,
+      );
+    }
+
     // 1b. Allocate slot
     const recoveredRuntime =
       task?.status === "inprogress"
@@ -2222,6 +2271,7 @@ class TaskExecutor {
       startedAt: validRecoveredStartedAt ? recoveredStartedAt : Date.now(),
       agentInstanceId,
       sdk: resolvedSdk,
+      model: selectedModel || "",
       attempt: 0,
       status: "running",
       executorProfile: executorProfile || null,
@@ -2244,6 +2294,7 @@ class TaskExecutor {
             branch,
             owner: "task-executor",
             sdk: resolvedSdk,
+            model: selectedModel || null,
             pid: process.pid,
             host: os.hostname(),
           },
@@ -2332,6 +2383,7 @@ class TaskExecutor {
           `| **Started** | ${new Date().toISOString()} |`,
           `| **Branch** | \`${branch}\` |`,
           `| **SDK** | ${resolvedSdk} |`,
+          selectedModel ? `| **Model** | ${selectedModel} |` : "",
           `| **Executor** | codex-monitor (internal) |`,
           executorProfile ? `| **Profile** | ${executorProfile} |` : "",
         ]

@@ -741,13 +741,7 @@ function getBrowserUiUrl() {
   if (!base) return null;
   const token = getSessionToken();
   if (!token) return base;
-  try {
-    const u = new URL(base);
-    u.searchParams.set("token", token);
-    return u.toString();
-  } catch {
-    return base;
-  }
+  return appendTokenToUrl(base, token) || base;
 }
 
 function syncUiUrlsFromServer() {
@@ -765,6 +759,11 @@ function syncUiUrlsFromServer() {
 let activeAgentSession = null; // { chatId, messageId, taskPreview, abortController, followUpQueue, ... }
 let agentMessageId = null; // current agent streaming message ID
 let agentChatId = null; // chat where agent is running
+
+// ── Sticky UI menu state (keep /menu accessible at bottom) ─────────────────
+const stickyMenuState = new Map();
+const stickyMenuTimers = new Map();
+const STICKY_MENU_BUMP_MS = 1200;
 
 // ── Queues ──────────────────────────────────────────────────────────────────
 
@@ -941,6 +940,33 @@ export function isAgentActive() {
   return !!activeAgentSession;
 }
 
+function setStickyMenuState(chatId, patch) {
+  if (!chatId) return;
+  const current = stickyMenuState.get(chatId) || {};
+  stickyMenuState.set(chatId, { ...current, ...patch });
+}
+
+function scheduleStickyMenuBump(chatId, lastMessageId) {
+  const state = stickyMenuState.get(chatId);
+  if (!state?.enabled || !state?.screenId) return;
+  if (lastMessageId && state.messageId && lastMessageId === state.messageId)
+    return;
+  if (stickyMenuTimers.has(chatId)) return;
+  const timer = setTimeout(() => {
+    stickyMenuTimers.delete(chatId);
+    bumpStickyMenu(chatId).catch(() => {});
+  }, STICKY_MENU_BUMP_MS);
+  stickyMenuTimers.set(chatId, timer);
+}
+
+async function bumpStickyMenu(chatId) {
+  const state = stickyMenuState.get(chatId);
+  if (!state?.enabled || !state?.screenId) return;
+  await showUiScreen(chatId, null, state.screenId, state.params || {}, {
+    sticky: true,
+  });
+}
+
 // ── Telegram API Helpers ─────────────────────────────────────────────────────
 
 async function sendReply(chatId, text, options = {}) {
@@ -955,6 +981,7 @@ async function sendReply(chatId, text, options = {}) {
 
 async function sendDirect(chatId, text, options = {}) {
   if (!telegramToken) return null;
+  const skipSticky = options.skipSticky;
 
   // Split long messages
   const chunks = splitMessage(text, MAX_MESSAGE_LEN);
@@ -1013,6 +1040,9 @@ async function sendDirect(chatId, text, options = {}) {
         console.warn(`[telegram-bot] send JSON parse error: ${err.message}`);
       }
     }
+  }
+  if (!skipSticky && lastMessageId) {
+    scheduleStickyMenuBump(chatId, lastMessageId);
   }
   return lastMessageId;
 }
@@ -2530,7 +2560,7 @@ async function refreshMenuButton() {
       lastMenuButtonUrl = currentUrl;
       console.log(`[telegram-bot] menu button URL refreshed: ${currentUrl}`);
     }
-  } else if (!currentUrl && lastMenuButtonUrl) {
+  } else if (!currentUrl) {
     await clearWebAppMenuButton();
     lastMenuButtonUrl = null;
     if (currentUiUrl !== telegramUiUrl) {
@@ -2563,7 +2593,10 @@ const FAST_COMMANDS = new Set([
 function getTelegramWebAppUrl(url) {
   // Prefer cloudflared tunnel URL (valid cert, works in Telegram Mini App)
   const tUrl = getTunnelUrl();
-  if (tUrl) return tUrl;
+  if (tUrl) {
+    const normalizedTunnel = String(tUrl || "").trim().replace(/\/+$/, "");
+    return appendTokenToUrl(normalizedTunnel, getSessionToken()) || normalizedTunnel;
+  }
 
   const normalized = String(url || "")
     .trim()
@@ -2580,7 +2613,8 @@ function getTelegramWebAppUrl(url) {
       }
       return null;
     }
-    return parsed.toString().replace(/\/+$/, "");
+    const normalizedUrl = parsed.toString().replace(/\/+$/, "");
+    return appendTokenToUrl(normalizedUrl, getSessionToken()) || normalizedUrl;
   } catch {
     if (telegramWebAppUrlWarned !== normalized) {
       telegramWebAppUrlWarned = normalized;
@@ -2589,6 +2623,19 @@ function getTelegramWebAppUrl(url) {
       );
     }
     return null;
+  }
+}
+
+function appendTokenToUrl(inputUrl, token) {
+  const raw = String(inputUrl || "").trim();
+  if (!raw) return null;
+  if (!token) return raw;
+  try {
+    const url = new URL(raw);
+    url.searchParams.set("token", token);
+    return url.toString();
+  } catch {
+    return raw;
   }
 }
 
@@ -3828,12 +3875,13 @@ Object.assign(UI_SCREENS, {
   },
 });
 
-async function showUiScreen(chatId, messageId, screenId, params = {}) {
+async function showUiScreen(chatId, messageId, screenId, params = {}, opts = {}) {
   const screen = UI_SCREENS[screenId];
   if (!screen) {
     await sendReply(chatId, "Unknown menu.");
     return;
   }
+  const sticky = Boolean(opts.sticky);
   const ctx = { chatId, params };
   const body =
     typeof screen.body === "function"
@@ -3845,14 +3893,36 @@ async function showUiScreen(chatId, messageId, screenId, params = {}) {
     typeof screen.keyboard === "function"
       ? await screen.keyboard(ctx)
       : screen.keyboard;
-  const opts = {
+  const sendOpts = {
     parseMode: "Markdown",
     reply_markup: keyboard,
   };
   if (messageId) {
-    await editDirect(chatId, messageId, text, opts);
+    await editDirect(chatId, messageId, text, sendOpts);
+    if (stickyMenuState.has(chatId)) {
+      setStickyMenuState(chatId, { screenId, params, messageId });
+    }
+  } else if (sticky) {
+    const prev = stickyMenuState.get(chatId);
+    if (prev?.messageId) {
+      try {
+        await deleteDirect(chatId, prev.messageId);
+      } catch {
+        /* best effort */
+      }
+    }
+    const newId = await sendDirect(chatId, text, {
+      ...sendOpts,
+      skipSticky: true,
+    });
+    setStickyMenuState(chatId, {
+      enabled: true,
+      messageId: newId,
+      screenId,
+      params,
+    });
   } else {
-    await sendDirect(chatId, text, opts);
+    await sendDirect(chatId, text, sendOpts);
   }
 }
 
@@ -3870,7 +3940,9 @@ async function handleUiAction({ chatId, messageId, data }) {
   if (type === "go") {
     const screenId = rest[0];
     const page = rest[1] ? parsePageParam(rest[1]) : 0;
-    await showUiScreen(chatId, messageId, screenId, { page });
+    await showUiScreen(chatId, messageId, screenId, { page }, {
+      sticky: stickyMenuState.get(chatId)?.enabled,
+    });
     return;
   }
   if (type === "cmd") {
@@ -3902,7 +3974,9 @@ async function handleUiAction({ chatId, messageId, data }) {
       return;
     }
     if (payload.type === "go") {
-      await showUiScreen(chatId, messageId, payload.screenId, payload.params);
+      await showUiScreen(chatId, messageId, payload.screenId, payload.params, {
+        sticky: stickyMenuState.get(chatId)?.enabled,
+      });
       return;
     }
   }
@@ -3928,7 +4002,9 @@ async function handleWebAppData(raw, chatId) {
   }
 
   if (payload.type === "menu" && payload.screen) {
-    await showUiScreen(chatId, null, payload.screen, payload.params || {});
+    await showUiScreen(chatId, null, payload.screen, payload.params || {}, {
+      sticky: stickyMenuState.get(chatId)?.enabled,
+    });
     return;
   }
 
@@ -4191,7 +4267,7 @@ async function cmdMenu(chatId) {
     void refreshMenuButton();
   }
   clearPendingUiInput(chatId);
-  await showUiScreen(chatId, null, "home");
+  await showUiScreen(chatId, null, "home", {}, { sticky: true });
 }
 
 async function cmdCancel(chatId) {
@@ -7973,6 +8049,10 @@ export async function startTelegramBot() {
       }
     } catch (err) {
       console.warn(`[telegram-bot] UI server start failed: ${err.message}`);
+      if (reachable) {
+        await clearWebAppMenuButton();
+        lastMenuButtonUrl = null;
+      }
     }
   } else if (reachable) {
     await clearWebAppMenuButton();

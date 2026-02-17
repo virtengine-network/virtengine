@@ -26,6 +26,7 @@ import {
   agentLogLines,
   agentLogQuery,
   agentContext,
+  agentWorkspaceTarget,
   loadLogs,
   loadAgentLogFileList,
   loadAgentLogTailData,
@@ -33,9 +34,10 @@ import {
   showToast,
   scheduleRefresh,
 } from "../modules/state.js";
+import { navigateTo } from "../modules/router.js";
 import { ICONS } from "../modules/icons.js";
 import { formatBytes } from "../modules/utils.js";
-import { Card, Badge, EmptyState, SkeletonCard } from "../components/shared.js";
+import { Card, Badge, EmptyState, SkeletonCard, Modal } from "../components/shared.js";
 import { SearchInput } from "../components/forms.js";
 
 /* ─── Log level helpers ─── */
@@ -122,6 +124,9 @@ export function LogsTab() {
   const [regexMode, setRegexMode] = useState(false);
   const [logScrollTop, setLogScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(400);
+  const [branchDetail, setBranchDetail] = useState(null);
+  const [branchLoading, setBranchLoading] = useState(false);
+  const [branchError, setBranchError] = useState(null);
 
   /* Raw log text */
   const rawLogText = logsData?.value?.lines
@@ -219,6 +224,44 @@ export function LogsTab() {
     if (agentLogFile) agentLogFile.value = "";
     await loadAgentLogFileList();
     await loadAgentLogTailData();
+  };
+
+  const normalizeBranchLine = (line) => {
+    if (!line) return null;
+    const cleaned = line.replace(/^\*\s*/, "").trim();
+    const noRemote = cleaned.replace(/^remotes\//, "");
+    const short = noRemote.replace(/^origin\//, "");
+    return { raw: line, name: noRemote, short };
+  };
+
+  const openBranchDetail = async (line) => {
+    const parsed = normalizeBranchLine(line);
+    if (!parsed?.name) return;
+    setBranchError(null);
+    setBranchLoading(true);
+    setBranchDetail({ branch: parsed.name });
+    try {
+      const res = await apiFetch(
+        `/api/git/branch-detail?branch=${encodeURIComponent(parsed.name)}`,
+      );
+      setBranchDetail(res.data || null);
+    } catch (err) {
+      setBranchError(err.message || "Failed to load branch detail");
+    } finally {
+      setBranchLoading(false);
+    }
+  };
+
+  const openWorkspace = (detail) => {
+    if (!detail) return;
+    const taskId = detail?.activeSlot?.taskId || detail?.worktree?.taskKey || null;
+    const taskTitle = detail?.activeSlot?.taskTitle || detail?.branch || "Workspace";
+    agentWorkspaceTarget.value = {
+      taskId,
+      taskTitle,
+      branch: detail?.branch || null,
+    };
+    navigateTo("agents");
   };
 
   const handleAgentOpen = async (name) => {
@@ -559,9 +602,78 @@ export function LogsTab() {
       <div class="card-subtitle">Recent Branches</div>
       ${(gitBranches?.value || []).length
         ? (gitBranches.value || []).map(
-            (line, i) => html`<div key=${i} class="meta-text">${line}</div>`,
+            (line, i) => {
+              const parsed = normalizeBranchLine(line);
+              return html`
+                <button
+                  key=${i}
+                  class="branch-row"
+                  onClick=${() => openBranchDetail(line)}
+                >
+                  <span class="branch-name">${parsed?.short || line}</span>
+                  <span class="branch-raw">${line}</span>
+                </button>
+              `;
+            },
           )
         : html`<div class="meta-text">No branches found.</div>`}
     <//>
+
+    ${branchDetail &&
+    html`
+      <${Modal} title="Branch Detail" onClose=${() => setBranchDetail(null)}>
+        ${branchLoading && html`<${SkeletonCard} height="80px" />`}
+        ${branchError && html`<div class="meta-text" style="color:var(--color-error)">${branchError}</div>`}
+        ${!branchLoading &&
+        !branchError &&
+        html`
+          <div class="meta-text mb-sm">
+            Branch: <span class="mono">${branchDetail.branch}</span>
+          </div>
+          ${branchDetail.base &&
+          html`<div class="meta-text mb-sm">Base: ${branchDetail.base}</div>`}
+          ${branchDetail.activeSlot &&
+          html`<div class="meta-text mb-sm">Active Agent: ${branchDetail.activeSlot.taskTitle || branchDetail.activeSlot.taskId}</div>`}
+          <div class="btn-row mb-sm">
+            ${(branchDetail.activeSlot || branchDetail.worktree) &&
+            html`<button class="btn btn-primary btn-sm" onClick=${() => openWorkspace(branchDetail)}>
+              🔍 Open Workspace
+            </button>`}
+            <button
+              class="btn btn-ghost btn-sm"
+              onClick=${() => copyToClipboard(branchDetail.diffStat || "", "Diff")}
+            >📋 Copy Diff</button>
+          </div>
+          ${branchDetail.commits?.length > 0 &&
+          html`
+            <div class="card mb-sm">
+              <div class="card-title">Commits</div>
+              ${branchDetail.commits.map(
+                (cm) => html`
+                  <div class="meta-text" key=${cm.hash}>
+                    <span class="mono">${cm.hash}</span> ${cm.message || ""} ${cm.time ? `· ${cm.time}` : ""}
+                  </div>
+                `,
+              )}
+            </div>
+          `}
+          <div class="card mb-sm">
+            <div class="card-title">Files Changed</div>
+            ${branchDetail.files?.length
+              ? branchDetail.files.map(
+                  (f) => html`<div class="meta-text" key=${f}>${f}</div>`,
+                )
+              : html`<div class="meta-text">No diff against base.</div>`}
+          </div>
+          ${branchDetail.diffStat &&
+          html`
+            <div class="card">
+              <div class="card-title">Diff Summary</div>
+              <pre class="workspace-diff">${branchDetail.diffStat}</pre>
+            </div>
+          `}
+        `}
+      <//>
+    `}
   `;
 }
