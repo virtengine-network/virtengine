@@ -19,6 +19,16 @@ import { clearLine, createInterface, cursorTo } from "node:readline";
 import net from "node:net";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Node.js Happy Eyeballs (RFC 8305) tries IPv6 first with a 250ms timeout
+// before falling back to IPv4.  On networks where IPv6 is unreachable, the
+// IPv4 fallback can exceed 250ms (Telegram's server round-trip is ~500ms)
+// causing fetch() to fail with ETIMEDOUT while curl works fine.  Raise the
+// attempt timeout so IPv4 has enough time to connect.
+if (typeof net.setDefaultAutoSelectFamilyAttemptTimeout === "function") {
+  net.setDefaultAutoSelectFamilyAttemptTimeout(2000);
+}
+
 import { acquireMonitorLock, runMaintenanceSweep } from "./maintenance.mjs";
 import { archiveCompletedTasks } from "./task-archiver.mjs";
 import {
