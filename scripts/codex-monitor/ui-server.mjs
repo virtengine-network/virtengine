@@ -62,9 +62,12 @@ function getDefaultPort() {
   return Number(process.env.TELEGRAM_UI_PORT || "0") || 0;
 }
 const DEFAULT_HOST = process.env.TELEGRAM_UI_HOST || "0.0.0.0";
-const ALLOW_UNSAFE = ["1", "true", "yes"].includes(
-  String(process.env.TELEGRAM_UI_ALLOW_UNSAFE || "").toLowerCase(),
-);
+// Lazy evaluation — .env may not be loaded yet when this module is first imported
+function isAllowUnsafe() {
+  return ["1", "true", "yes"].includes(
+    String(process.env.TELEGRAM_UI_ALLOW_UNSAFE || "").toLowerCase(),
+  );
+}
 const AUTH_MAX_AGE_SEC = Number(
   process.env.TELEGRAM_UI_AUTH_MAX_AGE_SEC || "86400",
 );
@@ -614,7 +617,7 @@ function checkSessionToken(req) {
 }
 
 function requireAuth(req) {
-  if (ALLOW_UNSAFE) return true;
+  if (isAllowUnsafe()) return true;
   // Session token (browser access)
   if (checkSessionToken(req)) return true;
   // Telegram initData HMAC
@@ -631,7 +634,7 @@ function requireAuth(req) {
 }
 
 function requireWsAuth(req, url) {
-  if (ALLOW_UNSAFE) return true;
+  if (isAllowUnsafe()) return true;
   // Session token (query param or cookie)
   if (checkSessionToken(req)) return true;
   if (sessionToken && url.searchParams.get("token") === sessionToken) return true;
@@ -1575,7 +1578,7 @@ async function handleApi(req, res, url) {
       uiUrl: getTelegramUiUrl(),
       lanIp: getLocalLanIp(),
       wsEnabled: true,
-      authRequired: !ALLOW_UNSAFE,
+      authRequired: !isAllowUnsafe(),
     });
     return;
   }
