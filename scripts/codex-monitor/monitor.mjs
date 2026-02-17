@@ -385,7 +385,7 @@ let {
 let watchPath = resolve(configWatchPath);
 let codexEnabled = config.codexEnabled;
 let plannerMode = configPlannerMode; // "codex-sdk" | "kanban" | "disabled"
-let kanbanBackend = String(kanbanConfig?.backend || "vk").toLowerCase();
+let kanbanBackend = String(kanbanConfig?.backend || "github").toLowerCase();
 let executorMode = configExecutorMode || getExecutorMode();
 let githubReconcile = githubReconcileConfig || {
   enabled: false,
@@ -409,11 +409,11 @@ try {
 
 function getActiveKanbanBackend() {
   try {
-    return String(getKanbanBackendName() || kanbanBackend || "vk")
+    return String(getKanbanBackendName() || kanbanBackend || "github")
       .trim()
       .toLowerCase();
   } catch {
-    return String(kanbanBackend || "vk")
+    return String(kanbanBackend || "github")
       .trim()
       .toLowerCase();
   }
@@ -1645,7 +1645,11 @@ function notifyErrorLine(line) {
     return;
   }
   if (vkErrorPatterns.some((pattern) => pattern.test(line))) {
-    notifyVkError(line);
+    // Only forward VK errors when VK backend is actually required.
+    // Prevents stale stdout lines from triggering false Telegram alerts.
+    if (isVkRuntimeRequired()) {
+      notifyVkError(line);
+    }
     return;
   }
 
@@ -10148,7 +10152,7 @@ function applyConfig(nextConfig, options = {}) {
   vkRecoveryCooldownMin = nextConfig.vkRecoveryCooldownMin;
   vkSpawnEnabled = nextConfig.vkSpawnEnabled;
   vkEnsureIntervalMs = nextConfig.vkEnsureIntervalMs;
-  kanbanBackend = String(nextConfig.kanban?.backend || kanbanBackend || "vk")
+  kanbanBackend = String(nextConfig.kanban?.backend || kanbanBackend || "github")
     .trim()
     .toLowerCase();
   try {

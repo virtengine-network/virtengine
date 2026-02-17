@@ -956,9 +956,9 @@ export function loadConfig(argv = process.argv, options = {}) {
 
   // ── Internal Executor ────────────────────────────────────
   // Allows the monitor to run tasks via agent-pool directly instead of
-  // (or alongside) the VK executor. Modes: "vk" (default), "internal", "hybrid".
+  // (or alongside) the VK executor. Modes: "internal" (default), "vk", "hybrid".
   const kanbanBackend = normalizeKanbanBackend(
-    process.env.KANBAN_BACKEND || configData.kanban?.backend || "vk",
+    process.env.KANBAN_BACKEND || configData.kanban?.backend || "github",
   );
   const kanban = Object.freeze({
     backend: kanbanBackend,
@@ -970,7 +970,7 @@ export function loadConfig(argv = process.argv, options = {}) {
   const executorMode = (
     process.env.EXECUTOR_MODE ||
     internalExecutorConfig.mode ||
-    "vk"
+    "internal"
   ).toLowerCase();
   const reviewAgentToggleRaw =
     process.env.INTERNAL_EXECUTOR_REVIEW_AGENT_ENABLED;
@@ -982,7 +982,7 @@ export function loadConfig(argv = process.argv, options = {}) {
   const internalExecutor = {
     mode: ["vk", "internal", "hybrid"].includes(executorMode)
       ? executorMode
-      : "vk",
+      : "internal",
     maxParallel: Number(
       process.env.INTERNAL_EXECUTOR_PARALLEL ||
         internalExecutorConfig.maxParallel ||

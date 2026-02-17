@@ -1757,7 +1757,7 @@ async function main() {
     // ── Step 7: Kanban + Execution ─────────────────────────
     heading("Step 7 of 9 — Kanban & Execution");
     const backendDefault = String(
-      process.env.KANBAN_BACKEND || configJson.kanban?.backend || "vk",
+      process.env.KANBAN_BACKEND || configJson.kanban?.backend || "github",
     )
       .trim()
       .toLowerCase();
@@ -1771,7 +1771,7 @@ async function main() {
     configJson.kanban = { backend: selectedKanbanBackend };
 
     const modeDefault = String(
-      process.env.EXECUTOR_MODE || configJson.internalExecutor?.mode || "vk",
+      process.env.EXECUTOR_MODE || configJson.internalExecutor?.mode || "internal",
     )
       .trim()
       .toLowerCase();
@@ -2424,8 +2424,8 @@ async function runNonInteractive({
   env.GITHUB_REPO = process.env.GITHUB_REPO || slug || "";
   env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
   env.TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
-  env.KANBAN_BACKEND = process.env.KANBAN_BACKEND || "vk";
-  env.EXECUTOR_MODE = process.env.EXECUTOR_MODE || "vk";
+  env.KANBAN_BACKEND = process.env.KANBAN_BACKEND || "github";
+  env.EXECUTOR_MODE = process.env.EXECUTOR_MODE || "internal";
   env.VK_BASE_URL = process.env.VK_BASE_URL || "http://127.0.0.1:54089";
   env.VK_RECOVERY_PORT = process.env.VK_RECOVERY_PORT || "54089";
   env.GITHUB_REPO_OWNER =
@@ -2477,10 +2477,10 @@ async function runNonInteractive({
   }
 
   configJson.projectName = env.PROJECT_NAME;
-  configJson.kanban = { backend: env.KANBAN_BACKEND || "vk" };
+  configJson.kanban = { backend: env.KANBAN_BACKEND || "github" };
   configJson.internalExecutor = {
     ...(configJson.internalExecutor || {}),
-    mode: env.EXECUTOR_MODE || "vk",
+    mode: env.EXECUTOR_MODE || "internal",
   };
   configJson.failover = {
     strategy: process.env.FAILOVER_STRATEGY || "next-in-line",
@@ -2591,8 +2591,8 @@ async function writeConfigFiles({ env, configJson, repoRoot, configDir }) {
     const vkPort = env.VK_RECOVERY_PORT || "54089";
     const vkBaseUrl = env.VK_BASE_URL || `http://127.0.0.1:${vkPort}`;
     const kanbanIsVk =
-      (env.KANBAN_BACKEND || "vk").toLowerCase() === "vk" ||
-      ["vk", "hybrid"].includes((env.EXECUTOR_MODE || "vk").toLowerCase());
+      (env.KANBAN_BACKEND || "github").toLowerCase() === "vk" ||
+      ["vk", "hybrid"].includes((env.EXECUTOR_MODE || "internal").toLowerCase());
     const tomlResult = ensureCodexConfig({
       vkBaseUrl,
       skipVk: !kanbanIsVk,

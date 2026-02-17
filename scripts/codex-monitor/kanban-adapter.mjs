@@ -2376,7 +2376,7 @@ function resolveBackendName() {
   }
 
   // 3. Default
-  return "vk";
+  return "github";
 }
 
 /**

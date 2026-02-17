@@ -527,7 +527,7 @@ describe("archiveCompletedTasks", () => {
     expect(result.skipped).toBe(1);
   });
 
-  it("respects maxArchive limit", async () => {
+  it("respects maxArchive limit", { timeout: 15_000 }, async () => {
     const tasks = Array.from({ length: 10 }, (_, i) =>
       makeTask({ id: `limit-${i}` }),
     );

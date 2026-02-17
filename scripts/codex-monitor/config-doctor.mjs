@@ -224,7 +224,7 @@ export function runConfigDoctor(options = {}) {
     });
   }
 
-  const backend = String(effective.KANBAN_BACKEND || "vk").toLowerCase();
+  const backend = String(effective.KANBAN_BACKEND || "github").toLowerCase();
   if (!["vk", "github", "jira"].includes(backend)) {
     issues.errors.push({
       code: "KANBAN_BACKEND",

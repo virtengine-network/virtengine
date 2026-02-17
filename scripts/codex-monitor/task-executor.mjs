@@ -493,7 +493,7 @@ class TaskExecutor {
    */
   constructor(options = {}) {
     const defaults = {
-      mode: "vk",
+      mode: "internal",
       maxParallel: 3,
       pollIntervalMs: 30_000,
       sdk: "auto",
@@ -3949,7 +3949,7 @@ export function loadExecutorOptionsFromConfig() {
       : configExec.reviewAgentEnabled !== false;
 
   return {
-    mode: envMode || configExec.mode || "vk",
+    mode: envMode || configExec.mode || "internal",
     maxParallel: Number(
       process.env.INTERNAL_EXECUTOR_PARALLEL || configExec.maxParallel || 3,
     ),
@@ -4042,13 +4042,13 @@ export function getExecutorMode() {
     const configMode = (
       config.internalExecutor?.mode ||
       config.taskExecutor?.mode ||
-      "vk"
+      "internal"
     ).toLowerCase();
     if (VALID_EXECUTOR_MODES.includes(configMode)) return configMode;
   } catch {
     /* ignore */
   }
-  return "vk";
+  return "internal";
 }
 
 /**

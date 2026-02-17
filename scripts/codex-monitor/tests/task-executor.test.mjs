@@ -146,7 +146,7 @@ describe("task-executor", () => {
   describe("TaskExecutor constructor", () => {
     it("sets default options when none provided", () => {
       const ex = new TaskExecutor();
-      expect(ex.mode).toBe("vk");
+      expect(ex.mode).toBe("internal");
       expect(ex.maxParallel).toBe(3);
       expect(ex.pollIntervalMs).toBe(30_000);
       expect(ex.sdk).toBe("auto");
@@ -760,7 +760,7 @@ describe("task-executor", () => {
     it("returns defaults when nothing configured", () => {
       loadConfig.mockReturnValue({});
       const opts = loadExecutorOptionsFromConfig();
-      expect(opts.mode).toBe("vk");
+      expect(opts.mode).toBe("internal");
       expect(opts.maxParallel).toBe(3);
       expect(opts.sdk).toBe("auto");
       expect(opts.maxRetries).toBe(2);
@@ -836,7 +836,7 @@ describe("task-executor", () => {
       });
 
       const opts = loadExecutorOptionsFromConfig();
-      expect(opts.mode).toBe("vk");
+      expect(opts.mode).toBe("internal");
       expect(opts.maxParallel).toBe(3);
     });
   });
@@ -911,16 +911,16 @@ describe("task-executor", () => {
       expect(getExecutorMode()).toBe("internal");
     });
 
-    it("returns 'vk' as default", () => {
+    it("returns 'internal' as default", () => {
       loadConfig.mockReturnValue({});
-      expect(getExecutorMode()).toBe("vk");
+      expect(getExecutorMode()).toBe("internal");
     });
 
-    it("returns 'vk' when loadConfig throws", () => {
+    it("returns 'internal' when loadConfig throws", () => {
       loadConfig.mockImplementation(() => {
         throw new Error("fail");
       });
-      expect(getExecutorMode()).toBe("vk");
+      expect(getExecutorMode()).toBe("internal");
     });
   });
 

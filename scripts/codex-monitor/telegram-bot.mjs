@@ -13,7 +13,7 @@
  */
 
 import { execSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import {
   mkdir,
   readFile,
@@ -65,6 +65,7 @@ import {
   getFirewallState,
   openFirewallPort,
   getSessionToken,
+  getTunnelUrl,
 } from "./ui-server.mjs";
 import {
   loadWorkspaceRegistry,
@@ -101,6 +102,8 @@ const telegramPollLockPath = resolve(
   "telegram-getupdates.lock",
 );
 const liveDigestStatePath = resolve(repoRoot, ".cache", "ve-live-digest.json");
+const fwCooldownPath = resolve(repoRoot, ".cache", "ve-fw-cooldown.json");
+const FW_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -2504,6 +2507,10 @@ const FAST_COMMANDS = new Set([
 ]);
 
 function getTelegramWebAppUrl(url) {
+  // Prefer cloudflared tunnel URL (valid cert, works in Telegram Mini App)
+  const tUrl = getTunnelUrl();
+  if (tUrl) return tUrl;
+
   const normalized = String(url || "")
     .trim()
     .replace(/\/+$/, "");
@@ -2833,7 +2840,7 @@ Object.assign(UI_SCREENS, {
         const paused = executor.isPaused?.() ? "paused" : "running";
         executorLine = `Executor: ${paused} • Slots ${status.activeSlots}/${status.maxParallel}`;
       } else {
-        executorLine = `Executor: ${_getExecutorMode?.() || "vk"}`;
+        executorLine = `Executor: ${_getExecutorMode?.() || "internal"}`;
       }
       return [
         "Pick a section below to manage Codex-Monitor.",
@@ -5670,7 +5677,7 @@ async function cmdExecutor(chatId, args) {
 
   // Get monitor functions for executor access
   const executor = _getInternalExecutor?.();
-  const mode = _getExecutorMode?.() || "vk";
+  const mode = _getExecutorMode?.() || "internal";
 
   if (sub === "slots") {
     if (!executor) {
@@ -7641,26 +7648,41 @@ export async function startTelegramBot() {
         await clearWebAppMenuButton();
       }
 
-      // Notify about firewall issues if detected
+      // Notify about firewall issues if detected (24h cooldown)
       if (reachable) {
         const fwState = getFirewallState();
         if (fwState && fwState.blocked) {
-          const port = new URL(telegramUiUrl || "http://localhost:5511").port || "5511";
-          await sendDirect(
-            telegramChatId,
-            `🔥 *Firewall Alert*\n\n` +
-            `Port ${port}/tcp appears blocked by \`${fwState.firewall}\`.\n` +
-            `The Control Center may not be reachable from your phone.\n\n` +
-            `To fix, run on the server:\n\`\`\`\n${fwState.allowCmd}\n\`\`\``,
-            {
-              parseMode: "Markdown",
-              reply_markup: {
-                inline_keyboard: [[
-                  { text: "🔓 Open Port (requires admin password on server)", callback_data: "fw:open" },
-                ]],
+          let skipCooldown = false;
+          try {
+            if (existsSync(fwCooldownPath)) {
+              const data = JSON.parse(readFileSync(fwCooldownPath, "utf8"));
+              if (Date.now() - (data.lastNotified || 0) < FW_COOLDOWN_MS) {
+                skipCooldown = true;
+              }
+            }
+          } catch { /* ignore corrupt file */ }
+          if (!skipCooldown) {
+            const port = new URL(telegramUiUrl || "http://localhost:5511").port || "5511";
+            await sendDirect(
+              telegramChatId,
+              `🔥 *Firewall Alert*\n\n` +
+              `Port ${port}/tcp appears blocked by \`${fwState.firewall}\`.\n` +
+              `The Control Center may not be reachable from your phone.\n\n` +
+              `To fix, run on the server:\n\`\`\`\n${fwState.allowCmd}\n\`\`\``,
+              {
+                parseMode: "Markdown",
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: "🔓 Open Port (requires admin password on server)", callback_data: "fw:open" },
+                  ]],
+                },
               },
-            },
-          );
+            );
+            try {
+              mkdirSync(resolve(repoRoot, ".cache"), { recursive: true });
+              writeFileSync(fwCooldownPath, JSON.stringify({ lastNotified: Date.now() }));
+            } catch { /* best effort */ }
+          }
         }
       }
     } catch (err) {

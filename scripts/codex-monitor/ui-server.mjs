@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { createHmac, randomBytes, X509Certificate } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { open, readFile, readdir, stat, writeFile } from "node:fs/promises";
@@ -312,6 +312,130 @@ export async function openFirewallPort(port) {
   };
 }
 
+// ── Cloudflared tunnel for trusted TLS ──────────────────────────────
+
+let tunnelUrl = null;
+let tunnelProcess = null;
+
+/** Return the tunnel URL (e.g. https://xxx.trycloudflare.com) or null. */
+export function getTunnelUrl() {
+  return tunnelUrl;
+}
+
+/**
+ * Detect if cloudflared binary is available.
+ */
+function findCloudflared() {
+  try {
+    const path = execSync("which cloudflared 2>/dev/null || where cloudflared 2>nul", {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    return path || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Start a cloudflared quick tunnel for the given local URL.
+ * Quick tunnels are free, require no account, and provide a random
+ * *.trycloudflare.com domain with a valid TLS cert.
+ * Returns the assigned public URL or null on failure.
+ */
+async function startTunnel(localPort) {
+  const tunnelMode = (process.env.TELEGRAM_UI_TUNNEL || "auto").toLowerCase();
+  if (tunnelMode === "disabled" || tunnelMode === "off" || tunnelMode === "0") {
+    console.log("[telegram-ui] tunnel disabled via TELEGRAM_UI_TUNNEL=disabled");
+    return null;
+  }
+
+  const cfBin = findCloudflared();
+  if (!cfBin) {
+    if (tunnelMode === "auto") {
+      console.log(
+        "[telegram-ui] cloudflared not found — Telegram Mini App will use self-signed cert (may be rejected).\n" +
+        "[telegram-ui] Install cloudflared for automatic trusted HTTPS: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
+      );
+      return null;
+    }
+    console.warn("[telegram-ui] cloudflared not found but TELEGRAM_UI_TUNNEL=cloudflared requested");
+    return null;
+  }
+
+  return new Promise((resolvePromise) => {
+    const localUrl = `https://localhost:${localPort}`;
+    const args = ["tunnel", "--url", localUrl, "--no-autoupdate"];
+    console.log(`[telegram-ui] starting cloudflared tunnel → ${localUrl}`);
+
+    const child = spawn(cfBin, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
+    });
+
+    let resolved = false;
+    let output = "";
+    const urlPattern = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.warn("[telegram-ui] cloudflared tunnel timed out after 30s");
+        resolvePromise(null);
+      }
+    }, 30_000);
+
+    function parseOutput(chunk) {
+      output += chunk;
+      const match = output.match(urlPattern);
+      if (match && !resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        tunnelUrl = match[0];
+        tunnelProcess = child;
+        console.log(`[telegram-ui] tunnel active: ${tunnelUrl}`);
+        resolvePromise(tunnelUrl);
+      }
+    }
+
+    child.stdout.on("data", (d) => parseOutput(d.toString()));
+    child.stderr.on("data", (d) => parseOutput(d.toString()));
+
+    child.on("error", (err) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        console.warn(`[telegram-ui] cloudflared failed: ${err.message}`);
+        resolvePromise(null);
+      }
+    });
+
+    child.on("exit", (code) => {
+      tunnelProcess = null;
+      tunnelUrl = null;
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        console.warn(`[telegram-ui] cloudflared exited with code ${code}`);
+        resolvePromise(null);
+      } else if (code !== 0 && code !== null) {
+        console.warn(`[telegram-ui] cloudflared tunnel exited (code ${code})`);
+      }
+    });
+  });
+}
+
+/** Stop the tunnel if running. */
+export function stopTunnel() {
+  if (tunnelProcess) {
+    try {
+      tunnelProcess.kill("SIGTERM");
+    } catch { /* ignore */ }
+    tunnelProcess = null;
+    tunnelUrl = null;
+  }
+}
+
 export function injectUiDependencies(deps = {}) {
   uiDeps = { ...uiDeps, ...deps };
 }
@@ -611,7 +735,7 @@ async function handleApi(req, res, url) {
 
   if (path === "/api/executor") {
     const executor = uiDeps.getInternalExecutor?.();
-    const mode = uiDeps.getExecutorMode?.() || "vk";
+    const mode = uiDeps.getExecutorMode?.() || "internal";
     jsonResponse(res, 200, {
       ok: true,
       data: executor?.getStatus?.() || null,
@@ -1453,11 +1577,20 @@ export async function startTelegramUiServer(options = {}) {
     }
   }
 
+  // Start cloudflared tunnel for trusted TLS (Telegram Mini App requires valid cert)
+  if (uiServerTls) {
+    const tUrl = await startTunnel(actualPort);
+    if (tUrl) {
+      console.log(`[telegram-ui] Telegram Mini App URL: ${tUrl}`);
+    }
+  }
+
   return uiServer;
 }
 
 export function stopTelegramUiServer() {
   if (!uiServer) return;
+  stopTunnel();
   for (const socket of wsClients) {
     try {
       socket.close();
