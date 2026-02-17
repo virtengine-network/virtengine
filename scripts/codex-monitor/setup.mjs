@@ -82,6 +82,15 @@ function hasSetupMarkers(dir) {
   return markers.some((name) => existsSync(resolve(dir, name)));
 }
 
+function hasConfigFiles(dir) {
+  const markers = [
+    "codex-monitor.config.json",
+    ".codex-monitor.json",
+    "codex-monitor.json",
+  ];
+  return markers.some((name) => existsSync(resolve(dir, name)));
+}
+
 function isPathInside(parent, child) {
   const rel = relative(parent, child);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
@@ -92,7 +101,7 @@ function resolveConfigDir(repoRoot) {
   if (explicit) return resolve(explicit);
   const repoPath = resolve(repoRoot || process.cwd());
   const packageDir = resolve(__dirname);
-  if (isPathInside(repoPath, packageDir) || hasSetupMarkers(packageDir)) {
+  if (isPathInside(repoPath, packageDir) || hasConfigFiles(packageDir)) {
     return packageDir;
   }
   const baseDir =
@@ -1203,6 +1212,44 @@ function normalizeSetupConfiguration({
     "internal",
   );
 
+  env.CODEX_MODEL_PROFILE = normalizeEnum(
+    env.CODEX_MODEL_PROFILE,
+    ["xl", "m"],
+    "xl",
+  );
+  env.CODEX_MODEL_PROFILE_SUBAGENT = normalizeEnum(
+    env.CODEX_MODEL_PROFILE_SUBAGENT || env.CODEX_SUBAGENT_PROFILE,
+    ["xl", "m"],
+    "m",
+  );
+  env.CODEX_MODEL_PROFILE_XL_PROVIDER = normalizeEnum(
+    env.CODEX_MODEL_PROFILE_XL_PROVIDER,
+    ["openai", "azure", "compatible"],
+    "openai",
+  );
+  env.CODEX_MODEL_PROFILE_M_PROVIDER = normalizeEnum(
+    env.CODEX_MODEL_PROFILE_M_PROVIDER,
+    ["openai", "azure", "compatible"],
+    "openai",
+  );
+  env.CODEX_MODEL_PROFILE_XL_MODEL =
+    env.CODEX_MODEL_PROFILE_XL_MODEL || "gpt-5.3-codex";
+  env.CODEX_MODEL_PROFILE_M_MODEL =
+    env.CODEX_MODEL_PROFILE_M_MODEL || "gpt-5.1-codex-mini";
+  env.CODEX_SUBAGENT_MODEL =
+    env.CODEX_SUBAGENT_MODEL || env.CODEX_MODEL_PROFILE_M_MODEL;
+  env.CODEX_AGENT_MAX_THREADS = String(
+    toPositiveInt(
+      env.CODEX_AGENT_MAX_THREADS || env.CODEX_AGENTS_MAX_THREADS || "12",
+      12,
+    ),
+  );
+  env.CODEX_SANDBOX = normalizeEnum(
+    env.CODEX_SANDBOX,
+    ["workspace-write", "danger-full-access", "read-only"],
+    "workspace-write",
+  );
+
   env.VK_BASE_URL = env.VK_BASE_URL || "http://127.0.0.1:54089";
   env.VK_RECOVERY_PORT = String(
     toPositiveInt(env.VK_RECOVERY_PORT || "54089", 54089),
@@ -1871,6 +1918,45 @@ async function main() {
       env.CODEX_MODEL = await prompt.ask("Model name", "");
     } else if (providerIdx === 4) {
       env.CODEX_SDK_DISABLED = "true";
+    }
+
+    if (providerIdx < 4) {
+      const configureProfiles = await prompt.confirm(
+        "Configure model profiles (xl/m) for one-click switching?",
+        true,
+      );
+      if (configureProfiles) {
+        const activeProfileIdx = await prompt.choose(
+          "Default active profile:",
+          ["xl (high quality)", "m (faster/cheaper)"],
+          0,
+        );
+        env.CODEX_MODEL_PROFILE = activeProfileIdx === 0 ? "xl" : "m";
+        env.CODEX_MODEL_PROFILE_SUBAGENT = activeProfileIdx === 0 ? "m" : "xl";
+
+        env.CODEX_MODEL_PROFILE_XL_MODEL = await prompt.ask(
+          "XL profile model",
+          process.env.CODEX_MODEL_PROFILE_XL_MODEL ||
+            process.env.CODEX_MODEL ||
+            "gpt-5.3-codex",
+        );
+        env.CODEX_MODEL_PROFILE_M_MODEL = await prompt.ask(
+          "M profile model",
+          process.env.CODEX_MODEL_PROFILE_M_MODEL || "gpt-5.1-codex-mini",
+        );
+
+        const providerName =
+          providerIdx === 1 ? "azure" : providerIdx === 3 ? "compatible" : "openai";
+        env.CODEX_MODEL_PROFILE_XL_PROVIDER =
+          process.env.CODEX_MODEL_PROFILE_XL_PROVIDER || providerName;
+        env.CODEX_MODEL_PROFILE_M_PROVIDER =
+          process.env.CODEX_MODEL_PROFILE_M_PROVIDER || providerName;
+
+        if (!env.CODEX_SUBAGENT_MODEL) {
+          env.CODEX_SUBAGENT_MODEL =
+            env.CODEX_MODEL_PROFILE_M_MODEL || "gpt-5.1-codex-mini";
+        }
+      }
     }
 
     // ── Step 6: Telegram ──────────────────────────────────
@@ -3352,6 +3438,26 @@ async function runNonInteractive({
     env.GITHUB_REPO = env.GITHUB_REPOSITORY;
   }
   env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+  env.CODEX_MODEL_PROFILE = process.env.CODEX_MODEL_PROFILE || "xl";
+  env.CODEX_MODEL_PROFILE_SUBAGENT =
+    process.env.CODEX_MODEL_PROFILE_SUBAGENT ||
+    process.env.CODEX_SUBAGENT_PROFILE ||
+    "m";
+  env.CODEX_MODEL_PROFILE_XL_MODEL =
+    process.env.CODEX_MODEL_PROFILE_XL_MODEL || "gpt-5.3-codex";
+  env.CODEX_MODEL_PROFILE_M_MODEL =
+    process.env.CODEX_MODEL_PROFILE_M_MODEL || "gpt-5.1-codex-mini";
+  env.CODEX_MODEL_PROFILE_XL_PROVIDER =
+    process.env.CODEX_MODEL_PROFILE_XL_PROVIDER || "openai";
+  env.CODEX_MODEL_PROFILE_M_PROVIDER =
+    process.env.CODEX_MODEL_PROFILE_M_PROVIDER || "openai";
+  env.CODEX_SUBAGENT_MODEL =
+    process.env.CODEX_SUBAGENT_MODEL || env.CODEX_MODEL_PROFILE_M_MODEL;
+  env.CODEX_AGENT_MAX_THREADS =
+    process.env.CODEX_AGENT_MAX_THREADS ||
+    process.env.CODEX_AGENTS_MAX_THREADS ||
+    "12";
+  env.CODEX_SANDBOX = process.env.CODEX_SANDBOX || "workspace-write";
   env.MAX_PARALLEL = process.env.MAX_PARALLEL || "6";
   if (!process.env.ORCHESTRATOR_SCRIPT) {
     const { orchestratorScriptEnvValue } = resolveSetupOrchestratorDefaults({
@@ -3533,6 +3639,22 @@ async function writeConfigFiles({ env, configJson, repoRoot, configDir }) {
   writeFileSync(configPath, JSON.stringify(configOut, null, 2) + "\n", "utf8");
   success(`Config written to ${relative(repoRoot, configPath)}`);
 
+  // If the setup target directory differs from the package dir but a local .env
+  // exists there without a config file, seed a config copy to avoid mismatches.
+  const packageDir = resolve(__dirname);
+  if (resolve(packageDir) !== resolve(targetDir)) {
+    const packageEnvPath = resolve(packageDir, ".env");
+    const packageConfigPath = resolve(packageDir, "codex-monitor.config.json");
+    if (existsSync(packageEnvPath) && !existsSync(packageConfigPath)) {
+      writeFileSync(
+        packageConfigPath,
+        JSON.stringify(configOut, null, 2) + "\n",
+        "utf8",
+      );
+      success(`Config written to ${relative(repoRoot, packageConfigPath)}`);
+    }
+  }
+
   // ── Workspace VS Code settings ─────────────────────────
   const vscodeSettingsResult = writeWorkspaceVsCodeSettings(repoRoot, env);
   if (vscodeSettingsResult.updated) {
@@ -3641,6 +3763,9 @@ async function writeConfigFiles({ env, configJson, repoRoot, configDir }) {
   }
   if (
     !env.OPENAI_API_KEY &&
+    !env.AZURE_OPENAI_API_KEY &&
+    !env.CODEX_MODEL_PROFILE_XL_API_KEY &&
+    !env.CODEX_MODEL_PROFILE_M_API_KEY &&
     !parseBooleanEnvValue(env.CODEX_SDK_DISABLED, false)
   ) {
     info("No API key set — AI analysis & autofix will be disabled.");

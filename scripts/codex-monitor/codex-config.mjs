@@ -17,6 +17,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { resolveCodexProfileRuntime } from "./codex-model-profiles.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -51,6 +52,9 @@ const RECOMMENDED_STREAM_IDLE_TIMEOUT_MS = 3_600_000; // 60 minutes
 const AGENT_SDK_HEADER = "[agent_sdk]";
 const AGENT_SDK_CAPS_HEADER = "[agent_sdk.capabilities]";
 
+const AGENTS_HEADER = "[agents]";
+const DEFAULT_AGENT_MAX_THREADS = 12;
+
 const DEFAULT_AGENT_SDK_BLOCK = [
   "",
   "# ── Agent SDK selection (added by codex-monitor) ──",
@@ -68,6 +72,16 @@ const DEFAULT_AGENT_SDK_BLOCK = [
   "vscode_tools = false",
   "",
 ].join("\n");
+
+const buildAgentsBlock = (maxThreads) =>
+  [
+    "",
+    "# ── Agent limits (added by codex-monitor) ──",
+    AGENTS_HEADER,
+    "# Max concurrent agent threads per Codex session.",
+    `max_threads = ${maxThreads}`,
+    "",
+  ].join("\n");
 
 // ── Feature Flags ────────────────────────────────────────────────────────────
 
@@ -112,6 +126,87 @@ const CRITICAL_ALWAYS_ON_FEATURES = new Set([
   "shell_tool",
   "unified_exec",
 ]);
+
+function parsePositiveInt(value) {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function resolveAgentMaxThreads(envOverrides = process.env) {
+  const raw =
+    envOverrides.CODEX_AGENT_MAX_THREADS ??
+    envOverrides.CODEX_AGENTS_MAX_THREADS ??
+    envOverrides.CODEX_MAX_THREADS;
+  if (raw !== undefined) {
+    return {
+      value: parsePositiveInt(raw),
+      explicit: true,
+      raw,
+    };
+  }
+  return {
+    value: DEFAULT_AGENT_MAX_THREADS,
+    explicit: false,
+    raw: null,
+  };
+}
+
+export function ensureAgentMaxThreads(
+  toml,
+  { maxThreads, overwrite = false } = {},
+) {
+  const result = {
+    toml,
+    changed: false,
+    existing: null,
+    applied: null,
+    added: false,
+    updated: false,
+    skipped: false,
+  };
+
+  const desired = parsePositiveInt(maxThreads);
+  if (!desired) {
+    result.skipped = true;
+    return result;
+  }
+  result.applied = desired;
+
+  const headerIdx = toml.indexOf(AGENTS_HEADER);
+  if (headerIdx === -1) {
+    result.changed = true;
+    result.added = true;
+    result.toml = toml.trimEnd() + buildAgentsBlock(desired);
+    return result;
+  }
+
+  const afterHeader = headerIdx + AGENTS_HEADER.length;
+  const nextSection = toml.indexOf("\n[", afterHeader);
+  const sectionEnd = nextSection === -1 ? toml.length : nextSection;
+  let section = toml.substring(afterHeader, sectionEnd);
+
+  const maxThreadsRegex = /^max_threads\s*=\s*(\d+)/m;
+  const match = section.match(maxThreadsRegex);
+  if (match) {
+    result.existing = parsePositiveInt(match[1]);
+    if (overwrite && result.existing !== desired) {
+      section = section.replace(maxThreadsRegex, `max_threads = ${desired}`);
+      result.changed = true;
+      result.updated = true;
+    }
+  } else {
+    section = section.trimEnd() + `\nmax_threads = ${desired}\n`;
+    result.changed = true;
+    result.added = true;
+  }
+
+  if (result.changed) {
+    result.toml = toml.substring(0, afterHeader) + section + toml.substring(sectionEnd);
+  }
+
+  return result;
+}
 
 /**
  * Check whether config has a [features] section.
@@ -542,6 +637,60 @@ export function setStreamTimeout(toml, providerName, value) {
   return toml.substring(0, afterHeader) + section + toml.substring(sectionEnd);
 }
 
+function hasModelProviderSection(toml, providerName) {
+  return new RegExp(`^\\[model_providers\\.${escapeRegex(providerName)}\\]`, "m").test(
+    toml,
+  );
+}
+
+function buildModelProviderSection(providerName, config = {}) {
+  const lines = ["", `[model_providers.${providerName}]`];
+  if (config.name) lines.push(`name = "${config.name}"`);
+  if (config.baseUrl) lines.push(`base_url = "${config.baseUrl}"`);
+  if (config.envKey) lines.push(`env_key = "${config.envKey}"`);
+  if (config.wireApi) lines.push(`wire_api = "${config.wireApi}"`);
+  if (config.model) lines.push(`model = "${config.model}"`);
+  lines.push("");
+  return lines.join("\n");
+}
+
+function ensureModelProviderSectionsFromEnv(toml, env = process.env) {
+  const added = [];
+  const { env: resolvedEnv, active } = resolveCodexProfileRuntime(env);
+
+  const activeProvider = String(active?.provider || "").toLowerCase();
+  const activeBaseUrl =
+    active?.baseUrl ||
+    resolvedEnv.OPENAI_BASE_URL ||
+    "";
+
+  if (
+    activeProvider === "azure" ||
+    String(activeBaseUrl).toLowerCase().includes(".openai.azure.com")
+  ) {
+    if (!hasModelProviderSection(toml, "azure")) {
+      toml += buildModelProviderSection("azure", {
+        name: "Azure OpenAI",
+        baseUrl: activeBaseUrl,
+        envKey: "AZURE_OPENAI_API_KEY",
+        wireApi: "responses",
+        model: active?.model || resolvedEnv.CODEX_MODEL || "",
+      });
+      added.push("azure");
+    }
+  }
+
+  if (!hasModelProviderSection(toml, "openai")) {
+    toml += buildModelProviderSection("openai", {
+      name: "OpenAI",
+      envKey: "OPENAI_API_KEY",
+    });
+    added.push("openai");
+  }
+
+  return { toml, added };
+}
+
 /**
  * Ensure retry settings exist on a model provider section.
  * Adds sensible defaults for long-running agentic workloads.
@@ -601,9 +750,12 @@ export function ensureCodexConfig({
     vkEnvUpdated: false,
     agentSdkAdded: false,
     featuresAdded: [],
+    agentMaxThreads: null,
+    agentMaxThreadsSkipped: null,
     sandboxAdded: false,
     shellEnvAdded: false,
     commonMcpAdded: false,
+    profileProvidersAdded: [],
     timeoutsFixed: [],
     retriesAdded: [],
     noChanges: false,
@@ -696,7 +848,27 @@ export function ensureCodexConfig({
     }
   }
 
-  // ── 1d. Ensure sandbox permissions ────────────────────────
+  // ── 1d. Ensure agent thread limits ──────────────────────
+
+  {
+    const desired = resolveAgentMaxThreads(env);
+    const ensured = ensureAgentMaxThreads(toml, {
+      maxThreads: desired.value,
+      overwrite: desired.explicit,
+    });
+    if (ensured.changed) {
+      toml = ensured.toml;
+      result.agentMaxThreads = {
+        from: ensured.existing,
+        to: ensured.applied,
+        explicit: desired.explicit,
+      };
+    } else if (ensured.skipped && desired.explicit) {
+      result.agentMaxThreadsSkipped = desired.raw;
+    }
+  }
+
+  // ── 1e. Ensure sandbox permissions ────────────────────────
 
   if (!hasSandboxPermissions(toml)) {
     const envPerms = env.CODEX_SANDBOX_PERMISSIONS || "";
@@ -768,6 +940,12 @@ export function ensureCodexConfig({
   }
 
   // ── 2. Audit and fix stream timeouts ──────────────────────
+
+  {
+    const ensured = ensureModelProviderSectionsFromEnv(toml, env);
+    toml = ensured.toml;
+    result.profileProvidersAdded = ensured.added;
+  }
 
   const timeouts = auditStreamTimeouts(toml);
   for (const t of timeouts) {
@@ -855,9 +1033,29 @@ export function printConfigSummary(result, log = console.log) {
     log("  ✅ Added shell environment policy (inherit=all)");
   }
 
+  if (result.agentMaxThreads) {
+    const fromLabel =
+      result.agentMaxThreads.from === null
+        ? "unset"
+        : String(result.agentMaxThreads.from);
+    const toLabel = String(result.agentMaxThreads.to);
+    const note = result.agentMaxThreads.explicit ? " (env override)" : "";
+    log(`  ✅ Set agents.max_threads: ${fromLabel} → ${toLabel}${note}`);
+  } else if (result.agentMaxThreadsSkipped) {
+    log(
+      `  ⚠ Skipped agents.max_threads (invalid value: ${result.agentMaxThreadsSkipped})`,
+    );
+  }
+
   if (result.commonMcpAdded) {
     log(
       "  ✅ Added common MCP servers (context7, sequential-thinking, playwright, microsoft-docs)",
+    );
+  }
+
+  if (result.profileProvidersAdded && result.profileProvidersAdded.length > 0) {
+    log(
+      `  ✅ Added model provider sections: ${result.profileProvidersAdded.join(", ")}`,
     );
   }
 

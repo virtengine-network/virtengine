@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCommonMcpBlocks,
+  ensureAgentMaxThreads,
   ensureFeatureFlags,
 } from "../codex-config.mjs";
 
@@ -33,5 +34,30 @@ describe("codex-config defaults", () => {
     expect(toml).toContain("shell_tool = true");
     expect(toml).toContain("unified_exec = true");
     expect(toml).toContain("undo = false");
+  });
+
+  it("adds agents.max_threads when missing", () => {
+    const input = ["[features]", "child_agents_md = true", ""].join("\n");
+    const result = ensureAgentMaxThreads(input, { maxThreads: 12 });
+    expect(result.changed).toBe(true);
+    expect(result.toml).toContain("[agents]");
+    expect(result.toml).toContain("max_threads = 12");
+  });
+
+  it("overwrites agents.max_threads when explicitly requested", () => {
+    const input = ["[agents]", "max_threads = 4", "", "[features]"].join("\n");
+    const result = ensureAgentMaxThreads(input, {
+      maxThreads: 12,
+      overwrite: true,
+    });
+    expect(result.changed).toBe(true);
+    expect(result.toml).toContain("max_threads = 12");
+  });
+
+  it("does not overwrite agents.max_threads by default", () => {
+    const input = ["[agents]", "max_threads = 4", ""].join("\n");
+    const result = ensureAgentMaxThreads(input, { maxThreads: 12 });
+    expect(result.changed).toBe(false);
+    expect(result.toml).toContain("max_threads = 4");
   });
 });
