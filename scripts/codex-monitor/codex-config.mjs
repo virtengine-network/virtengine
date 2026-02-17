@@ -5,6 +5,9 @@
  *   1. A vibe_kanban MCP server section with the correct env vars
  *   2. Sufficient stream_idle_timeout_ms on all model providers
  *   3. Recommended defaults for long-running agentic workloads
+ *   4. Feature flags for sub-agents, memory, undo, collaboration
+ *   5. Sandbox permissions and shell environment policy
+ *   6. Common MCP servers (context7, microsoft-docs)
  *
  * Uses string-based TOML manipulation (no parser dependency) — we only
  * append or patch well-known sections rather than rewriting the whole file.
@@ -65,6 +68,194 @@ const DEFAULT_AGENT_SDK_BLOCK = [
   "vscode_tools = false",
   "",
 ].join("\n");
+
+// ── Feature Flags ────────────────────────────────────────────────────────────
+
+/**
+ * Feature flags that should be enabled for sub-agents, collaboration,
+ * memory, and continuous operation.  Keys are the [features] TOML keys;
+ * values are { default, envVar, comment }.
+ */
+const RECOMMENDED_FEATURES = {
+  // Sub-agents & collaboration
+  child_agents_md:        { default: true, envVar: "CODEX_FEATURES_CHILD_AGENTS_MD",   comment: "Enable sub-agent discovery via CODEX.md" },
+  collab:                 { default: true, envVar: "CODEX_FEATURES_COLLAB",             comment: "Enable collaboration mode" },
+  collaboration_modes:    { default: true, envVar: "CODEX_FEATURES_COLLABORATION_MODES", comment: "Enable collaboration mode selection" },
+
+  // Continuity & recovery
+  memory_tool:            { default: true, envVar: "CODEX_FEATURES_MEMORY_TOOL",        comment: "Persistent memory across sessions" },
+  undo:                   { default: true, envVar: "CODEX_FEATURES_UNDO",               comment: "Safe rollback of agent changes" },
+  steer:                  { default: true, envVar: "CODEX_FEATURES_STEER",              comment: "Live steering during runs" },
+  personality:            { default: true, envVar: "CODEX_FEATURES_PERSONALITY",         comment: "Agent personality persistence" },
+
+  // Sandbox & execution
+  use_linux_sandbox_bwrap:{ default: true, envVar: "CODEX_FEATURES_BWRAP",              comment: "Linux bubblewrap sandbox" },
+  shell_tool:             { default: true, envVar: null,                                 comment: "Shell tool access" },
+  unified_exec:           { default: true, envVar: null,                                 comment: "Unified execution" },
+  shell_snapshot:         { default: true, envVar: null,                                 comment: "Shell state snapshots" },
+  request_rule:           { default: true, envVar: null,                                 comment: "Request-level approval rules" },
+
+  // Performance & networking
+  enable_request_compression: { default: true, envVar: null,                             comment: "Compress requests" },
+  remote_models:          { default: true, envVar: null,                                 comment: "Remote model support" },
+  skill_mcp_dependency_install: { default: true, envVar: null,                           comment: "Auto-install MCP skill deps" },
+
+  // Experimental (disabled by default unless explicitly enabled)
+  apps:                   { default: true, envVar: "CODEX_FEATURES_APPS",               comment: "ChatGPT Apps integration" },
+};
+
+/**
+ * Check whether config has a [features] section.
+ */
+export function hasFeaturesSection(toml) {
+  return /^\[features\]/m.test(toml);
+}
+
+/**
+ * Check whether config has a [shell_environment_policy] section.
+ */
+export function hasShellEnvPolicy(toml) {
+  return /^\[shell_environment_policy\]/m.test(toml);
+}
+
+/**
+ * Check whether config has sandbox_permissions set (top-level key).
+ */
+export function hasSandboxPermissions(toml) {
+  return /^sandbox_permissions\s*=/m.test(toml);
+}
+
+/**
+ * Build a [features] block with the recommended flags.
+ * Reads environment overrides: set CODEX_FEATURES_<NAME>=false to disable.
+ *
+ * @param {object} [envOverrides]  Optional env map (defaults to process.env)
+ * @returns {string}  TOML block
+ */
+export function buildFeaturesBlock(envOverrides = process.env) {
+  const lines = [
+    "",
+    "# ── Feature flags (added by codex-monitor) ──",
+    "[features]",
+  ];
+
+  for (const [key, meta] of Object.entries(RECOMMENDED_FEATURES)) {
+    let enabled = meta.default;
+    // Check env override
+    if (meta.envVar && envOverrides[meta.envVar] !== undefined) {
+      enabled = parseBoolEnv(envOverrides[meta.envVar]);
+    }
+    if (meta.comment) lines.push(`# ${meta.comment}`);
+    lines.push(`${key} = ${enabled}`);
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Ensure all recommended feature flags are present in an existing [features]
+ * section.  Only adds missing keys — never overwrites user choices.
+ *
+ * @param {string} toml  Current config.toml content
+ * @param {object} [envOverrides]  Optional env map (defaults to process.env)
+ * @returns {{ toml: string, added: string[] }}
+ */
+export function ensureFeatureFlags(toml, envOverrides = process.env) {
+  const added = [];
+
+  if (!hasFeaturesSection(toml)) {
+    toml += buildFeaturesBlock(envOverrides);
+    added.push(...Object.keys(RECOMMENDED_FEATURES));
+    return { toml, added };
+  }
+
+  // Find the [features] section boundaries
+  const header = "[features]";
+  const headerIdx = toml.indexOf(header);
+  const afterHeader = headerIdx + header.length;
+  const nextSection = toml.indexOf("\n[", afterHeader);
+  const sectionEnd = nextSection === -1 ? toml.length : nextSection;
+  let section = toml.substring(afterHeader, sectionEnd);
+
+  for (const [key, meta] of Object.entries(RECOMMENDED_FEATURES)) {
+    const keyRegex = new RegExp(`^${escapeRegex(key)}\\s*=`, "m");
+    if (!keyRegex.test(section)) {
+      let enabled = meta.default;
+      if (meta.envVar && envOverrides[meta.envVar] !== undefined) {
+        enabled = parseBoolEnv(envOverrides[meta.envVar]);
+      }
+      section = section.trimEnd() + `\n${key} = ${enabled}\n`;
+      added.push(key);
+    }
+  }
+
+  toml = toml.substring(0, afterHeader) + section + toml.substring(sectionEnd);
+  return { toml, added };
+}
+
+/**
+ * Build the sandbox_permissions top-level key.
+ * Default: ["disk-full-read-access"] for agentic workloads.
+ *
+ * @param {string} [envValue]  CODEX_SANDBOX_PERMISSIONS env var value
+ * @returns {string}  TOML line(s)
+ */
+export function buildSandboxPermissions(envValue) {
+  const perms = envValue
+    ? envValue.split(",").map((s) => `"${s.trim()}"`)
+    : ['"disk-full-read-access"'];
+  return `\n# Sandbox permissions (added by codex-monitor)\nsandbox_permissions = [${perms.join(", ")}]\n`;
+}
+
+/**
+ * Build the [shell_environment_policy] section.
+ * Default: inherit = "all" so .NET, Go, Node etc. env vars are visible.
+ *
+ * @param {string} [policy]  "all" | "none" | "allowlist"
+ * @returns {string}  TOML block
+ */
+export function buildShellEnvPolicy(policy = "all") {
+  return [
+    "",
+    "# ── Shell environment policy (added by codex-monitor) ──",
+    "[shell_environment_policy]",
+    `inherit = "${policy}"`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Check whether config has a [mcp_servers.context7] section.
+ */
+export function hasContext7Mcp(toml) {
+  return /^\[mcp_servers\.context7\]/m.test(toml);
+}
+
+/**
+ * Check whether config has a [mcp_servers.microsoft-docs] or microsoft_docs section.
+ */
+export function hasMicrosoftDocsMcp(toml) {
+  return /^\[mcp_servers\.microsoft[_-]docs\]/m.test(toml);
+}
+
+/**
+ * Build MCP server blocks for context7 and microsoft-docs.
+ * These are universally useful for documentation lookups.
+ */
+export function buildCommonMcpBlocks() {
+  return [
+    "",
+    "# ── Common MCP servers (added by codex-monitor) ──",
+    "[mcp_servers.context7]",
+    'command = "npx"',
+    'args = ["-y", "@upstash/context7-mcp"]',
+    "",
+    "[mcp_servers.microsoft-docs]",
+    'url = "https://learn.microsoft.com/api/mcp"',
+    "",
+  ].join("\n");
+}
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -353,16 +544,20 @@ export function ensureRetrySettings(toml, providerName) {
  * High-level: ensure the config.toml is properly configured for codex-monitor.
  *
  * Returns an object describing what was done:
- *   { created, vkAdded, vkEnvUpdated, timeoutsFixed[], retriesAdded[], path }
+ *   { created, vkAdded, vkEnvUpdated, timeoutsFixed[], retriesAdded[],
+ *     featuresAdded[], sandboxAdded, shellEnvAdded, commonMcpAdded, path }
  *
  * @param {object} opts
- * @param {string} [opts.vkBaseUrl]
+ * @param {string}  [opts.vkBaseUrl]
+ * @param {boolean} [opts.skipVk]
  * @param {boolean} [opts.dryRun]  If true, returns result without writing
+ * @param {object}  [opts.env]     Environment overrides (defaults to process.env)
  */
 export function ensureCodexConfig({
   vkBaseUrl = "http://127.0.0.1:54089",
   skipVk = false,
   dryRun = false,
+  env = process.env,
 } = {}) {
   const result = {
     path: CONFIG_PATH,
@@ -371,6 +566,10 @@ export function ensureCodexConfig({
     vkRemoved: false,
     vkEnvUpdated: false,
     agentSdkAdded: false,
+    featuresAdded: [],
+    sandboxAdded: false,
+    shellEnvAdded: false,
+    commonMcpAdded: false,
     timeoutsFixed: [],
     retriesAdded: [],
     noChanges: false,
@@ -453,6 +652,61 @@ export function ensureCodexConfig({
     result.agentSdkAdded = true;
   }
 
+  // ── 1c. Ensure feature flags (sub-agents, memory, etc.) ──
+
+  {
+    const { toml: updated, added } = ensureFeatureFlags(toml, env);
+    if (added.length > 0) {
+      toml = updated;
+      result.featuresAdded = added;
+    }
+  }
+
+  // ── 1d. Ensure sandbox permissions ────────────────────────
+
+  if (!hasSandboxPermissions(toml)) {
+    const envPerms = env.CODEX_SANDBOX_PERMISSIONS || "";
+    toml = toml.trimEnd() + "\n" + buildSandboxPermissions(envPerms || undefined);
+    result.sandboxAdded = true;
+  }
+
+  // ── 1e. Ensure shell environment policy ───────────────────
+
+  if (!hasShellEnvPolicy(toml)) {
+    const policy = env.CODEX_SHELL_ENV_POLICY || "all";
+    toml += buildShellEnvPolicy(policy);
+    result.shellEnvAdded = true;
+  }
+
+  // ── 1f. Ensure common MCP servers (context7, MS docs) ─────
+
+  {
+    const needsContext7 = !hasContext7Mcp(toml);
+    const needsMsDocs = !hasMicrosoftDocsMcp(toml);
+    if (needsContext7 || needsMsDocs) {
+      // Only add the full block if both are missing; otherwise add individually
+      if (needsContext7 && needsMsDocs) {
+        toml += buildCommonMcpBlocks();
+      } else if (needsContext7) {
+        toml += [
+          "",
+          "[mcp_servers.context7]",
+          'command = "npx"',
+          'args = ["-y", "@upstash/context7-mcp"]',
+          "",
+        ].join("\n");
+      } else {
+        toml += [
+          "",
+          "[mcp_servers.microsoft-docs]",
+          'url = "https://learn.microsoft.com/api/mcp"',
+          "",
+        ].join("\n");
+      }
+      result.commonMcpAdded = true;
+    }
+  }
+
   // ── 2. Audit and fix stream timeouts ──────────────────────
 
   const timeouts = auditStreamTimeouts(toml);
@@ -526,6 +780,25 @@ export function printConfigSummary(result, log = console.log) {
     log("  ✅ Added agent SDK selection block");
   }
 
+  if (result.featuresAdded && result.featuresAdded.length > 0) {
+    const key = result.featuresAdded.length <= 5
+      ? result.featuresAdded.join(", ")
+      : `${result.featuresAdded.length} feature flags`;
+    log(`  ✅ Added feature flags: ${key}`);
+  }
+
+  if (result.sandboxAdded) {
+    log("  ✅ Added sandbox permissions (disk-full-read-access)");
+  }
+
+  if (result.shellEnvAdded) {
+    log("  ✅ Added shell environment policy (inherit=all)");
+  }
+
+  if (result.commonMcpAdded) {
+    log("  ✅ Added common MCP servers (context7, microsoft-docs)");
+  }
+
   for (const t of result.timeoutsFixed) {
     const fromLabel =
       t.from === null ? "not set" : `${(t.from / 1000).toFixed(0)}s`;
@@ -546,4 +819,10 @@ export function printConfigSummary(result, log = console.log) {
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseBoolEnv(value) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (["0", "false", "no", "off", "n"].includes(raw)) return false;
+  return true;
 }

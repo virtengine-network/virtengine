@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve, dirname, isAbsolute, relative } from "node:path";
+import { resolve, dirname, isAbsolute, relative, join } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILES = [
@@ -349,6 +350,57 @@ export function runConfigDoctor(options = {}) {
       code: "ENV_MISSING",
       message: "No .env file found in config directory or repo root.",
       fix: "Run codex-monitor --setup to generate .env",
+    });
+  }
+
+  // ── Codex config.toml feature flag / sub-agent checks ──────────────────────
+  const codexConfigToml = join(homedir(), ".codex", "config.toml");
+  if (existsSync(codexConfigToml)) {
+    const toml = readFileSync(codexConfigToml, "utf-8");
+    if (!/^\[features\]/m.test(toml)) {
+      issues.warnings.push({
+        code: "CODEX_NO_FEATURES",
+        message: "Codex config.toml has no [features] section — sub-agents and advanced features disabled.",
+        fix: "Run codex-monitor --setup to auto-configure features, or add [features] manually",
+      });
+    } else {
+      if (!/child_agents_md\s*=\s*true/i.test(toml)) {
+        issues.warnings.push({
+          code: "CODEX_NO_CHILD_AGENTS",
+          message: "child_agents_md not enabled — Codex cannot spawn sub-agents or discover CODEX.md.",
+          fix: 'Add child_agents_md = true under [features] in ~/.codex/config.toml',
+        });
+      }
+      if (!/memory_tool\s*=\s*true/i.test(toml)) {
+        issues.warnings.push({
+          code: "CODEX_NO_MEMORY",
+          message: "memory_tool not enabled — Codex has no persistent memory across sessions.",
+          fix: 'Add memory_tool = true under [features] in ~/.codex/config.toml',
+        });
+      }
+    }
+    if (!/^\[sandbox_permissions\]/m.test(toml)) {
+      issues.warnings.push({
+        code: "CODEX_NO_SANDBOX_PERMS",
+        message: "No [sandbox_permissions] in Codex config — may restrict agent file access.",
+        fix: "Run codex-monitor --setup to auto-configure sandbox permissions",
+      });
+    }
+  } else {
+    issues.warnings.push({
+      code: "CODEX_CONFIG_MISSING",
+      message: "~/.codex/config.toml not found — Codex CLI may not be configured.",
+      fix: "Run codex-monitor --setup or 'codex --setup' to create initial config",
+    });
+  }
+
+  // ── CODEX.md repo-level check ──────────────────────────────────────────────
+  const codexMd = join(repoRoot, "CODEX.md");
+  if (!existsSync(codexMd)) {
+    issues.warnings.push({
+      code: "CODEX_MD_MISSING",
+      message: "No CODEX.md in repo root — Codex sub-agents cannot discover repo instructions.",
+      fix: "Create CODEX.md (copy from AGENTS.md) for Codex CLI sub-agent discovery",
     });
   }
 

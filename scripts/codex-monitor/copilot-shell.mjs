@@ -126,7 +126,8 @@ function logSessionEvent(logPath, event) {
 
 /**
  * Build CLI arguments for the Copilot subprocess.
- * Enables experimental features (fleet, autopilot), auto-permissions, and autonomy.
+ * Enables experimental features (fleet, autopilot), auto-permissions,
+ * sub-agents, and autonomy.
  */
 function buildCliArgs() {
   const args = [];
@@ -157,6 +158,19 @@ function buildCliArgs() {
   // Disable built-in MCPs if custom ones are provided exclusively
   if (envFlagEnabled(process.env.COPILOT_DISABLE_BUILTIN_MCPS)) {
     args.push("--disable-builtin-mcps");
+  }
+
+  // Enable parallel tool execution for sub-agent-like concurrency
+  if (!envFlagEnabled(process.env.COPILOT_DISABLE_PARALLEL_TOOLS)) {
+    // Parallel is on by default; only disable if explicitly set
+  } else {
+    args.push("--disable-parallel-tools-execution");
+  }
+
+  // Add additional MCP config if available (for fleet/task sub-agent MCP servers)
+  const mcpConfigPath = process.env.COPILOT_ADDITIONAL_MCP_CONFIG;
+  if (mcpConfigPath) {
+    args.push("--additional-mcp-config", mcpConfigPath);
   }
 
   if (args.length > 0) {

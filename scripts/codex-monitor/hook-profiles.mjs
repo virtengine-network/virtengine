@@ -8,11 +8,19 @@ const __dirname = dirname(__filename);
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_HOOK_SCHEMA = "https://json-schema.org/draft/2020-12/schema";
 const LEGACY_BRIDGE_SNIPPET = "scripts/codex-monitor/agent-hook-bridge.mjs";
+const DEFAULT_BRIDGE_SCRIPT_PATH = "scripts/codex-monitor/agent-hook-bridge.mjs";
 
-const BRIDGE_COMMAND = Object.freeze([
-  process.execPath,
-  resolve(__dirname, "agent-hook-bridge.mjs"),
-]);
+function getHookNodeBinary() {
+  const configured = String(process.env.CODEX_MONITOR_HOOK_NODE_BIN || "").trim();
+  return configured || "node";
+}
+
+function getHookBridgeScriptPath() {
+  const configured = String(
+    process.env.CODEX_MONITOR_HOOK_BRIDGE_PATH || "",
+  ).trim();
+  return configured || DEFAULT_BRIDGE_SCRIPT_PATH;
+}
 
 export const HOOK_PROFILES = Object.freeze([
   "strict",
@@ -125,7 +133,36 @@ function buildShellCommand(args) {
 }
 
 function makeBridgeCommandTokens(agent, event) {
-  return [...BRIDGE_COMMAND, "--agent", agent, "--event", event];
+  return [
+    getHookNodeBinary(),
+    getHookBridgeScriptPath(),
+    "--agent",
+    agent,
+    "--event",
+    event,
+  ];
+}
+
+function isBridgeCommandString(command) {
+  return String(command || "").includes("agent-hook-bridge.mjs");
+}
+
+function isPortableNodeCommandToken(token) {
+  const normalized = String(token || "").trim().toLowerCase();
+  return normalized === "node";
+}
+
+function isPortableBridgeScriptToken(token) {
+  return String(token || "") === DEFAULT_BRIDGE_SCRIPT_PATH;
+}
+
+function isCopilotBridgeCommandPortable(commandTokens) {
+  if (!Array.isArray(commandTokens) || commandTokens.length < 2) return false;
+  if (!isBridgeCommandString(commandTokens.join(" "))) return false;
+  return (
+    isPortableNodeCommandToken(commandTokens[0]) &&
+    isPortableBridgeScriptToken(commandTokens[1])
+  );
 }
 
 function deepClone(value) {
@@ -428,9 +465,7 @@ function mergeClaudeSettings(existing, generated) {
       const commands = Array.isArray(entry.hooks)
         ? entry.hooks.map((h) => String(h?.command || ""))
         : [];
-      const hasLegacyBridge = commands.some((cmd) =>
-        cmd.includes(LEGACY_BRIDGE_SNIPPET),
-      );
+      const hasLegacyBridge = commands.some((cmd) => isBridgeCommandString(cmd));
       return !hasLegacyBridge;
     });
 
@@ -463,6 +498,34 @@ function mergeClaudeSettings(existing, generated) {
 
 function hasLegacyBridgeInCopilotConfig(config) {
   if (!config || typeof config !== "object") return false;
+  const events = [
+    ...((Array.isArray(config.sessionStart) && config.sessionStart) || []),
+    ...((Array.isArray(config.sessionEnd) && config.sessionEnd) || []),
+    ...Object.values(config.preToolUse || {}).flatMap((hooks) =>
+      Array.isArray(hooks) ? hooks : [],
+    ),
+    ...Object.values(config.postToolUse || {}).flatMap((hooks) =>
+      Array.isArray(hooks) ? hooks : [],
+    ),
+  ];
+
+  let foundAnyBridgeHook = false;
+  for (const entry of events) {
+    const command = entry?.command;
+    if (Array.isArray(command) && command.some((part) => isBridgeCommandString(part))) {
+      foundAnyBridgeHook = true;
+      if (!isCopilotBridgeCommandPortable(command)) return true;
+      continue;
+    }
+
+    if (typeof command === "string" && isBridgeCommandString(command)) {
+      foundAnyBridgeHook = true;
+      return true;
+    }
+  }
+
+  if (!foundAnyBridgeHook) return false;
+
   const scan = (value) => {
     if (typeof value === "string") {
       return value.includes(LEGACY_BRIDGE_SNIPPET);

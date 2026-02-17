@@ -106,6 +106,56 @@ describe("hook-profiles", () => {
       ? copilotCmd.join(" ")
       : String(copilotCmd || "");
     expect(copilotJoined).toContain("agent-hook-bridge.mjs");
+    expect(Array.isArray(copilotCmd)).toBe(true);
+    expect(copilotCmd[0]).toBe("node");
+    expect(copilotCmd[1]).toBe("scripts/codex-monitor/agent-hook-bridge.mjs");
+  });
+
+  it("auto-migrates non-portable copilot bridge commands", async () => {
+    const hooksDir = resolve(rootDir, ".github", "hooks");
+    await mkdir(hooksDir, { recursive: true });
+
+    const legacyConfig = {
+      version: 1,
+      sessionStart: [
+        {
+          type: "command",
+          command: [
+            "C:\\\\nvm4w\\\\nodejs\\\\node.exe",
+            "C:\\\\Users\\\\jon\\\\AppData\\\\Local\\\\nvm\\\\v24.11.1\\\\node_modules\\\\@virtengine\\\\codex-monitor\\\\agent-hook-bridge.mjs",
+            "--agent",
+            "copilot",
+            "--event",
+            "sessionStart",
+          ],
+          timeout: 60,
+        },
+      ],
+    };
+
+    await writeFile(
+      resolve(hooksDir, "codex-monitor.hooks.json"),
+      JSON.stringify(legacyConfig, null, 2),
+      "utf8",
+    );
+
+    const result = scaffoldAgentHookFiles(rootDir, {
+      profile: "strict",
+      targets: ["copilot"],
+      overwriteExisting: false,
+      enabled: true,
+    });
+
+    expect(result.updated).toContain(".github/hooks/codex-monitor.hooks.json");
+
+    const migratedConfig = JSON.parse(
+      await readFile(resolve(hooksDir, "codex-monitor.hooks.json"), "utf8"),
+    );
+    const migratedCommand = migratedConfig.sessionStart?.[0]?.command || [];
+    expect(migratedCommand[0]).toBe("node");
+    expect(migratedCommand[1]).toBe(
+      "scripts/codex-monitor/agent-hook-bridge.mjs",
+    );
   });
 
   it("merges with existing claude settings", async () => {
