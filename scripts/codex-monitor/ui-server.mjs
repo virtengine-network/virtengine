@@ -54,7 +54,10 @@ const statusPath = resolve(repoRoot, ".cache", "ve-orchestrator-status.json");
 const logsDir = resolve(__dirname, "logs");
 const agentLogsDir = resolve(repoRoot, ".cache", "agent-logs");
 
-const DEFAULT_PORT = Number(process.env.TELEGRAM_UI_PORT || "0") || 0;
+// Read port lazily — .env may not be loaded at module import time
+function getDefaultPort() {
+  return Number(process.env.TELEGRAM_UI_PORT || "0") || 0;
+}
 const DEFAULT_HOST = process.env.TELEGRAM_UI_HOST || "0.0.0.0";
 const ALLOW_UNSAFE = ["1", "true", "yes"].includes(
   String(process.env.TELEGRAM_UI_ALLOW_UNSAFE || "").toLowerCase(),
@@ -86,9 +89,11 @@ let uiDeps = {};
 const TLS_CACHE_DIR = resolve(__dirname, ".cache", "tls");
 const TLS_CERT_PATH = resolve(TLS_CACHE_DIR, "server.crt");
 const TLS_KEY_PATH = resolve(TLS_CACHE_DIR, "server.key");
-const TLS_DISABLED = ["1", "true", "yes"].includes(
-  String(process.env.TELEGRAM_UI_TLS_DISABLE || "").toLowerCase(),
-);
+function isTlsDisabled() {
+  return ["1", "true", "yes"].includes(
+    String(process.env.TELEGRAM_UI_TLS_DISABLE || "").toLowerCase(),
+  );
+}
 
 /**
  * Ensures a self-signed TLS certificate exists in .cache/tls/.
@@ -1105,14 +1110,14 @@ async function handleStatic(req, res, url) {
 export async function startTelegramUiServer(options = {}) {
   if (uiServer) return uiServer;
 
-  const port = Number(options.port || DEFAULT_PORT);
+  const port = Number(options.port || getDefaultPort());
   if (!port) return null;
 
   injectUiDependencies(options.dependencies || {});
 
   // Auto-TLS: generate a self-signed cert for HTTPS unless explicitly disabled
   let tlsOpts = null;
-  if (!TLS_DISABLED) {
+  if (!isTlsDisabled()) {
     tlsOpts = ensureSelfSignedCert();
   }
 
