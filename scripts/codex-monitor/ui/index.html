@@ -6,13 +6,31 @@
   <meta name="color-scheme" content="dark light" />
   <title>VirtEngine Control Center</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://esm.sh" crossorigin />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <div id="boot-loader" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:Inter,system-ui,sans-serif;color:#aaa;background:#1a1a2e;">
+      <div style="font-size:24px;margin-bottom:12px;">⚡ VirtEngine</div>
+      <div style="font-size:14px;" id="boot-status">Loading Control Center…</div>
+    </div>
+  </div>
   <script type="module" src="app.js"></script>
+  <script>
+    // Signal Telegram that the page has loaded (before ES modules finish loading)
+    try { if (window.Telegram && Telegram.WebApp) Telegram.WebApp.ready(); } catch(e) {}
+    // Fallback: if the ES module fails to load within 12s, show an error
+    setTimeout(function() {
+      var el = document.getElementById('boot-loader');
+      if (el) {
+        var s = document.getElementById('boot-status');
+        if (s) s.innerHTML = '⚠️ Failed to load app modules.<br><small style="color:#888">Check your internet connection (CDN: esm.sh) or try refreshing.</small>';
+      }
+    }, 12000);
+  </script>
 </body>
 </html>
