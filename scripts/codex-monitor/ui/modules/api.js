@@ -107,7 +107,13 @@ export function connectWebSocket() {
   const wsUrl = new URL(`${proto}://${globalThis.location.host}/ws`);
 
   const initData = getInitData();
-  if (initData) wsUrl.searchParams.set("initData", initData);
+  if (initData) {
+    wsUrl.searchParams.set("initData", initData);
+  } else {
+    // Pass session token from cookie for browser-based WS auth
+    const m = (document.cookie || "").match(/(?:^|;\s*)ve_session=([^;]+)/);
+    if (m) wsUrl.searchParams.set("token", m[1]);
+  }
 
   const socket = new WebSocket(wsUrl.toString());
   ws = socket;

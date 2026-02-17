@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { createHmac, X509Certificate } from "node:crypto";
+import { createHmac, randomBytes, X509Certificate } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -84,6 +84,14 @@ let uiServerTls = false;
 let wsServer = null;
 const wsClients = new Set();
 let uiDeps = {};
+
+// ── Session token (auto-generated per startup for browser access) ────
+let sessionToken = "";
+
+/** Return the current session token (for logging the browser URL). */
+export function getSessionToken() {
+  return sessionToken;
+}
 
 // ── Auto-TLS self-signed certificate generation ──────────────────────
 const TLS_CACHE_DIR = resolve(__dirname, ".cache", "tls");
@@ -228,8 +236,32 @@ function validateInitData(initData, botToken) {
   return true;
 }
 
+function parseCookie(req, name) {
+  const header = req.headers.cookie || "";
+  for (const part of header.split(";")) {
+    const [k, ...rest] = part.split("=");
+    if (k.trim() === name) return rest.join("=").trim();
+  }
+  return "";
+}
+
+function checkSessionToken(req) {
+  if (!sessionToken) return false;
+  // Bearer header
+  const authHeader = req.headers.authorization || "";
+  if (authHeader.startsWith("Bearer ") && authHeader.slice(7) === sessionToken) {
+    return true;
+  }
+  // Cookie
+  if (parseCookie(req, "ve_session") === sessionToken) return true;
+  return false;
+}
+
 function requireAuth(req) {
   if (ALLOW_UNSAFE) return true;
+  // Session token (browser access)
+  if (checkSessionToken(req)) return true;
+  // Telegram initData HMAC
   const initData =
     req.headers["x-telegram-initdata"] ||
     req.headers["x-telegram-init-data"] ||
@@ -244,6 +276,10 @@ function requireAuth(req) {
 
 function requireWsAuth(req, url) {
   if (ALLOW_UNSAFE) return true;
+  // Session token (query param or cookie)
+  if (checkSessionToken(req)) return true;
+  if (sessionToken && url.searchParams.get("token") === sessionToken) return true;
+  // Telegram initData HMAC
   const initData =
     req.headers["x-telegram-initdata"] ||
     req.headers["x-telegram-init-data"] ||
@@ -1126,6 +1162,19 @@ export async function startTelegramUiServer(options = {}) {
       req.url || "/",
       `http://${req.headers.host || "localhost"}`,
     );
+
+    // Token exchange: ?token=<hex> → set session cookie and redirect to clean URL
+    const qToken = url.searchParams.get("token");
+    if (qToken && sessionToken && qToken === sessionToken) {
+      const secure = uiServerTls ? "; Secure" : "";
+      res.writeHead(302, {
+        "Set-Cookie": `ve_session=${sessionToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400${secure}`,
+        Location: url.pathname || "/",
+      });
+      res.end();
+      return;
+    }
+
     if (url.pathname.startsWith("/api/")) {
       await handleApi(req, res, url);
       return;
@@ -1204,6 +1253,9 @@ export async function startTelegramUiServer(options = {}) {
     });
   });
 
+  // Generate a session token for browser-based access (no config needed)
+  sessionToken = randomBytes(32).toString("hex");
+
   await new Promise((resolveReady, rejectReady) => {
     uiServer.once("error", rejectReady);
     uiServer.listen(port, options.host || DEFAULT_HOST, () => {
@@ -1229,6 +1281,7 @@ export async function startTelegramUiServer(options = {}) {
     console.log(`[telegram-ui] TLS enabled (self-signed) — Telegram WebApp buttons will use HTTPS`);
   }
   console.log(`[telegram-ui] LAN access: ${protocol}://${lanIp}:${actualPort}`);
+  console.log(`[telegram-ui] Browser access: ${protocol}://${lanIp}:${actualPort}/?token=${sessionToken}`);
 
   return uiServer;
 }
@@ -1258,6 +1311,7 @@ export function stopTelegramUiServer() {
   }
   uiServer = null;
   uiServerTls = false;
+  sessionToken = "";
 }
 
 export { getLocalLanIp };
