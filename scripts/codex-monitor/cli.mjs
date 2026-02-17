@@ -156,12 +156,12 @@ function showHelp() {
   EXAMPLES
     codex-monitor                                          # start with defaults
     codex-monitor --setup                                  # interactive setup
-    codex-monitor --script ./my-orchestrator.ps1            # custom script
+    codex-monitor --script ./my-orchestrator.sh             # custom script
     codex-monitor --args "-MaxParallel 4" --no-telegram-bot # custom args
     codex-monitor --no-codex --no-autofix                  # minimal mode
 
   DOCS
-    https://github.com/virtengine/virtengine/tree/main/scripts/codex-monitor
+    https://www.npmjs.com/package/@virtengine/codex-monitor
 `);
 }
 
@@ -639,6 +639,11 @@ async function main() {
   if (args.includes("--no-auto-update")) {
     process.env.CODEX_MONITOR_SKIP_AUTO_UPDATE = "1";
   }
+
+  // Mark all child processes as codex-monitor managed.
+  // The agent-hook-bridge checks this to avoid firing hooks for standalone
+  // agent sessions that happen to have hook config files in their tree.
+  process.env.VE_MANAGED = "1";
 
   // Handle --setup
   if (args.includes("--setup") || args.includes("setup")) {

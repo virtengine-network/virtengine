@@ -385,7 +385,7 @@ let {
 let watchPath = resolve(configWatchPath);
 let codexEnabled = config.codexEnabled;
 let plannerMode = configPlannerMode; // "codex-sdk" | "kanban" | "disabled"
-let kanbanBackend = String(kanbanConfig?.backend || "github").toLowerCase();
+let kanbanBackend = String(kanbanConfig?.backend || "internal").toLowerCase();
 let executorMode = configExecutorMode || getExecutorMode();
 let githubReconcile = githubReconcileConfig || {
   enabled: false,
@@ -409,11 +409,11 @@ try {
 
 function getActiveKanbanBackend() {
   try {
-    return String(getKanbanBackendName() || kanbanBackend || "github")
+    return String(getKanbanBackendName() || kanbanBackend || "internal")
       .trim()
       .toLowerCase();
   } catch {
-    return String(kanbanBackend || "github")
+    return String(kanbanBackend || "internal")
       .trim()
       .toLowerCase();
   }
@@ -481,6 +481,14 @@ function isMonitorMonitorEnabled() {
   }
   // Default ON in devmode unless explicitly disabled.
   return true;
+}
+
+function isSelfRestartWatcherEnabled() {
+  const explicit = process.env.SELF_RESTART_WATCH_ENABLED;
+  if (explicit !== undefined && String(explicit).trim() !== "") {
+    return !isFalsyFlag(explicit);
+  }
+  return isDevMode();
 }
 
 const MONITOR_MONITOR_DEFAULT_TIMEOUT_MS = 6 * 60 * 60 * 1000;
@@ -749,6 +757,7 @@ let pendingSelfRestart = null; // filename that triggered a deferred restart
 let selfRestartDeferCount = 0;
 let deferredMonitorRestartTimer = null;
 let pendingMonitorRestartReason = "";
+let selfRestartWatcherEnabled = isSelfRestartWatcherEnabled();
 
 // ── Self-restart marker: detect if this process was spawned by a code-change restart
 const selfRestartMarkerPath = resolve(
@@ -1783,8 +1792,8 @@ async function startVibeKanbanProcess() {
       if (pidMatch) {
         stalePid = pidMatch[1];
       }
-    } else {
-      // Linux/macOS: use lsof
+    } else if (commandExists("lsof")) {
+      // Linux/macOS: use lsof when available
       const portCheck = execSync(`lsof -ti :${vkRecoveryPort}`, {
         encoding: "utf8",
         timeout: 5000,
@@ -1794,6 +1803,10 @@ async function startVibeKanbanProcess() {
       if (pids.length > 0) {
         stalePid = pids[0]; // Take first PID if multiple
       }
+    } else {
+      console.warn(
+        `[monitor] lsof not found on PATH; skipping stale PID scan for port ${vkRecoveryPort}`,
+      );
     }
 
     if (stalePid) {
@@ -7121,8 +7134,10 @@ function buildTaskUrl(task, projectId) {
     }
     // GitHub issue URL format
     const cfg = loadConfig();
-    const slug =
-      process.env.GITHUB_REPOSITORY || cfg?.repoSlug || "virtengine/virtengine";
+    const slug = process.env.GITHUB_REPOSITORY || cfg?.repoSlug || "";
+    if (!slug || slug === "unknown/unknown") {
+      return null;
+    }
     return `https://github.com/${slug}/issues/${String(taskId).replace(/^#/, "")}`;
   }
 
@@ -8217,7 +8232,7 @@ async function analyzeWithCodex(logPath, logText, reason) {
   // The new approach uses `codex exec` with --full-auto so the agent can
   // actually read files, inspect git status, and give a real diagnosis.
   const logTail = logText.slice(-12000);
-  const prompt = `You are diagnosing why the VirtEngine orchestrator exited.
+  const prompt = `You are diagnosing why the codex-monitor orchestrator exited.
 You have FULL READ ACCESS to the workspace. Use it.
 
 ## Context
@@ -9586,7 +9601,35 @@ async function startProcess() {
   let orchestratorArgs = [...scriptArgs];
 
   if (scriptLower.endsWith(".ps1")) {
-    orchestratorCmd = process.env.PWSH_PATH || "pwsh";
+    const configuredPwsh = String(process.env.PWSH_PATH || "").trim();
+    const pwshCmd = configuredPwsh || "pwsh";
+    const pwshExists = configuredPwsh
+      ? configuredPwsh.includes("/") || configuredPwsh.includes("\\")
+        ? existsSync(configuredPwsh)
+        : commandExists(configuredPwsh)
+      : commandExists("pwsh");
+    if (!pwshExists) {
+      const pwshLabel = configuredPwsh
+        ? `PWSH_PATH (${configuredPwsh})`
+        : "pwsh on PATH";
+      const pauseMs = Math.max(orchestratorPauseMs, 60_000);
+      const pauseMin = Math.max(1, Math.round(pauseMs / 60_000));
+      monitorSafeModeUntil = Math.max(monitorSafeModeUntil, Date.now() + pauseMs);
+      console.error(
+        `[monitor] .ps1 orchestrator selected but PowerShell runtime is unavailable (${pwshLabel}). ` +
+          `Install PowerShell 7+ or set PWSH_PATH correctly. Pausing restarts for ${pauseMin}m.`,
+      );
+      if (telegramToken && telegramChatId) {
+        void sendTelegramMessage(
+          `❌ .ps1 orchestrator selected, but PowerShell runtime is unavailable (${pwshLabel}).\n` +
+            `Install PowerShell 7+ or set PWSH_PATH to a valid executable path. ` +
+            `Pausing restarts for ${pauseMin} minute(s).`,
+        );
+      }
+      setTimeout(startProcess, pauseMs);
+      return;
+    }
+    orchestratorCmd = pwshCmd;
     orchestratorArgs = ["-File", scriptPath, ...scriptArgs];
   } else if (scriptLower.endsWith(".sh")) {
     const shellCmd =
@@ -9598,7 +9641,9 @@ async function startProcess() {
             : ""
         : commandExists("bash")
           ? "bash"
-          : "sh";
+          : commandExists("sh")
+            ? "sh"
+            : "";
     if (!shellCmd) {
       console.error(
         "[monitor] shell-mode orchestrator selected (.sh) but no bash/sh runtime is available on PATH.",
@@ -10145,6 +10190,7 @@ function applyConfig(nextConfig, options = {}) {
   const prevTelegramCommandEnabled = telegramCommandEnabled;
   const prevTelegramBotEnabled = telegramBotEnabled;
   const prevPreflightEnabled = preflightEnabled;
+  const prevSelfRestartWatcherEnabled = selfRestartWatcherEnabled;
   const prevVkRuntimeRequired = isVkRuntimeRequired();
 
   config = nextConfig;
@@ -10206,6 +10252,7 @@ function applyConfig(nextConfig, options = {}) {
   executorScheduler = nextConfig.scheduler;
   agentSdk = nextConfig.agentSdk;
   envPaths = nextConfig.envPaths;
+  selfRestartWatcherEnabled = isSelfRestartWatcherEnabled();
   const nextVkRuntimeRequired = isVkRuntimeRequired();
 
   if (prevVkRuntimeRequired && !nextVkRuntimeRequired) {
@@ -10259,6 +10306,19 @@ function applyConfig(nextConfig, options = {}) {
 
   if (prevWatchPath !== watchPath || watchEnabled === false) {
     void startWatcher(true);
+  }
+  if (prevSelfRestartWatcherEnabled !== selfRestartWatcherEnabled) {
+    if (selfRestartWatcherEnabled) {
+      startSelfWatcher();
+      console.log(
+        "[monitor] self-restart watcher enabled (devmode or SELF_RESTART_WATCH_ENABLED=1)",
+      );
+    } else {
+      stopSelfWatcher();
+      console.log(
+        "[monitor] self-restart watcher disabled (set SELF_RESTART_WATCH_ENABLED=1 to force-enable)",
+      );
+    }
   }
   startEnvWatchers();
 
@@ -10647,7 +10707,13 @@ startAutoUpdateLoop({
 
 startWatcher();
 startEnvWatchers();
-startSelfWatcher();
+if (selfRestartWatcherEnabled) {
+  startSelfWatcher();
+} else {
+  console.log(
+    "[monitor] self-restart watcher disabled (default outside devmode)",
+  );
+}
 startInteractiveShell();
 if (isVkRuntimeRequired()) {
   ensureAnomalyDetector();
@@ -10786,7 +10852,7 @@ function restartGitHubReconciler() {
       ? `${process.env.GITHUB_REPO_OWNER}/${process.env.GITHUB_REPO_NAME}`
       : "") ||
     repoSlug ||
-    "virtengine/virtengine";
+    "unknown/unknown";
 
   ghReconciler = startGitHubReconciler({
     repoSlug: repo,
@@ -11132,14 +11198,26 @@ if (isExecutorDisabled()) {
         syncEngine = createSyncEngine({
           projectId,
           syncIntervalMs: 60_000, // 1 minute
+          syncPolicy: kanbanConfig?.syncPolicy || "internal-primary",
           sendTelegram:
             telegramToken && telegramChatId
               ? (msg) => void sendTelegramMessage(msg)
               : null,
+          onAlert:
+            telegramToken && telegramChatId
+              ? (event) =>
+                  void sendTelegramMessage(
+                    `⚠️ Project sync alert: ${event?.message || "unknown"}`,
+                  )
+              : null,
+          failureAlertThreshold:
+            config?.githubProjectSync?.alertFailureThreshold || 3,
+          rateLimitAlertThreshold:
+            config?.githubProjectSync?.rateLimitAlertThreshold || 3,
         });
         syncEngine.start();
         console.log(
-          `[monitor] sync engine started (interval: 60s, backend=${activeKanbanBackend}, project=${projectId})`,
+          `[monitor] sync engine started (interval: 60s, backend=${activeKanbanBackend}, policy=${kanbanConfig?.syncPolicy || "internal-primary"}, project=${projectId})`,
         );
       } else {
         console.log(
@@ -11159,7 +11237,7 @@ if (isExecutorDisabled()) {
 if (isExecutorDisabled()) {
   // Already logged above
 } else if (executorMode === "vk" || executorMode === "hybrid") {
-  // Start VK orchestrator (ve-orchestrator.ps1)
+  // Start VK orchestrator (ve-orchestrator.sh/ps1)
   startProcess();
 } else {
   console.log("[monitor] VK orchestrator skipped (executor mode = internal)");

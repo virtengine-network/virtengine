@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const mockTaskStore = vi.hoisted(() => ({
   getTask: vi.fn(),
@@ -23,6 +23,20 @@ vi.mock("../task-store.mjs", () => mockTaskStore);
 vi.mock("../kanban-adapter.mjs", () => mockKanban);
 
 const { SyncEngine } = await import("../sync-engine.mjs");
+
+const ORIGINAL_SYNC_POLICY = process.env.KANBAN_SYNC_POLICY;
+
+beforeEach(() => {
+  process.env.KANBAN_SYNC_POLICY = "bidirectional";
+});
+
+afterEach(() => {
+  if (ORIGINAL_SYNC_POLICY === undefined) {
+    delete process.env.KANBAN_SYNC_POLICY;
+  } else {
+    process.env.KANBAN_SYNC_POLICY = ORIGINAL_SYNC_POLICY;
+  }
+});
 
 describe("sync-engine backward external status handling", () => {
   beforeEach(() => {
@@ -81,6 +95,65 @@ describe("sync-engine backward external status handling", () => {
       syncDirty: true,
     });
     expect(result.pulled).toBe(0);
+  });
+
+  it("preserves internal status under internal-primary sync policy", async () => {
+    mockTaskStore.getAllTasks.mockReturnValue([
+      {
+        id: "task-keep-internal",
+        projectId: "proj-1",
+        status: "inreview",
+        externalStatus: "inprogress",
+        syncDirty: false,
+        meta: {},
+      },
+    ]);
+    mockKanban.listTasks.mockResolvedValue([
+      { id: "task-keep-internal", status: "done", projectId: "proj-1" },
+    ]);
+
+    const engine = new SyncEngine({
+      projectId: "proj-1",
+      syncPolicy: "internal-primary",
+    });
+    const result = await engine.pullFromExternal();
+
+    expect(mockTaskStore.setTaskStatus).not.toHaveBeenCalled();
+    expect(mockTaskStore.updateTask).toHaveBeenCalledWith(
+      "task-keep-internal",
+      expect.objectContaining({
+        externalStatus: "done",
+      }),
+    );
+    expect(mockTaskStore.markSynced).toHaveBeenCalledWith(
+      "task-keep-internal",
+    );
+    expect(result.pulled).toBe(0);
+  });
+
+  it("does not cancel internal tasks deleted externally under internal-primary policy", async () => {
+    mockTaskStore.getAllTasks.mockReturnValue([
+      {
+        id: "task-survives",
+        projectId: "proj-1",
+        status: "todo",
+        externalStatus: "todo",
+        syncDirty: false,
+      },
+    ]);
+    mockKanban.listTasks.mockResolvedValue([]);
+
+    const engine = new SyncEngine({
+      projectId: "proj-1",
+      syncPolicy: "internal-primary",
+    });
+    await engine.pullFromExternal();
+
+    expect(mockTaskStore.setTaskStatus).not.toHaveBeenCalledWith(
+      "task-survives",
+      "cancelled",
+      "external",
+    );
   });
 });
 
@@ -375,6 +448,68 @@ describe("sync-engine syncTask backend ID handling", () => {
     expect(mockKanban.updateTaskStatus).not.toHaveBeenCalled();
     expect(mockTaskStore.markSynced).toHaveBeenCalledWith(
       "28c1b2e9-0e9e-4eeb-83ac-90c80e7f4a2e",
+    );
+  });
+});
+
+describe("sync-engine monitoring counters and alerts", () => {
+  const originalRateLimitDelay = SyncEngine.RATE_LIMIT_DELAY_MS;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockKanban.getKanbanBackendName.mockReturnValue("github");
+    SyncEngine.RATE_LIMIT_DELAY_MS = 0;
+  });
+
+  afterEach(() => {
+    SyncEngine.RATE_LIMIT_DELAY_MS = originalRateLimitDelay;
+  });
+
+  it("increments success/failure metrics across full sync cycles", async () => {
+    mockTaskStore.getAllTasks.mockReturnValue([]);
+    mockKanban.listTasks.mockResolvedValue([]);
+    mockTaskStore.getDirtyTasks.mockReturnValue([]);
+
+    const engine = new SyncEngine({ projectId: "proj-1" });
+
+    await engine.fullSync();
+    let status = engine.getStatus();
+    expect(status.metrics.syncSuccesses).toBe(1);
+    expect(status.metrics.syncFailures).toBe(0);
+    expect(status.metrics.lastSuccessAt).toBeTruthy();
+
+    mockKanban.listTasks.mockRejectedValueOnce(new Error("list failed"));
+    await engine.fullSync();
+    status = engine.getStatus();
+    expect(status.metrics.syncFailures).toBe(1);
+    expect(status.metrics.lastFailureAt).toBeTruthy();
+    expect(status.metrics.lastError).toContain("list failed");
+  });
+
+  it("tracks rate-limit usage and emits alert hook", async () => {
+    const onAlert = vi.fn();
+    mockTaskStore.getDirtyTasks.mockReturnValue([
+      { id: "42", status: "inprogress", syncDirty: true },
+    ]);
+    mockKanban.updateTaskStatus
+      .mockRejectedValueOnce(new Error("429 rate limit exceeded"))
+      .mockResolvedValueOnce({});
+
+    const engine = new SyncEngine({
+      projectId: "proj-1",
+      onAlert,
+      rateLimitAlertThreshold: 1,
+    });
+
+    const result = await engine.pushToExternal();
+    const status = engine.getStatus();
+
+    expect(result.pushed).toBe(1);
+    expect(status.metrics.rateLimitEvents).toBe(1);
+    expect(status.metrics.rateLimitRetrySuccesses).toBe(1);
+    expect(status.metrics.alertsTriggered).toBeGreaterThanOrEqual(1);
+    expect(onAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "rate_limit" }),
     );
   });
 });

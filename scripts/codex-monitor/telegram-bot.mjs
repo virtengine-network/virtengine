@@ -1,5 +1,5 @@
 /**
- * telegram-bot.mjs — Two-way Telegram ↔ primary agent for VirtEngine monitor.
+ * telegram-bot.mjs — Two-way Telegram ↔ primary agent for codex-monitor.
  *
  * Polls Telegram Bot API for incoming messages, routes slash commands to
  * built-in handlers, and forwards free-text to the persistent primary agent.
@@ -96,6 +96,7 @@ import {
 
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const repoRoot = resolveRepoRoot();
+const codexMonitorDir = __dirname;
 const statusPath = resolve(repoRoot, ".cache", "ve-orchestrator-status.json");
 const telegramPollLockPath = resolve(
   repoRoot,
@@ -105,6 +106,12 @@ const telegramPollLockPath = resolve(
 const liveDigestStatePath = resolve(repoRoot, ".cache", "ve-live-digest.json");
 const fwCooldownPath = resolve(repoRoot, ".cache", "ve-fw-cooldown.json");
 const FW_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function resolveVeKanbanPs1Path() {
+  const modulePath = resolve(codexMonitorDir, "ve-kanban.ps1");
+  if (existsSync(modulePath)) return modulePath;
+  return resolve(repoRoot, "scripts", "codex-monitor", "ve-kanban.ps1");
+}
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -741,6 +748,16 @@ function getBrowserUiUrl() {
   } catch {
     return base;
   }
+}
+
+function syncUiUrlsFromServer() {
+  const currentUiUrl = getTelegramUiUrl?.() || null;
+  telegramUiUrl = currentUiUrl;
+  telegramWebAppUrl = getTelegramWebAppUrl(currentUiUrl);
+  return {
+    uiUrl: telegramUiUrl,
+    webAppUrl: telegramWebAppUrl,
+  };
 }
 
 // ── Agent session state (for follow-up steering & bottom-pinning) ────────────
@@ -2246,7 +2263,15 @@ const COMMANDS = {
   },
   "/kanban": {
     handler: cmdKanban,
-    desc: "View/switch kanban backend: /kanban [vk|github|jira]",
+    desc: "View/switch kanban backend: /kanban [internal|vk|github|jira]",
+  },
+  "/autobacklog": {
+    handler: cmdAutoBacklog,
+    desc: "Experimental backlog replenishment controls",
+  },
+  "/requirements": {
+    handler: cmdRequirements,
+    desc: "Set project requirements profile",
   },
   "/threads": {
     handler: cmdThreads,
@@ -2444,9 +2469,9 @@ async function registerBotCommands() {
 }
 
 async function setWebAppMenuButton(url) {
-  if (!telegramToken || !url) return;
+  if (!telegramToken || !url) return false;
   const webAppUrl = getTelegramWebAppUrl(url);
-  if (!webAppUrl) return;
+  if (!webAppUrl) return false;
   try {
     const payload = {
       menu_button: {
@@ -2471,10 +2496,12 @@ async function setWebAppMenuButton(url) {
       throw new Error(details.trim());
     }
     console.log(`[telegram-bot] chat menu button set to ${webAppUrl}`);
+    return true;
   } catch (err) {
     if (telegramApiReachable !== false) {
       console.warn(`[telegram-bot] setChatMenuButton error: ${err.message}`);
     }
+    return false;
   }
 }
 
@@ -2496,14 +2523,19 @@ async function clearWebAppMenuButton() {
 const MENU_BUTTON_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
 
 async function refreshMenuButton() {
-  const currentUiUrl = getTelegramUiUrl() || null;
-  const currentUrl = getTelegramWebAppUrl(currentUiUrl);
+  const { uiUrl: currentUiUrl, webAppUrl: currentUrl } = syncUiUrlsFromServer();
   if (currentUrl && currentUrl !== lastMenuButtonUrl) {
-    await setWebAppMenuButton(currentUrl);
-    telegramUiUrl = currentUiUrl;
-    telegramWebAppUrl = currentUrl;
-    lastMenuButtonUrl = currentUrl;
-    console.log(`[telegram-bot] menu button URL refreshed: ${currentUrl}`);
+    const updated = await setWebAppMenuButton(currentUrl);
+    if (updated) {
+      lastMenuButtonUrl = currentUrl;
+      console.log(`[telegram-bot] menu button URL refreshed: ${currentUrl}`);
+    }
+  } else if (!currentUrl && lastMenuButtonUrl) {
+    await clearWebAppMenuButton();
+    lastMenuButtonUrl = null;
+    if (currentUiUrl !== telegramUiUrl) {
+      telegramUiUrl = currentUiUrl;
+    }
   }
 }
 
@@ -2602,6 +2634,7 @@ async function handleUiCommand(text) {
   const ACTION_COMMANDS = new Set([
     "/restart", "/plan", "/retry", "/cleanup", "/prune",
     "/starttask", "/pause", "/resume", "/reconcile",
+    "/autobacklog", "/requirements",
   ]);
 
   if (ACTION_COMMANDS.has(cmd)) {
@@ -2893,7 +2926,7 @@ const UI_SCREENS = {};
 
 Object.assign(UI_SCREENS, {
   home: {
-    title: "VirtEngine Control Center",
+    title: "Codex-Monitor Control Center",
     parent: null,
     body: async () => {
       const statusLine = await buildHomeStatusLine();
@@ -2914,6 +2947,7 @@ Object.assign(UI_SCREENS, {
       ].join("\n");
     },
     keyboard: () => {
+      syncUiUrlsFromServer();
       const rows = [
         [
           uiButton("📊 Overview", uiGoAction("overview")),
@@ -3240,6 +3274,10 @@ Object.assign(UI_SCREENS, {
         ],
         [
           uiButton("🌍 Region", uiGoAction("region")),
+          uiButton("♻️ Auto Backlog", uiGoAction("autobacklog")),
+          uiButton("📐 Requirements", uiGoAction("requirements")),
+        ],
+        [
           uiButton("🎯 Route Task", uiGoAction("route_task")),
           uiButton("🏥 Health", uiCmdAction("/health")),
         ],
@@ -3295,11 +3333,54 @@ Object.assign(UI_SCREENS, {
     keyboard: () =>
       buildKeyboard([
         [
+          uiButton("Internal", uiCmdAction("/kanban internal")),
           uiButton("VK", uiCmdAction("/kanban vk")),
           uiButton("GitHub", uiCmdAction("/kanban github")),
-          uiButton("Jira", uiCmdAction("/kanban jira")),
         ],
+        [uiButton("Jira", uiCmdAction("/kanban jira"))],
         [uiButton("Status", uiCmdAction("/kanban"))],
+        uiNavRow("routing"),
+      ]),
+  },
+  autobacklog: {
+    title: "Auto Backlog",
+    parent: "routing",
+    body: () => "Experimental autonomous backlog replenishment controls.",
+    keyboard: () =>
+      buildKeyboard([
+        [
+          uiButton("Enable", uiCmdAction("/autobacklog on")),
+          uiButton("Disable", uiCmdAction("/autobacklog off")),
+          uiButton("Status", uiCmdAction("/autobacklog")),
+        ],
+        [
+          uiButton("Min 1", uiCmdAction("/autobacklog min 1")),
+          uiButton("Min 2", uiCmdAction("/autobacklog min 2")),
+        ],
+        [
+          uiButton("Max 1", uiCmdAction("/autobacklog max 1")),
+          uiButton("Max 2", uiCmdAction("/autobacklog max 2")),
+          uiButton("Max 3", uiCmdAction("/autobacklog max 3")),
+        ],
+        uiNavRow("routing"),
+      ]),
+  },
+  requirements: {
+    title: "Requirements Profile",
+    parent: "routing",
+    body: () => "Tune project-scope requirements for planning and backlog quality.",
+    keyboard: () =>
+      buildKeyboard([
+        [
+          uiButton("Simple", uiCmdAction("/requirements simple-feature")),
+          uiButton("Feature", uiCmdAction("/requirements feature")),
+          uiButton("Large", uiCmdAction("/requirements large-feature")),
+        ],
+        [
+          uiButton("System", uiCmdAction("/requirements system")),
+          uiButton("Multi-System", uiCmdAction("/requirements multi-system")),
+        ],
+        [uiButton("Status", uiCmdAction("/requirements"))],
         uiNavRow("routing"),
       ]),
   },
@@ -4001,10 +4082,6 @@ function findRepoPath(basePath) {
   if (existsSync(resolve(resolved, "go.mod"))) {
     return resolved;
   }
-  const nested = resolve(resolved, "virtengine");
-  if (existsSync(resolve(nested, "go.mod"))) {
-    return nested;
-  }
   return null;
 }
 
@@ -4084,7 +4161,7 @@ async function loadWorkspaceStatusData(workspacePath) {
 }
 
 async function cmdApp(chatId) {
-  const uiUrl = getTelegramUiUrl?.() || null;
+  const { uiUrl, webAppUrl } = syncUiUrlsFromServer();
   if (!uiUrl) {
     await sendReply(
       chatId,
@@ -4092,8 +4169,6 @@ async function cmdApp(chatId) {
     );
     return;
   }
-  const webAppUrl = getTelegramWebAppUrl(uiUrl);
-
   const rows = [[{ text: "🌐 Open in Browser", url: getBrowserUiUrl() || uiUrl }]];
   if (webAppUrl) {
     rows.unshift([{ text: "📱 Open Control Center", web_app: { url: webAppUrl } }]);
@@ -4102,7 +4177,7 @@ async function cmdApp(chatId) {
 
   await sendDirect(
     chatId,
-    "🚀 *VirtEngine Control Center*\n\nOpen the Mini App or access via browser:",
+    "🚀 *Codex-Monitor Control Center*\n\nOpen the Mini App or access via browser:",
     {
       parseMode: "Markdown",
       reply_markup: keyboard,
@@ -4111,6 +4186,10 @@ async function cmdApp(chatId) {
 }
 
 async function cmdMenu(chatId) {
+  syncUiUrlsFromServer();
+  if (telegramApiReachable !== false) {
+    void refreshMenuButton();
+  }
   clearPendingUiInput(chatId);
   await showUiScreen(chatId, null, "home");
 }
@@ -4130,7 +4209,7 @@ async function cmdHelp(chatId) {
 }
 
 async function cmdHelpFull(chatId) {
-  const lines = ["🤖 VirtEngine Primary Agent — All Commands:\n"];
+  const lines = ["🤖 Codex-Monitor Primary Agent — All Commands:\n"];
   for (const [cmd, { desc }] of Object.entries(COMMANDS)) {
     lines.push(`${cmd} — ${desc}`);
   }
@@ -4192,7 +4271,7 @@ async function cmdStatus(chatId) {
       : [];
 
     const lines = [
-      "📊 VirtEngine Orchestrator Status",
+      "📊 Codex-Monitor Orchestrator Status",
       "",
       `Running: ${counts.running ?? 0}`,
       `Review: ${counts.review ?? 0}`,
@@ -5304,7 +5383,7 @@ async function cmdRegion(chatId, regionArg) {
     // Show current region status
     try {
       const result = runPwsh(
-        `. '${resolve(repoRoot, "scripts", "codex-monitor", "ve-kanban.ps1")}'; Initialize-CodexRegionTracking; Get-RegionStatus | ConvertTo-Json -Depth 3`,
+        `. '${resolveVeKanbanPs1Path()}'; Initialize-CodexRegionTracking; Get-RegionStatus | ConvertTo-Json -Depth 3`,
       );
       const status = JSON.parse(result);
       const lines = [
@@ -5343,8 +5422,8 @@ async function cmdRegion(chatId, regionArg) {
   try {
     const psCmd =
       target === "auto"
-        ? `. '${resolve(repoRoot, "scripts", "codex-monitor", "ve-kanban.ps1")}'; Set-RegionOverride -Region $null | ConvertTo-Json`
-        : `. '${resolve(repoRoot, "scripts", "codex-monitor", "ve-kanban.ps1")}'; Set-RegionOverride -Region '${target}' | ConvertTo-Json`;
+        ? `. '${resolveVeKanbanPs1Path()}'; Set-RegionOverride -Region $null | ConvertTo-Json`
+        : `. '${resolveVeKanbanPs1Path()}'; Set-RegionOverride -Region '${target}' | ConvertTo-Json`;
     const result = runPwsh(psCmd);
     const info = JSON.parse(result);
     const icon = info.changed ? "✅" : "ℹ️";
@@ -5393,7 +5472,7 @@ async function cmdHealth(chatId) {
     // Add region info
     try {
       const regionScript = [
-        `. '${resolve(repoRoot, "scripts", "codex-monitor", "ve-kanban.ps1")}';`,
+        `. '${resolveVeKanbanPs1Path()}';`,
         "Initialize-CodexRegionTracking;",
         "Get-RegionStatus | ConvertTo-Json",
       ].join(" ");
@@ -5537,14 +5616,19 @@ async function cmdKanban(chatId, backendArg) {
   if (!backendArg || backendArg.trim() === "") {
     const current = getKanbanBackendName();
     const available = getAvailableBackends();
+    const syncPolicy = String(
+      process.env.KANBAN_SYNC_POLICY || "internal-primary",
+    ).toLowerCase();
     const lines = [
       "📋 Kanban Backend Status",
       "",
       `Active: ${current}`,
+      `Sync Policy: ${syncPolicy}`,
       `Available: ${available.join(", ")}`,
       "",
       "Switch backend:",
-      "  /kanban vk        Vibe-Kanban (default)",
+      "  /kanban internal  Internal task-store (primary)",
+      "  /kanban vk        Vibe-Kanban (secondary)",
       "  /kanban github     GitHub Issues",
       "  /kanban jira       Jira (stub)",
     ];
@@ -5572,6 +5656,120 @@ async function cmdKanban(chatId, backendArg) {
   } catch (err) {
     await sendReply(chatId, `❌ Error switching backend: ${err.message}`);
   }
+}
+
+async function cmdAutoBacklog(chatId, args) {
+  const executor = _getInternalExecutor?.();
+  if (!executor) {
+    await sendReply(chatId, "⚠️ Internal executor is not available.");
+    return;
+  }
+
+  const parts = String(args || "")
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0 || parts[0] === "status") {
+    const cfg = executor.getBacklogReplenishmentConfig?.() || {};
+    await sendReply(
+      chatId,
+      [
+        "♻️ Experimental Auto-Backlog",
+        "",
+        `Enabled: ${cfg.enabled ? "yes" : "no"}`,
+        `Min new tasks: ${cfg.minNewTasks ?? 1}`,
+        `Max new tasks: ${cfg.maxNewTasks ?? 2}`,
+        `Require priority: ${cfg.requirePriority !== false ? "yes" : "no"}`,
+        `Requirements profile: ${cfg.projectRequirements?.profile || "feature"}`,
+        "",
+        "Usage:",
+        "  /autobacklog on|off",
+        "  /autobacklog min <1|2>",
+        "  /autobacklog max <1|2|3>",
+      ].join("\n"),
+    );
+    return;
+  }
+
+  const op = parts[0];
+  if (op === "on" || op === "off") {
+    const cfg = executor.setBacklogReplenishmentConfig?.({
+      enabled: op === "on",
+    });
+    await sendReply(
+      chatId,
+      `✅ Auto-backlog ${op === "on" ? "enabled" : "disabled"}. Min=${cfg?.minNewTasks ?? 1}, Max=${cfg?.maxNewTasks ?? 2}`,
+    );
+    return;
+  }
+
+  if ((op === "min" || op === "max") && parts[1]) {
+    const value = Number(parts[1]);
+    if (!Number.isFinite(value)) {
+      await sendReply(chatId, `❌ Invalid ${op} value: ${parts[1]}`);
+      return;
+    }
+    const patch = op === "min" ? { minNewTasks: value } : { maxNewTasks: value };
+    const cfg = executor.setBacklogReplenishmentConfig?.(patch);
+    await sendReply(
+      chatId,
+      `✅ Auto-backlog updated. Enabled=${cfg?.enabled ? "yes" : "no"}, Min=${cfg?.minNewTasks ?? 1}, Max=${cfg?.maxNewTasks ?? 2}`,
+    );
+    return;
+  }
+
+  await sendReply(chatId, "Usage: /autobacklog [status|on|off|min <n>|max <n>]");
+}
+
+async function cmdRequirements(chatId, args) {
+  const executor = _getInternalExecutor?.();
+  if (!executor) {
+    await sendReply(chatId, "⚠️ Internal executor is not available.");
+    return;
+  }
+  const profiles = [
+    "simple-feature",
+    "feature",
+    "large-feature",
+    "system",
+    "multi-system",
+  ];
+  const input = String(args || "").trim();
+  if (!input) {
+    const req = executor.getProjectRequirements?.() || {
+      profile: "feature",
+      notes: "",
+    };
+    await sendReply(
+      chatId,
+      [
+        "📐 Project Requirements",
+        "",
+        `Profile: ${req.profile || "feature"}`,
+        `Notes: ${req.notes || "(none)"}`,
+        "",
+        "Usage:",
+        "  /requirements <simple-feature|feature|large-feature|system|multi-system>",
+      ].join("\n"),
+    );
+    return;
+  }
+
+  const profile = input.toLowerCase();
+  if (!profiles.includes(profile)) {
+    await sendReply(
+      chatId,
+      `❌ Unknown requirements profile: ${input}\nValid: ${profiles.join(", ")}`,
+    );
+    return;
+  }
+
+  const req = executor.setProjectRequirements?.({ profile });
+  await sendReply(
+    chatId,
+    `✅ Project requirements profile set to ${req?.profile || profile}`,
+  );
 }
 
 async function cmdThreads(chatId, subArg) {
@@ -7703,15 +7901,23 @@ export async function startTelegramBot() {
           getInternalExecutor: _getInternalExecutor,
           getExecutorMode: _getExecutorMode,
           handleUiCommand: handleUiCommand,
+          getSyncEngine: _getSyncEngine,
+          onProjectSyncAlert: async (alert) => {
+            if (!_sendTelegramMessage) return;
+            const text = String(alert?.message || "Project sync alert");
+            await _sendTelegramMessage(`⚠️ ${text}`);
+          },
         },
       });
-      telegramUiUrl = getTelegramUiUrl() || null;
-      telegramWebAppUrl = getTelegramWebAppUrl(telegramUiUrl);
+      syncUiUrlsFromServer();
       if (reachable && telegramWebAppUrl) {
-        await setWebAppMenuButton(telegramWebAppUrl);
-        lastMenuButtonUrl = telegramWebAppUrl;
+        const updated = await setWebAppMenuButton(telegramWebAppUrl);
+        if (updated) {
+          lastMenuButtonUrl = telegramWebAppUrl;
+        }
       } else if (reachable) {
         await clearWebAppMenuButton();
+        lastMenuButtonUrl = null;
       }
 
       // Periodically refresh the menu button URL in case the tunnel changes
@@ -7824,7 +8030,7 @@ export async function startTelegramBot() {
   } else {
     await sendDirect(
       telegramChatId,
-      `🤖 VirtEngine primary agent online (${getPrimaryAgentName()}).\n\nType /menu for the control center or send any message to chat with the agent.`,
+      `🤖 Codex-Monitor primary agent online (${getPrimaryAgentName()}).\n\nType /menu for the control center or send any message to chat with the agent.`,
     );
   }
 

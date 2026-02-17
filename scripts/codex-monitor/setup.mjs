@@ -163,6 +163,160 @@ function commandExists(cmd) {
   }
 }
 
+function normalizeBaseUrl(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed.replace(/\/+$/, "");
+  }
+  return `https://${trimmed.replace(/\/+$/, "")}`;
+}
+
+function openUrlInBrowser(url) {
+  const target = String(url || "").trim();
+  if (!target) return false;
+  const escaped = target.replace(/"/g, '\\"');
+  try {
+    if (process.platform === "darwin") {
+      execSync(`open "${escaped}"`);
+      return true;
+    }
+    if (process.platform === "win32") {
+      execSync(`cmd /c start "" "${escaped}"`);
+      return true;
+    }
+    if (commandExists("xdg-open")) {
+      execSync(`xdg-open "${escaped}"`);
+      return true;
+    }
+    if (commandExists("gio")) {
+      execSync(`gio open "${escaped}"`);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function buildJiraAuthHeaders(email, token) {
+  const credentials = Buffer.from(`${email}:${token}`).toString("base64");
+  return {
+    Authorization: `Basic ${credentials}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+}
+
+async function jiraRequest({ baseUrl, email, token, path, method = "GET", body }) {
+  if (!baseUrl || !email || !token) {
+    throw new Error("Jira credentials are missing");
+  }
+  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  const response = await fetch(url, {
+    method,
+    headers: buildJiraAuthHeaders(email, token),
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+  if (!response || typeof response.status !== "number") {
+    throw new Error(`Jira API ${method} ${path} failed: no HTTP response`);
+  }
+  if (response.status === 204) return null;
+  const contentType = String(response.headers.get("content-type") || "");
+  let payload = null;
+  if (contentType.includes("application/json")) {
+    payload = await response.json().catch(() => null);
+  } else {
+    payload = await response.text().catch(() => "");
+  }
+  if (!response.ok) {
+    const message =
+      payload?.errorMessages?.join("; ") ||
+      (payload?.errors ? Object.values(payload.errors || {}).join("; ") : "");
+    throw new Error(
+      `Jira API ${method} ${path} failed (${response.status}): ${message || response.statusText || "Unknown error"}`,
+    );
+  }
+  return payload;
+}
+
+async function listJiraProjects({ baseUrl, email, token }) {
+  const projects = [];
+  let startAt = 0;
+  while (true) {
+    const page = await jiraRequest({
+      baseUrl,
+      email,
+      token,
+      path: `/rest/api/3/project/search?startAt=${startAt}&maxResults=50&orderBy=name`,
+    });
+    const values = Array.isArray(page?.values) ? page.values : [];
+    projects.push(...values);
+    if (values.length === 0 || page?.isLast) break;
+    startAt += values.length;
+  }
+  return projects.map((project) => ({
+    key: String(project.key || project.id || "").trim(),
+    name: project.name || project.key || "Unnamed Jira Project",
+    id: String(project.id || project.key || ""),
+  }));
+}
+
+async function listJiraIssueTypes({ baseUrl, email, token }) {
+  const data = await jiraRequest({
+    baseUrl,
+    email,
+    token,
+    path: "/rest/api/3/issuetype",
+  });
+  return (Array.isArray(data) ? data : [])
+    .map((entry) => ({
+      id: String(entry?.id || ""),
+      name: String(entry?.name || "").trim(),
+      subtask: Boolean(entry?.subtask),
+    }))
+    .filter((entry) => entry.name);
+}
+
+async function listJiraFields({ baseUrl, email, token }) {
+  const data = await jiraRequest({
+    baseUrl,
+    email,
+    token,
+    path: "/rest/api/3/field",
+  });
+  return (Array.isArray(data) ? data : [])
+    .map((field) => ({
+      id: String(field?.id || "").trim(),
+      name: String(field?.name || "").trim(),
+      custom: String(field?.id || "").startsWith("customfield_"),
+    }))
+    .filter((field) => field.id && field.name);
+}
+
+async function searchJiraUsers({ baseUrl, email, token, query }) {
+  const data = await jiraRequest({
+    baseUrl,
+    email,
+    token,
+    path: `/rest/api/3/user/search?maxResults=20&query=${encodeURIComponent(
+      String(query || "").trim(),
+    )}`,
+  });
+  return (Array.isArray(data) ? data : []).map((user) => ({
+    accountId: String(user?.accountId || ""),
+    displayName: user?.displayName || "",
+    emailAddress: user?.emailAddress || "",
+  }));
+}
+
+function isSubtaskIssueType(issueType) {
+  const name = String(issueType || "")
+    .trim()
+    .toLowerCase();
+  return name.includes("subtask") || name.includes("sub-task");
+}
+
 export function getScriptRuntimePrerequisiteStatus(
   platform = process.platform,
   checker = commandExists,
@@ -220,6 +374,67 @@ export function getDefaultOrchestratorScripts(
     preferredExt,
     variants,
     selectedDefault,
+  };
+}
+
+export function formatOrchestratorScriptForEnv(
+  scriptPath,
+  configDir = __dirname,
+) {
+  const raw = String(scriptPath || "").trim();
+  if (!raw) return "";
+
+  const absolutePath = isAbsolute(raw) ? raw : resolve(configDir, raw);
+  const relativePath = relative(configDir, absolutePath);
+  if (!relativePath || relativePath === ".") {
+    return `./${basename(absolutePath)}`.replace(/\\/g, "/");
+  }
+
+  if (isAbsolute(relativePath)) {
+    return absolutePath.replace(/\\/g, "/");
+  }
+
+  const normalized = relativePath.replace(/\\/g, "/");
+  if (normalized.startsWith(".") || normalized.startsWith("..")) {
+    return normalized;
+  }
+  return `./${normalized}`;
+}
+
+export function resolveSetupOrchestratorDefaults({
+  platform = process.platform,
+  repoRoot = process.cwd(),
+  configDir = __dirname,
+  packageDir = __dirname,
+} = {}) {
+  const repoScriptDefaults = getDefaultOrchestratorScripts(
+    platform,
+    resolve(repoRoot, "scripts", "codex-monitor"),
+  );
+  const packageScriptDefaults = getDefaultOrchestratorScripts(
+    platform,
+    packageDir,
+  );
+  const orchestratorDefaults =
+    [repoScriptDefaults, packageScriptDefaults].find((defaults) =>
+      defaults.variants.some(
+        (variant) => variant.ext === defaults.preferredExt,
+      ),
+    ) ||
+    [repoScriptDefaults, packageScriptDefaults].find(
+      (defaults) => defaults.variants.length > 0,
+    ) ||
+    packageScriptDefaults;
+  const selectedDefault = orchestratorDefaults.selectedDefault;
+
+  return {
+    repoScriptDefaults,
+    packageScriptDefaults,
+    orchestratorDefaults,
+    selectedDefault,
+    orchestratorScriptEnvValue: selectedDefault
+      ? formatOrchestratorScriptForEnv(selectedDefault.orchestratorPath, configDir)
+      : "",
   };
 }
 
@@ -621,6 +836,74 @@ function ensureRepoGitIgnoreEntry(repoRoot, entry) {
   return true;
 }
 
+function buildRecommendedVsCodeSettings(env = {}) {
+  const maxRequests = Math.max(
+    50,
+    Number(env.COPILOT_AGENT_MAX_REQUESTS || process.env.COPILOT_AGENT_MAX_REQUESTS || 500),
+  );
+
+  return {
+    "github.copilot.chat.searchSubagent.enabled": true,
+    "github.copilot.chat.switchAgent.enabled": true,
+    "github.copilot.chat.cli.customAgents.enabled": true,
+    "github.copilot.chat.cli.mcp.enabled": true,
+    "github.copilot.chat.agent.enabled": true,
+    "github.copilot.chat.agent.maxRequests": maxRequests,
+    "github.copilot.chat.thinking.collapsedTools": "withThinking",
+    "github.copilot.chat.thinking.generateTitles": true,
+    "github.copilot.chat.confirmEditRequestRemoval": false,
+    "github.copilot.chat.confirmRetryRequestRemoval": false,
+    "github.copilot.chat.terminal.enableAutoApprove": true,
+    "github.copilot.chat.terminal.autoReplyToPrompts": true,
+    "github.copilot.chat.tools.autoApprove": true,
+    "github.copilot.chat.tools.runSubagent.enabled": true,
+    "github.copilot.chat.tools.searchSubagent.enabled": true,
+  };
+}
+
+function mergePlainObjects(base, updates) {
+  const out = { ...(base || {}) };
+  for (const [key, value] of Object.entries(updates || {})) {
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      out[key] &&
+      typeof out[key] === "object" &&
+      !Array.isArray(out[key])
+    ) {
+      out[key] = mergePlainObjects(out[key], value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function writeWorkspaceVsCodeSettings(repoRoot, env) {
+  try {
+    const vscodeDir = resolve(repoRoot, ".vscode");
+    const settingsPath = resolve(vscodeDir, "settings.json");
+    mkdirSync(vscodeDir, { recursive: true });
+
+    let existing = {};
+    if (existsSync(settingsPath)) {
+      try {
+        existing = JSON.parse(readFileSync(settingsPath, "utf8"));
+      } catch {
+        existing = {};
+      }
+    }
+
+    const recommended = buildRecommendedVsCodeSettings(env);
+    const merged = mergePlainObjects(existing, recommended);
+    writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + "\n", "utf8");
+    return { path: settingsPath, updated: true };
+  } catch (err) {
+    return { path: null, updated: false, error: err.message };
+  }
+}
+
 function parseHookCommandInput(rawValue) {
   const raw = String(rawValue || "").trim();
   if (!raw) return null;
@@ -847,7 +1130,13 @@ function toBooleanEnvString(value, fallback = false) {
   return parseBooleanEnvValue(value, fallback) ? "true" : "false";
 }
 
-function normalizeSetupConfiguration({ env, configJson, repoRoot, slug }) {
+function normalizeSetupConfiguration({
+  env,
+  configJson,
+  repoRoot,
+  slug,
+  configDir,
+}) {
   env.PROJECT_NAME =
     env.PROJECT_NAME || configJson.projectName || basename(repoRoot);
   env.REPO_ROOT = env.REPO_ROOT || repoRoot;
@@ -860,8 +1149,53 @@ function normalizeSetupConfiguration({ env, configJson, repoRoot, slug }) {
 
   env.KANBAN_BACKEND = normalizeEnum(
     env.KANBAN_BACKEND,
-    ["vk", "github", "jira"],
-    "vk",
+    ["internal", "vk", "github", "jira"],
+    "internal",
+  );
+  env.KANBAN_SYNC_POLICY = normalizeEnum(
+    env.KANBAN_SYNC_POLICY,
+    ["internal-primary", "bidirectional"],
+    "internal-primary",
+  );
+  env.PROJECT_REQUIREMENTS_PROFILE = normalizeEnum(
+    env.PROJECT_REQUIREMENTS_PROFILE,
+    [
+      "simple-feature",
+      "feature",
+      "large-feature",
+      "system",
+      "multi-system",
+    ],
+    "feature",
+  );
+  env.INTERNAL_EXECUTOR_REPLENISH_ENABLED = toBooleanEnvString(
+    env.INTERNAL_EXECUTOR_REPLENISH_ENABLED,
+    false,
+  );
+  env.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS = String(
+    toPositiveInt(env.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS, 1),
+  );
+  env.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS = String(
+    toPositiveInt(env.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS, 2),
+  );
+  env.COPILOT_NO_EXPERIMENTAL = toBooleanEnvString(
+    env.COPILOT_NO_EXPERIMENTAL,
+    false,
+  );
+  env.COPILOT_NO_ALLOW_ALL = toBooleanEnvString(
+    env.COPILOT_NO_ALLOW_ALL,
+    false,
+  );
+  env.COPILOT_ENABLE_ASK_USER = toBooleanEnvString(
+    env.COPILOT_ENABLE_ASK_USER,
+    false,
+  );
+  env.COPILOT_ENABLE_ALL_GITHUB_MCP_TOOLS = toBooleanEnvString(
+    env.COPILOT_ENABLE_ALL_GITHUB_MCP_TOOLS,
+    true,
+  );
+  env.COPILOT_AGENT_MAX_REQUESTS = String(
+    toPositiveInt(env.COPILOT_AGENT_MAX_REQUESTS || 500, 500),
   );
   env.EXECUTOR_MODE = normalizeEnum(
     env.EXECUTOR_MODE,
@@ -899,6 +1233,12 @@ function normalizeSetupConfiguration({ env, configJson, repoRoot, slug }) {
     ["auto", "docker", "podman", "container"],
     "auto",
   );
+  if (env.ORCHESTRATOR_SCRIPT) {
+    env.ORCHESTRATOR_SCRIPT = formatOrchestratorScriptForEnv(
+      env.ORCHESTRATOR_SCRIPT,
+      configDir || __dirname,
+    );
+  }
 
   if (
     !Array.isArray(configJson.executors) ||
@@ -964,7 +1304,11 @@ function normalizeSetupConfiguration({ env, configJson, repoRoot, slug }) {
   }
 
   configJson.projectName = env.PROJECT_NAME;
-  configJson.kanban = { backend: env.KANBAN_BACKEND };
+  configJson.kanban = {
+    ...(configJson.kanban || {}),
+    backend: env.KANBAN_BACKEND,
+    syncPolicy: env.KANBAN_SYNC_POLICY,
+  };
   configJson.internalExecutor = {
     ...(configJson.internalExecutor || {}),
     mode: env.EXECUTOR_MODE,
@@ -1757,18 +2101,50 @@ async function main() {
     // ── Step 7: Kanban + Execution ─────────────────────────
     heading("Step 7 of 9 — Kanban & Execution");
     const backendDefault = String(
-      process.env.KANBAN_BACKEND || configJson.kanban?.backend || "github",
+      process.env.KANBAN_BACKEND || configJson.kanban?.backend || "internal",
     )
       .trim()
       .toLowerCase();
     const backendIdx = await prompt.choose(
       "Select task board backend:",
-      ["Vibe-Kanban (vk)", "GitHub Issues (github)"],
-      backendDefault === "github" ? 1 : 0,
+      [
+        "Internal Store (internal, recommended primary)",
+        "Vibe-Kanban (vk)",
+        "GitHub Issues (github)",
+        "Jira Issues (jira)",
+      ],
+      backendDefault === "vk"
+        ? 1
+        : backendDefault === "github"
+          ? 2
+          : backendDefault === "jira"
+            ? 3
+            : 0,
     );
-    const selectedKanbanBackend = backendIdx === 1 ? "github" : "vk";
+    const selectedKanbanBackend =
+      backendIdx === 1
+        ? "vk"
+        : backendIdx === 2
+          ? "github"
+          : backendIdx === 3
+            ? "jira"
+            : "internal";
     env.KANBAN_BACKEND = selectedKanbanBackend;
-    configJson.kanban = { backend: selectedKanbanBackend };
+    const syncPolicyIdx = await prompt.choose(
+      "Select sync policy:",
+      [
+        "Internal primary (recommended) — external is secondary mirror",
+        "Bidirectional (legacy) — external can drive internal status",
+      ],
+      0,
+    );
+    const selectedSyncPolicy =
+      syncPolicyIdx === 1 ? "bidirectional" : "internal-primary";
+    env.KANBAN_SYNC_POLICY = selectedSyncPolicy;
+    configJson.kanban = {
+      backend: selectedKanbanBackend,
+      syncPolicy: selectedSyncPolicy,
+    };
 
     const modeDefault = String(
       process.env.EXECUTOR_MODE || configJson.internalExecutor?.mode || "internal",
@@ -1782,7 +2158,9 @@ async function main() {
         "VK executor/orchestrator",
         "Hybrid (internal + VK)",
       ],
-      selectedKanbanBackend === "github"
+      selectedKanbanBackend === "internal" ||
+      selectedKanbanBackend === "github" ||
+      selectedKanbanBackend === "jira"
         ? 0
         : modeDefault === "hybrid"
           ? 2
@@ -1796,6 +2174,79 @@ async function main() {
     configJson.internalExecutor = {
       ...(configJson.internalExecutor || {}),
       mode: selectedExecutorMode,
+    };
+
+    const requirementsProfileDefault = String(
+      process.env.PROJECT_REQUIREMENTS_PROFILE ||
+        configJson.projectRequirements?.profile ||
+        "feature",
+    )
+      .trim()
+      .toLowerCase();
+    const profileOptions = [
+      "simple-feature",
+      "feature",
+      "large-feature",
+      "system",
+      "multi-system",
+    ];
+    const profileIdx = await prompt.choose(
+      "Project requirements profile:",
+      [
+        "Simple Feature",
+        "Feature",
+        "Large Feature",
+        "System",
+        "Multi-System",
+      ],
+      Math.max(0, profileOptions.indexOf(requirementsProfileDefault)),
+    );
+    env.PROJECT_REQUIREMENTS_PROFILE = profileOptions[profileIdx] || "feature";
+    const requirementsNotes = await prompt.ask(
+      "Requirements notes (optional)",
+      process.env.PROJECT_REQUIREMENTS_NOTES ||
+        configJson.projectRequirements?.notes ||
+        "",
+    );
+    env.PROJECT_REQUIREMENTS_NOTES = requirementsNotes;
+    configJson.projectRequirements = {
+      profile: env.PROJECT_REQUIREMENTS_PROFILE,
+      notes: env.PROJECT_REQUIREMENTS_NOTES,
+    };
+
+    const replenishEnabled = await prompt.confirm(
+      "Enable experimental autonomous backlog replenishment?",
+      false,
+    );
+    env.INTERNAL_EXECUTOR_REPLENISH_ENABLED = replenishEnabled
+      ? "true"
+      : "false";
+    const replenishMin = replenishEnabled
+      ? await prompt.ask(
+          "Minimum new tasks per completed task (1-2)",
+          process.env.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS || "1",
+        )
+      : "1";
+    const replenishMax = replenishEnabled
+      ? await prompt.ask(
+          "Maximum new tasks per completed task (1-3)",
+          process.env.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS || "2",
+        )
+      : "2";
+    env.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS = replenishMin;
+    env.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS = replenishMax;
+    configJson.internalExecutor = {
+      ...(configJson.internalExecutor || {}),
+      backlogReplenishment: {
+        enabled: replenishEnabled,
+        minNewTasks: toPositiveInt(replenishMin, 1),
+        maxNewTasks: toPositiveInt(replenishMax, 2),
+        requirePriority: true,
+      },
+      projectRequirements: {
+        profile: env.PROJECT_REQUIREMENTS_PROFILE,
+        notes: env.PROJECT_REQUIREMENTS_NOTES,
+      },
     };
 
     const vkNeeded =
@@ -1899,6 +2350,7 @@ async function main() {
 
       configJson.kanban = {
         backend: selectedKanbanBackend,
+        syncPolicy: selectedSyncPolicy,
         github: {
           mode: githubTaskMode,
           projectTitle: env.GITHUB_PROJECT_TITLE || "Codex-Monitor",
@@ -1910,6 +2362,464 @@ async function main() {
       info(
         "GitHub backend configured. codex-monitor-scoped issues are auto-assigned/labeled and can be linked to a Projects kanban board.",
       );
+    }
+
+    if (selectedKanbanBackend === "jira") {
+      const jiraBaseDefault =
+        process.env.JIRA_BASE_URL || configJson.kanban?.jira?.baseUrl || "";
+      const jiraEmailDefault =
+        process.env.JIRA_EMAIL || configJson.kanban?.jira?.email || "";
+      const jiraTokenDefault =
+        process.env.JIRA_API_TOKEN || configJson.kanban?.jira?.apiToken || "";
+      const jiraProjectDefault =
+        process.env.JIRA_PROJECT_KEY || configJson.kanban?.jira?.projectKey || "";
+      const jiraIssueTypeDefault =
+        process.env.JIRA_ISSUE_TYPE || configJson.kanban?.jira?.issueType || "Task";
+
+      env.JIRA_BASE_URL = normalizeBaseUrl(
+        await prompt.ask("Jira site URL", jiraBaseDefault),
+      );
+      if (env.JIRA_BASE_URL) {
+        const openTokenPage = await prompt.confirm(
+          "Open Jira API token page in your browser?",
+          true,
+        );
+        if (openTokenPage) {
+          const opened = openUrlInBrowser(
+            "https://id.atlassian.com/manage-profile/security/api-tokens",
+          );
+          if (!opened) {
+            warn(
+              "Unable to open browser. Visit https://id.atlassian.com/manage-profile/security/api-tokens",
+            );
+          }
+        }
+      }
+
+      env.JIRA_EMAIL = await prompt.ask("Jira account email", jiraEmailDefault);
+      env.JIRA_API_TOKEN = await prompt.ask(
+        "Jira API token",
+        jiraTokenDefault,
+      );
+
+      const hasJiraCreds =
+        Boolean(env.JIRA_BASE_URL) &&
+        Boolean(env.JIRA_EMAIL) &&
+        Boolean(env.JIRA_API_TOKEN);
+
+      let projects = [];
+      if (hasJiraCreds) {
+        const lookupProjects = await prompt.confirm(
+          "Look up Jira projects now?",
+          true,
+        );
+        if (lookupProjects) {
+          try {
+            projects = await listJiraProjects({
+              baseUrl: env.JIRA_BASE_URL,
+              email: env.JIRA_EMAIL,
+              token: env.JIRA_API_TOKEN,
+            });
+          } catch (err) {
+            warn(`Failed to load Jira projects: ${err.message}`);
+          }
+        }
+      }
+
+      const selectProjectKey = async (projectList, fallbackKey) => {
+        if (!Array.isArray(projectList) || projectList.length === 0) {
+          return await prompt.ask("Jira project key", fallbackKey || "");
+        }
+        const filter = await prompt.ask(
+          "Filter Jira projects (optional)",
+          "",
+        );
+        const normalizedFilter = filter.trim().toLowerCase();
+        const filtered = normalizedFilter
+          ? projectList.filter(
+              (project) =>
+                String(project.name || "").toLowerCase().includes(normalizedFilter) ||
+                String(project.key || "").toLowerCase().includes(normalizedFilter),
+            )
+          : projectList;
+        const visible = filtered.slice(0, 20);
+        const options = visible.map(
+          (project) => `${project.name} (${project.key})`,
+        );
+        options.push("Enter project key manually");
+        options.push("Open Jira Projects page");
+        options.push("Create a new Jira project");
+        const choiceIdx = await prompt.choose(
+          "Select Jira project for codex-monitor tasks:",
+          options,
+          0,
+        );
+        if (choiceIdx < visible.length) {
+          return visible[choiceIdx].key;
+        }
+        if (choiceIdx === visible.length) {
+          return await prompt.ask("Jira project key", fallbackKey || "");
+        }
+        if (choiceIdx === visible.length + 1) {
+          const url = `${env.JIRA_BASE_URL}/jira/projects`;
+          const opened = openUrlInBrowser(url);
+          if (!opened) warn(`Open this URL manually: ${url}`);
+          const requery = hasJiraCreds
+            ? await prompt.confirm("Re-fetch Jira projects now?", true)
+            : false;
+          if (requery) {
+            try {
+              const refreshed = await listJiraProjects({
+                baseUrl: env.JIRA_BASE_URL,
+                email: env.JIRA_EMAIL,
+                token: env.JIRA_API_TOKEN,
+              });
+              return await selectProjectKey(refreshed, fallbackKey);
+            } catch (err) {
+              warn(`Failed to refresh Jira projects: ${err.message}`);
+            }
+          }
+          return await prompt.ask("Jira project key", fallbackKey || "");
+        }
+        const createUrl = `${env.JIRA_BASE_URL}/jira/projects`;
+        const opened = openUrlInBrowser(createUrl);
+        if (!opened) warn(`Open this URL manually: ${createUrl}`);
+        info("Create the project in Jira, then enter the new project key.");
+        const createdKey = await prompt.ask("New Jira project key", "");
+        if (!createdKey) {
+          return await prompt.ask("Jira project key", fallbackKey || "");
+        }
+        if (hasJiraCreds) {
+          const requery = await prompt.confirm(
+            "Re-fetch Jira projects now?",
+            true,
+          );
+          if (requery) {
+            try {
+              const refreshed = await listJiraProjects({
+                baseUrl: env.JIRA_BASE_URL,
+                email: env.JIRA_EMAIL,
+                token: env.JIRA_API_TOKEN,
+              });
+              const match = refreshed.find(
+                (project) =>
+                  String(project.key || "").toUpperCase() ===
+                  String(createdKey || "").toUpperCase(),
+              );
+              if (match) return match.key;
+            } catch (err) {
+              warn(`Failed to refresh Jira projects: ${err.message}`);
+            }
+          }
+        }
+        return createdKey;
+      };
+
+      env.JIRA_PROJECT_KEY = String(
+        await selectProjectKey(projects, jiraProjectDefault),
+      )
+        .trim()
+        .toUpperCase();
+
+      let jiraIssueType = jiraIssueTypeDefault;
+      if (hasJiraCreds) {
+        const lookupIssueTypes = await prompt.confirm(
+          "Look up Jira issue types now?",
+          isAdvancedSetup,
+        );
+        if (lookupIssueTypes) {
+          try {
+            const issueTypes = await listJiraIssueTypes({
+              baseUrl: env.JIRA_BASE_URL,
+              email: env.JIRA_EMAIL,
+              token: env.JIRA_API_TOKEN,
+            });
+            if (issueTypes.length > 0) {
+              const issueOptions = issueTypes.map((entry) =>
+                entry.subtask ? `${entry.name} (subtask)` : entry.name,
+              );
+              issueOptions.push("Enter issue type manually");
+              const defaultIdx = Math.max(
+                0,
+                issueOptions.findIndex(
+                  (option) =>
+                    option.toLowerCase() === jiraIssueType.toLowerCase() ||
+                    option
+                      .toLowerCase()
+                      .startsWith(jiraIssueType.toLowerCase()),
+                ),
+              );
+              const issueIdx = await prompt.choose(
+                "Select default Jira issue type:",
+                issueOptions,
+                defaultIdx,
+              );
+              if (issueIdx < issueTypes.length) {
+                jiraIssueType = issueTypes[issueIdx].name;
+              } else {
+                jiraIssueType = await prompt.ask(
+                  "Default Jira issue type",
+                  jiraIssueTypeDefault,
+                );
+              }
+            } else {
+              jiraIssueType = await prompt.ask(
+                "Default Jira issue type",
+                jiraIssueTypeDefault,
+              );
+            }
+          } catch (err) {
+            warn(`Failed to load Jira issue types: ${err.message}`);
+            jiraIssueType = await prompt.ask(
+              "Default Jira issue type",
+              jiraIssueTypeDefault,
+            );
+          }
+        } else {
+          jiraIssueType = await prompt.ask(
+            "Default Jira issue type",
+            jiraIssueTypeDefault,
+          );
+        }
+      } else {
+        jiraIssueType = await prompt.ask(
+          "Default Jira issue type",
+          jiraIssueTypeDefault,
+        );
+      }
+      env.JIRA_ISSUE_TYPE = jiraIssueType;
+
+      if (isSubtaskIssueType(env.JIRA_ISSUE_TYPE)) {
+        env.JIRA_SUBTASK_PARENT_KEY = await prompt.ask(
+          "Parent issue key for subtasks",
+          process.env.JIRA_SUBTASK_PARENT_KEY || "",
+        );
+      }
+
+      const canonicalLabel = "codex-monitor";
+      const jiraScopeLabels = String(
+        process.env.JIRA_TASK_LABELS ||
+          process.env.CODEX_MONITOR_TASK_LABELS ||
+          "",
+      )
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean);
+      if (!jiraScopeLabels.includes(canonicalLabel)) {
+        jiraScopeLabels.unshift(canonicalLabel);
+      }
+      if (!jiraScopeLabels.includes("codex-mointor")) {
+        jiraScopeLabels.push("codex-mointor");
+      }
+      env.CODEX_MONITOR_TASK_LABEL = canonicalLabel;
+      env.CODEX_MONITOR_TASK_LABELS = jiraScopeLabels.join(",");
+      env.CODEX_MONITOR_ENFORCE_TASK_LABEL = "true";
+      env.JIRA_TASK_LABELS = env.CODEX_MONITOR_TASK_LABELS;
+      env.JIRA_ENFORCE_TASK_LABEL = "true";
+
+      if (hasJiraCreds) {
+        const wantsAssignee = await prompt.confirm(
+          "Set a default Jira assignee for new tasks?",
+          false,
+        );
+        if (wantsAssignee) {
+          const query = await prompt.ask(
+            "Search users by name/email (optional)",
+            "",
+          );
+          let selectedAccountId = "";
+          if (query) {
+            try {
+              const users = await searchJiraUsers({
+                baseUrl: env.JIRA_BASE_URL,
+                email: env.JIRA_EMAIL,
+                token: env.JIRA_API_TOKEN,
+                query,
+              });
+              if (users.length > 0) {
+                const userOptions = users.map((user) => {
+                  const emailSuffix = user.emailAddress
+                    ? ` <${user.emailAddress}>`
+                    : "";
+                  return `${user.displayName}${emailSuffix} (${user.accountId})`;
+                });
+                userOptions.push("Enter account ID manually");
+                const userIdx = await prompt.choose(
+                  "Select default Jira assignee:",
+                  userOptions,
+                  0,
+                );
+                if (userIdx < users.length) {
+                  selectedAccountId = users[userIdx].accountId;
+                }
+              } else {
+                warn("No Jira users matched that search.");
+              }
+            } catch (err) {
+              warn(`Failed to search Jira users: ${err.message}`);
+            }
+          }
+          if (!selectedAccountId) {
+            selectedAccountId = await prompt.ask(
+              "Default assignee account ID",
+              process.env.JIRA_DEFAULT_ASSIGNEE || "",
+            );
+          }
+          env.JIRA_DEFAULT_ASSIGNEE = selectedAccountId;
+        }
+      }
+
+      if (isAdvancedSetup) {
+        env.JIRA_STATUS_TODO = await prompt.ask(
+          "Jira status for TODO",
+          process.env.JIRA_STATUS_TODO ||
+            configJson.kanban?.jira?.statusMapping?.todo ||
+            "To Do",
+        );
+        env.JIRA_STATUS_INPROGRESS = await prompt.ask(
+          "Jira status for IN PROGRESS",
+          process.env.JIRA_STATUS_INPROGRESS ||
+            configJson.kanban?.jira?.statusMapping?.inprogress ||
+            "In Progress",
+        );
+        env.JIRA_STATUS_INREVIEW = await prompt.ask(
+          "Jira status for IN REVIEW",
+          process.env.JIRA_STATUS_INREVIEW ||
+            configJson.kanban?.jira?.statusMapping?.inreview ||
+            "In Review",
+        );
+        env.JIRA_STATUS_DONE = await prompt.ask(
+          "Jira status for DONE",
+          process.env.JIRA_STATUS_DONE ||
+            configJson.kanban?.jira?.statusMapping?.done ||
+            "Done",
+        );
+        env.JIRA_STATUS_CANCELLED = await prompt.ask(
+          "Jira status for CANCELLED",
+          process.env.JIRA_STATUS_CANCELLED ||
+            configJson.kanban?.jira?.statusMapping?.cancelled ||
+            "Cancelled",
+        );
+      }
+
+      const configureSharedState = await prompt.confirm(
+        "Configure Jira shared-state fields now?",
+        isAdvancedSetup,
+      );
+      if (configureSharedState && hasJiraCreds) {
+        let jiraFields = [];
+        try {
+          jiraFields = await listJiraFields({
+            baseUrl: env.JIRA_BASE_URL,
+            email: env.JIRA_EMAIL,
+            token: env.JIRA_API_TOKEN,
+          });
+        } catch (err) {
+          warn(`Failed to load Jira fields: ${err.message}`);
+        }
+        if (jiraFields.length === 0) {
+          const openFields = await prompt.confirm(
+            "Open Jira custom fields page in your browser?",
+            false,
+          );
+          if (openFields) {
+            const url = `${env.JIRA_BASE_URL}/jira/settings/issues/fields`;
+            const opened = openUrlInBrowser(url);
+            if (!opened) warn(`Open this URL manually: ${url}`);
+          }
+        }
+
+        const selectFieldId = async (label, fallbackValue) => {
+          if (!jiraFields.length) {
+            return await prompt.ask(`${label} field id`, fallbackValue || "");
+          }
+          const filter = await prompt.ask(
+            `Filter fields for ${label} (optional)`,
+            "",
+          );
+          const normalized = filter.trim().toLowerCase();
+          const filtered = normalized
+            ? jiraFields.filter((field) =>
+                String(field.name || "")
+                  .toLowerCase()
+                  .includes(normalized),
+              )
+            : jiraFields;
+          const visible = filtered.slice(0, 20);
+          const options = visible.map(
+            (field) => `${field.name} (${field.id})`,
+          );
+          options.push("Enter field id manually");
+          options.push("Skip");
+          const choiceIdx = await prompt.choose(
+            `Select Jira field for ${label}:`,
+            options,
+            0,
+          );
+          if (choiceIdx < visible.length) return visible[choiceIdx].id;
+          if (choiceIdx === visible.length) {
+            return await prompt.ask(`${label} field id`, fallbackValue || "");
+          }
+          return "";
+        };
+
+        const storageModeIdx = await prompt.choose(
+          "Shared-state storage mode:",
+          [
+            "Single JSON custom field (recommended)",
+            "Multiple custom fields (advanced)",
+            "Comments only (no custom fields)",
+          ],
+          0,
+        );
+        if (storageModeIdx === 0) {
+          env.JIRA_CUSTOM_FIELD_SHARED_STATE = await selectFieldId(
+            "shared state JSON",
+            process.env.JIRA_CUSTOM_FIELD_SHARED_STATE || "",
+          );
+        } else if (storageModeIdx === 1) {
+          env.JIRA_CUSTOM_FIELD_OWNER_ID = await selectFieldId(
+            "ownerId",
+            process.env.JIRA_CUSTOM_FIELD_OWNER_ID || "",
+          );
+          env.JIRA_CUSTOM_FIELD_ATTEMPT_TOKEN = await selectFieldId(
+            "attemptToken",
+            process.env.JIRA_CUSTOM_FIELD_ATTEMPT_TOKEN || "",
+          );
+          env.JIRA_CUSTOM_FIELD_ATTEMPT_STARTED = await selectFieldId(
+            "attemptStarted",
+            process.env.JIRA_CUSTOM_FIELD_ATTEMPT_STARTED || "",
+          );
+          env.JIRA_CUSTOM_FIELD_HEARTBEAT = await selectFieldId(
+            "heartbeat",
+            process.env.JIRA_CUSTOM_FIELD_HEARTBEAT || "",
+          );
+          env.JIRA_CUSTOM_FIELD_RETRY_COUNT = await selectFieldId(
+            "retryCount",
+            process.env.JIRA_CUSTOM_FIELD_RETRY_COUNT || "",
+          );
+          env.JIRA_CUSTOM_FIELD_IGNORE_REASON = await selectFieldId(
+            "ignoreReason",
+            process.env.JIRA_CUSTOM_FIELD_IGNORE_REASON || "",
+          );
+        } else {
+          info(
+            "Shared-state will be stored in Jira comments and labels only.",
+          );
+        }
+      }
+
+      configJson.kanban = {
+        backend: selectedKanbanBackend,
+        syncPolicy: selectedSyncPolicy,
+        jira: {
+          baseUrl: env.JIRA_BASE_URL,
+          email: env.JIRA_EMAIL,
+          projectKey: env.JIRA_PROJECT_KEY,
+          issueType: env.JIRA_ISSUE_TYPE || "Task",
+        },
+      };
+      success("Jira backend configured.");
     }
 
     if (vkNeeded) {
@@ -2005,23 +2915,13 @@ async function main() {
     );
 
     // Check for default scripts in repo first, then package fallback.
-    const repoScriptDefaults = getDefaultOrchestratorScripts(
-      process.platform,
-      resolve(repoRoot, "scripts", "codex-monitor"),
-    );
-    const packageScriptDefaults = getDefaultOrchestratorScripts();
-    const orchestratorDefaults =
-      [repoScriptDefaults, packageScriptDefaults].find((defaults) =>
-        defaults.variants.some(
-          (variant) => variant.ext === defaults.preferredExt,
-        ),
-      ) ||
-      [repoScriptDefaults, packageScriptDefaults].find(
-        (defaults) => defaults.variants.length > 0,
-      ) ||
-      packageScriptDefaults;
+    const { orchestratorDefaults, selectedDefault, orchestratorScriptEnvValue } =
+      resolveSetupOrchestratorDefaults({
+        platform: process.platform,
+        repoRoot,
+        configDir,
+      });
     const hasDefaultScripts = orchestratorDefaults.variants.length > 0;
-    const selectedDefault = orchestratorDefaults.selectedDefault;
 
     if (hasDefaultScripts) {
       info(`Found default orchestrator scripts in codex-monitor:`);
@@ -2041,7 +2941,7 @@ async function main() {
         : true;
 
       if (useDefault) {
-        env.ORCHESTRATOR_SCRIPT = selectedDefault.orchestratorPath;
+        env.ORCHESTRATOR_SCRIPT = orchestratorScriptEnvValue;
         success(`Using default ${basename(selectedDefault.orchestratorPath)}`);
       } else {
         const customPath = await prompt.ask(
@@ -2405,7 +3305,7 @@ async function main() {
   }
 
   // ── Write Files ─────────────────────────────────────────
-  normalizeSetupConfiguration({ env, configJson, repoRoot, slug });
+  normalizeSetupConfiguration({ env, configJson, repoRoot, slug, configDir });
   await writeConfigFiles({ env, configJson, repoRoot, configDir });
 }
 
@@ -2424,8 +3324,19 @@ async function runNonInteractive({
   env.GITHUB_REPO = process.env.GITHUB_REPO || slug || "";
   env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
   env.TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
-  env.KANBAN_BACKEND = process.env.KANBAN_BACKEND || "github";
+  env.KANBAN_BACKEND = process.env.KANBAN_BACKEND || "internal";
+  env.KANBAN_SYNC_POLICY =
+    process.env.KANBAN_SYNC_POLICY || "internal-primary";
   env.EXECUTOR_MODE = process.env.EXECUTOR_MODE || "internal";
+  env.PROJECT_REQUIREMENTS_PROFILE =
+    process.env.PROJECT_REQUIREMENTS_PROFILE || "feature";
+  env.PROJECT_REQUIREMENTS_NOTES = process.env.PROJECT_REQUIREMENTS_NOTES || "";
+  env.INTERNAL_EXECUTOR_REPLENISH_ENABLED =
+    process.env.INTERNAL_EXECUTOR_REPLENISH_ENABLED || "false";
+  env.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS =
+    process.env.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS || "1";
+  env.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS =
+    process.env.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS || "2";
   env.VK_BASE_URL = process.env.VK_BASE_URL || "http://127.0.0.1:54089";
   env.VK_RECOVERY_PORT = process.env.VK_RECOVERY_PORT || "54089";
   env.GITHUB_REPO_OWNER =
@@ -2442,6 +3353,18 @@ async function runNonInteractive({
   }
   env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
   env.MAX_PARALLEL = process.env.MAX_PARALLEL || "6";
+  if (!process.env.ORCHESTRATOR_SCRIPT) {
+    const { orchestratorScriptEnvValue } = resolveSetupOrchestratorDefaults({
+      platform: process.platform,
+      repoRoot,
+      configDir,
+    });
+    if (orchestratorScriptEnvValue) {
+      env.ORCHESTRATOR_SCRIPT = orchestratorScriptEnvValue;
+    }
+  } else {
+    env.ORCHESTRATOR_SCRIPT = process.env.ORCHESTRATOR_SCRIPT;
+  }
 
   // Optional channels
   env.WHATSAPP_ENABLED = process.env.WHATSAPP_ENABLED || "false";
@@ -2451,6 +3374,15 @@ async function runNonInteractive({
 
   // Copilot cloud: disabled by default — set to 0 to allow @copilot PR comments
   env.COPILOT_CLOUD_DISABLED = process.env.COPILOT_CLOUD_DISABLED || "true";
+  env.COPILOT_NO_EXPERIMENTAL =
+    process.env.COPILOT_NO_EXPERIMENTAL || "false";
+  env.COPILOT_NO_ALLOW_ALL = process.env.COPILOT_NO_ALLOW_ALL || "false";
+  env.COPILOT_ENABLE_ASK_USER =
+    process.env.COPILOT_ENABLE_ASK_USER || "false";
+  env.COPILOT_ENABLE_ALL_GITHUB_MCP_TOOLS =
+    process.env.COPILOT_ENABLE_ALL_GITHUB_MCP_TOOLS || "true";
+  env.COPILOT_AGENT_MAX_REQUESTS =
+    process.env.COPILOT_AGENT_MAX_REQUESTS || "500";
 
   // Parse EXECUTORS env if set, else use default preset
   if (process.env.EXECUTORS) {
@@ -2477,10 +3409,29 @@ async function runNonInteractive({
   }
 
   configJson.projectName = env.PROJECT_NAME;
-  configJson.kanban = { backend: env.KANBAN_BACKEND || "github" };
+  configJson.kanban = {
+    backend: env.KANBAN_BACKEND || "internal",
+    syncPolicy: env.KANBAN_SYNC_POLICY || "internal-primary",
+  };
+  configJson.projectRequirements = {
+    profile: env.PROJECT_REQUIREMENTS_PROFILE || "feature",
+    notes: env.PROJECT_REQUIREMENTS_NOTES || "",
+  };
   configJson.internalExecutor = {
     ...(configJson.internalExecutor || {}),
     mode: env.EXECUTOR_MODE || "internal",
+    backlogReplenishment: {
+      enabled:
+        String(env.INTERNAL_EXECUTOR_REPLENISH_ENABLED || "false").toLowerCase() ===
+        "true",
+      minNewTasks: toPositiveInt(env.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS, 1),
+      maxNewTasks: toPositiveInt(env.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS, 2),
+      requirePriority: true,
+    },
+    projectRequirements: {
+      profile: env.PROJECT_REQUIREMENTS_PROFILE || "feature",
+      notes: env.PROJECT_REQUIREMENTS_NOTES || "",
+    },
   };
   configJson.failover = {
     strategy: process.env.FAILOVER_STRATEGY || "next-in-line",
@@ -2532,7 +3483,7 @@ async function runNonInteractive({
     delete configJson.vkAutoConfig;
   }
 
-  normalizeSetupConfiguration({ env, configJson, repoRoot, slug });
+  normalizeSetupConfiguration({ env, configJson, repoRoot, slug, configDir });
   await writeConfigFiles({ env, configJson, repoRoot, configDir });
 }
 
@@ -2582,6 +3533,16 @@ async function writeConfigFiles({ env, configJson, repoRoot, configDir }) {
   writeFileSync(configPath, JSON.stringify(configOut, null, 2) + "\n", "utf8");
   success(`Config written to ${relative(repoRoot, configPath)}`);
 
+  // ── Workspace VS Code settings ─────────────────────────
+  const vscodeSettingsResult = writeWorkspaceVsCodeSettings(repoRoot, env);
+  if (vscodeSettingsResult.updated) {
+    success(
+      `Workspace settings updated: ${relative(repoRoot, vscodeSettingsResult.path)}`,
+    );
+  } else if (vscodeSettingsResult.error) {
+    warn(`Could not update workspace settings: ${vscodeSettingsResult.error}`);
+  }
+
   // ── Codex CLI config.toml ─────────────────────────────
   heading("Codex CLI Config");
 
@@ -2591,12 +3552,16 @@ async function writeConfigFiles({ env, configJson, repoRoot, configDir }) {
     const vkPort = env.VK_RECOVERY_PORT || "54089";
     const vkBaseUrl = env.VK_BASE_URL || `http://127.0.0.1:${vkPort}`;
     const kanbanIsVk =
-      (env.KANBAN_BACKEND || "github").toLowerCase() === "vk" ||
+      (env.KANBAN_BACKEND || "internal").toLowerCase() === "vk" ||
       ["vk", "hybrid"].includes((env.EXECUTOR_MODE || "internal").toLowerCase());
     const tomlResult = ensureCodexConfig({
       vkBaseUrl,
       skipVk: !kanbanIsVk,
       dryRun: false,
+      env: {
+        ...process.env,
+        ...env,
+      },
     });
     printConfigSummary(tomlResult, (msg) => console.log(msg));
   }
@@ -2718,6 +3683,8 @@ export {
   resolveOrCreateGitHubProjectNumber,
   resolveOrCreateGitHubProject,
   runGhCommand,
+  buildRecommendedVsCodeSettings,
+  writeWorkspaceVsCodeSettings,
 };
 
 // ── Entry Point ──────────────────────────────────────────────────────────────

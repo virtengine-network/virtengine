@@ -381,10 +381,43 @@ function normalizeKanbanBackend(value) {
   const backend = String(value || "")
     .trim()
     .toLowerCase();
-  if (backend === "github" || backend === "jira" || backend === "vk") {
+  if (
+    backend === "internal" ||
+    backend === "github" ||
+    backend === "jira" ||
+    backend === "vk"
+  ) {
     return backend;
   }
-  return "vk";
+  return "internal";
+}
+
+function normalizeKanbanSyncPolicy(value) {
+  const policy = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (policy === "internal-primary" || policy === "bidirectional") {
+    return policy;
+  }
+  return "internal-primary";
+}
+
+function normalizeProjectRequirementsProfile(value) {
+  const profile = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (
+    [
+      "simple-feature",
+      "feature",
+      "large-feature",
+      "system",
+      "multi-system",
+    ].includes(profile)
+  ) {
+    return profile;
+  }
+  return "feature";
 }
 
 function loadExecutorConfig(configDir, configData) {
@@ -958,15 +991,172 @@ export function loadConfig(argv = process.argv, options = {}) {
   // Allows the monitor to run tasks via agent-pool directly instead of
   // (or alongside) the VK executor. Modes: "internal" (default), "vk", "hybrid".
   const kanbanBackend = normalizeKanbanBackend(
-    process.env.KANBAN_BACKEND || configData.kanban?.backend || "github",
+    process.env.KANBAN_BACKEND || configData.kanban?.backend || "internal",
+  );
+  const kanbanSyncPolicy = normalizeKanbanSyncPolicy(
+    process.env.KANBAN_SYNC_POLICY || configData.kanban?.syncPolicy,
   );
   const kanban = Object.freeze({
     backend: kanbanBackend,
     projectId:
       process.env.KANBAN_PROJECT_ID || configData.kanban?.projectId || null,
+    syncPolicy: kanbanSyncPolicy,
+  });
+  const githubProjectSync = Object.freeze({
+    webhookPath:
+      process.env.GITHUB_PROJECT_WEBHOOK_PATH ||
+      configData.kanban?.github?.project?.webhook?.path ||
+      "/api/webhooks/github/project-sync",
+    webhookSecret:
+      process.env.GITHUB_PROJECT_WEBHOOK_SECRET ||
+      process.env.GITHUB_WEBHOOK_SECRET ||
+      configData.kanban?.github?.project?.webhook?.secret ||
+      "",
+    webhookRequireSignature: isEnvEnabled(
+      process.env.GITHUB_PROJECT_WEBHOOK_REQUIRE_SIGNATURE ??
+        configData.kanban?.github?.project?.webhook?.requireSignature,
+      Boolean(
+        process.env.GITHUB_PROJECT_WEBHOOK_SECRET ||
+          process.env.GITHUB_WEBHOOK_SECRET ||
+          configData.kanban?.github?.project?.webhook?.secret,
+      ),
+    ),
+    alertFailureThreshold: Math.max(
+      1,
+      Number(
+        process.env.GITHUB_PROJECT_SYNC_ALERT_FAILURE_THRESHOLD ||
+          configData.kanban?.github?.project?.syncMonitoring
+            ?.alertFailureThreshold ||
+          3,
+      ),
+    ),
+    rateLimitAlertThreshold: Math.max(
+      1,
+      Number(
+        process.env.GITHUB_PROJECT_SYNC_RATE_LIMIT_ALERT_THRESHOLD ||
+          configData.kanban?.github?.project?.syncMonitoring
+            ?.rateLimitAlertThreshold ||
+          3,
+      ),
+    ),
+  });
+  const jira = Object.freeze({
+    baseUrl:
+      process.env.JIRA_BASE_URL || configData.kanban?.jira?.baseUrl || "",
+    email: process.env.JIRA_EMAIL || configData.kanban?.jira?.email || "",
+    apiToken:
+      process.env.JIRA_API_TOKEN || configData.kanban?.jira?.apiToken || "",
+    projectKey:
+      process.env.JIRA_PROJECT_KEY || configData.kanban?.jira?.projectKey || "",
+    issueType:
+      process.env.JIRA_ISSUE_TYPE ||
+      configData.kanban?.jira?.issueType ||
+      "Task",
+    statusMapping: Object.freeze({
+      todo:
+        process.env.JIRA_STATUS_TODO ||
+        configData.kanban?.jira?.statusMapping?.todo ||
+        "To Do",
+      inprogress:
+        process.env.JIRA_STATUS_INPROGRESS ||
+        configData.kanban?.jira?.statusMapping?.inprogress ||
+        "In Progress",
+      inreview:
+        process.env.JIRA_STATUS_INREVIEW ||
+        configData.kanban?.jira?.statusMapping?.inreview ||
+        "In Review",
+      done:
+        process.env.JIRA_STATUS_DONE ||
+        configData.kanban?.jira?.statusMapping?.done ||
+        "Done",
+      cancelled:
+        process.env.JIRA_STATUS_CANCELLED ||
+        configData.kanban?.jira?.statusMapping?.cancelled ||
+        "Cancelled",
+    }),
+    labels: Object.freeze({
+      claimed:
+        process.env.JIRA_LABEL_CLAIMED ||
+        configData.kanban?.jira?.labels?.claimed ||
+        "codex:claimed",
+      working:
+        process.env.JIRA_LABEL_WORKING ||
+        configData.kanban?.jira?.labels?.working ||
+        "codex:working",
+      stale:
+        process.env.JIRA_LABEL_STALE ||
+        configData.kanban?.jira?.labels?.stale ||
+        "codex:stale",
+      ignore:
+        process.env.JIRA_LABEL_IGNORE ||
+        configData.kanban?.jira?.labels?.ignore ||
+        "codex:ignore",
+    }),
+    sharedStateFields: Object.freeze({
+      ownerId:
+        process.env.JIRA_CUSTOM_FIELD_OWNER_ID ||
+        configData.kanban?.jira?.sharedStateFields?.ownerId ||
+        "",
+      attemptToken:
+        process.env.JIRA_CUSTOM_FIELD_ATTEMPT_TOKEN ||
+        configData.kanban?.jira?.sharedStateFields?.attemptToken ||
+        "",
+      attemptStarted:
+        process.env.JIRA_CUSTOM_FIELD_ATTEMPT_STARTED ||
+        configData.kanban?.jira?.sharedStateFields?.attemptStarted ||
+        "",
+      heartbeat:
+        process.env.JIRA_CUSTOM_FIELD_HEARTBEAT ||
+        configData.kanban?.jira?.sharedStateFields?.heartbeat ||
+        "",
+      retryCount:
+        process.env.JIRA_CUSTOM_FIELD_RETRY_COUNT ||
+        configData.kanban?.jira?.sharedStateFields?.retryCount ||
+        "",
+      ignoreReason:
+        process.env.JIRA_CUSTOM_FIELD_IGNORE_REASON ||
+        configData.kanban?.jira?.sharedStateFields?.ignoreReason ||
+        "",
+    }),
   });
 
   const internalExecutorConfig = configData.internalExecutor || {};
+  const projectRequirements = {
+    profile: normalizeProjectRequirementsProfile(
+      process.env.PROJECT_REQUIREMENTS_PROFILE ||
+        configData.projectRequirements?.profile ||
+        internalExecutorConfig.projectRequirements?.profile ||
+        "feature",
+    ),
+    notes: String(
+      process.env.PROJECT_REQUIREMENTS_NOTES ||
+        configData.projectRequirements?.notes ||
+        internalExecutorConfig.projectRequirements?.notes ||
+        "",
+    ).trim(),
+  };
+  const replenishMin = Math.max(
+    1,
+    Math.min(
+      2,
+      Number(
+        process.env.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS ||
+          internalExecutorConfig.backlogReplenishment?.minNewTasks ||
+          1,
+      ),
+    ),
+  );
+  const replenishMax = Math.max(
+    replenishMin,
+    Math.min(
+      3,
+      Number(
+        process.env.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS ||
+          internalExecutorConfig.backlogReplenishment?.maxNewTasks ||
+          2,
+      ),
+    ),
+  );
   const executorMode = (
     process.env.EXECUTOR_MODE ||
     internalExecutorConfig.mode ||
@@ -1031,6 +1221,19 @@ export function loadConfig(argv = process.argv, options = {}) {
         internalExecutorConfig.taskClaimRenewIntervalMs ||
         5 * 60 * 1000,
     ),
+    backlogReplenishment: {
+      enabled: isEnvEnabled(
+        process.env.INTERNAL_EXECUTOR_REPLENISH_ENABLED,
+        internalExecutorConfig.backlogReplenishment?.enabled === true,
+      ),
+      minNewTasks: replenishMin,
+      maxNewTasks: replenishMax,
+      requirePriority: isEnvEnabled(
+        process.env.INTERNAL_EXECUTOR_REPLENISH_REQUIRE_PRIORITY,
+        internalExecutorConfig.backlogReplenishment?.requirePriority !== false,
+      ),
+    },
+    projectRequirements,
   };
 
   // ── Vibe-Kanban ──────────────────────────────────────────
@@ -1333,6 +1536,9 @@ export function loadConfig(argv = process.argv, options = {}) {
     internalExecutor,
     executorMode: internalExecutor.mode,
     kanban,
+    githubProjectSync,
+    jira,
+    projectRequirements,
 
     // Merge Strategy
     codexAnalyzeMergeStrategy:
