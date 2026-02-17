@@ -5,6 +5,7 @@
  */
 
 import { loadConfig } from "./config.mjs";
+import { getSessionTracker } from "./session-tracker.mjs";
 import {
   execCodexPrompt,
   steerCodexPrompt,
@@ -209,7 +210,24 @@ export async function execPrimaryPrompt(userMessage, options = {}) {
   if (!initialized) {
     await initPrimaryAgent();
   }
-  return activeAdapter.exec(userMessage, options);
+  const sessionId = `primary-${activeAdapter.name}`;
+  const tracker = getSessionTracker();
+  tracker.recordEvent(sessionId, {
+    role: "user",
+    content: userMessage,
+    timestamp: new Date().toISOString(),
+    _sessionType: "primary",
+  });
+  const result = await activeAdapter.exec(userMessage, options);
+  if (result) {
+    tracker.recordEvent(sessionId, {
+      role: "assistant",
+      content: typeof result === "string" ? result : JSON.stringify(result),
+      timestamp: new Date().toISOString(),
+      _sessionType: "primary",
+    });
+  }
+  return result;
 }
 
 export async function steerPrimaryPrompt(message) {

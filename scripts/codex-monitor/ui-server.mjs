@@ -49,6 +49,14 @@ import {
   loadWorkspaceRegistry,
   getLocalWorkspace,
 } from "./workspace-registry.mjs";
+import {
+  getSessionTracker,
+} from "./session-tracker.mjs";
+import {
+  collectDiffStats,
+  getCompactDiffSummary,
+  getRecentCommits,
+} from "./diff-stats.mjs";
 
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const repoRoot = resolve(__dirname, "..", "..");
@@ -1826,6 +1834,150 @@ async function handleApi(req, res, url) {
       jsonResponse(res, 500, { ok: false, error: err.message });
     }
     return;
+  }
+
+  // ── Session API endpoints ──────────────────────────────────────────────
+
+  if (path === "/api/sessions" && req.method === "GET") {
+    try {
+      const tracker = getSessionTracker();
+      let sessions = tracker.listAllSessions();
+      const typeFilter = url.searchParams.get("type");
+      const statusFilter = url.searchParams.get("status");
+      if (typeFilter) sessions = sessions.filter((s) => s.type === typeFilter);
+      if (statusFilter) sessions = sessions.filter((s) => s.status === statusFilter);
+      jsonResponse(res, 200, { ok: true, sessions });
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
+  if (path === "/api/sessions/create" && req.method === "POST") {
+    try {
+      const body = await readJsonBody(req);
+      const type = body?.type || "manual";
+      const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const tracker = getSessionTracker();
+      const session = tracker.createSession({
+        id,
+        type,
+        metadata: { prompt: body?.prompt },
+      });
+      jsonResponse(res, 200, { ok: true, session: { id: session.id, type: session.type, status: session.status } });
+      broadcastUiEvent(["sessions"], "invalidate", { reason: "session-created", sessionId: id });
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
+  // Parameterized session routes: /api/sessions/:id[/action]
+  const sessionMatch = path.match(/^\/api\/sessions\/([^/]+)(?:\/(.+))?$/);
+  if (sessionMatch) {
+    const sessionId = decodeURIComponent(sessionMatch[1]);
+    const action = sessionMatch[2] || null;
+
+    if (!action && req.method === "GET") {
+      try {
+        const tracker = getSessionTracker();
+        const session = tracker.getSessionMessages(sessionId);
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Session not found" });
+          return;
+        }
+        jsonResponse(res, 200, { ok: true, session });
+      } catch (err) {
+        jsonResponse(res, 500, { ok: false, error: err.message });
+      }
+      return;
+    }
+
+    if (action === "message" && req.method === "POST") {
+      try {
+        const tracker = getSessionTracker();
+        const session = tracker.getSessionById(sessionId);
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Session not found" });
+          return;
+        }
+        if (session.status === "paused" || session.status === "archived") {
+          jsonResponse(res, 400, { ok: false, error: `Session is ${session.status}` });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const content = body?.content;
+        if (!content) {
+          jsonResponse(res, 400, { ok: false, error: "content is required" });
+          return;
+        }
+        const messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        tracker.recordEvent(sessionId, { role: "user", content, timestamp: new Date().toISOString() });
+
+        // Forward to primary agent if applicable
+        if (session.type === "primary") {
+          const exec = uiDeps.execPrimaryPrompt;
+          if (exec) {
+            try {
+              const result = await exec(content);
+              if (result) {
+                tracker.recordEvent(sessionId, {
+                  role: "assistant",
+                  content: typeof result === "string" ? result : JSON.stringify(result),
+                  timestamp: new Date().toISOString(),
+                });
+              }
+            } catch { /* best-effort forwarding */ }
+          }
+        }
+
+        jsonResponse(res, 200, { ok: true, messageId });
+        broadcastUiEvent(["sessions"], "invalidate", { reason: "session-message", sessionId });
+      } catch (err) {
+        jsonResponse(res, 500, { ok: false, error: err.message });
+      }
+      return;
+    }
+
+    if (action === "resume" && req.method === "POST") {
+      try {
+        const tracker = getSessionTracker();
+        const session = tracker.getSessionById(sessionId);
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Session not found" });
+          return;
+        }
+        tracker.updateSessionStatus(sessionId, "active");
+        jsonResponse(res, 200, { ok: true });
+        broadcastUiEvent(["sessions"], "invalidate", { reason: "session-resumed", sessionId });
+      } catch (err) {
+        jsonResponse(res, 500, { ok: false, error: err.message });
+      }
+      return;
+    }
+
+    if (action === "diff" && req.method === "GET") {
+      try {
+        const tracker = getSessionTracker();
+        const session = tracker.getSessionById(sessionId);
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Session not found" });
+          return;
+        }
+        const worktreePath = session.metadata?.worktreePath;
+        if (!worktreePath || !existsSync(worktreePath)) {
+          jsonResponse(res, 200, { ok: true, diff: { files: [], totalFiles: 0, totalAdditions: 0, totalDeletions: 0, formatted: "(no worktree)" }, summary: "(no worktree)", commits: [] });
+          return;
+        }
+        const stats = collectDiffStats(worktreePath);
+        const summary = getCompactDiffSummary(worktreePath);
+        const commits = getRecentCommits(worktreePath);
+        jsonResponse(res, 200, { ok: true, diff: stats, summary, commits });
+      } catch (err) {
+        jsonResponse(res, 500, { ok: false, error: err.message });
+      }
+      return;
+    }
   }
 
   jsonResponse(res, 404, { ok: false, error: "Unknown API endpoint" });

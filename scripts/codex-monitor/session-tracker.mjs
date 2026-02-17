@@ -5,8 +5,18 @@
  * messages as context for the reviewer agent, including both agent outputs and
  * tool calls/results.
  *
+ * Supports disk persistence: each session is stored as a JSON file in
+ * `logs/sessions/<sessionId>.json` and auto-loaded on init.
+ *
  * @module session-tracker
  */
+
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const SESSIONS_DIR = resolve(__dirname, "logs", "sessions");
 
 const TAG = "[session-tracker]";
 
@@ -41,6 +51,9 @@ const MAX_SESSIONS = 50;
  * @property {number} lastActivityAt  - Timestamp of last event
  */
 
+/** Debounce interval for disk writes (ms). */
+const FLUSH_INTERVAL_MS = 2000;
+
 // ── SessionTracker Class ────────────────────────────────────────────────────
 
 export class SessionTracker {
@@ -53,14 +66,32 @@ export class SessionTracker {
   /** @type {number} idle threshold (ms) — 2 minutes without events = idle */
   #idleThresholdMs;
 
+  /** @type {string|null} directory for session JSON files */
+  #persistDir;
+
+  /** @type {Set<string>} session IDs with pending disk writes */
+  #dirty = new Set();
+
+  /** @type {ReturnType<typeof setInterval>|null} */
+  #flushTimer = null;
+
   /**
    * @param {Object} [options]
    * @param {number} [options.maxMessages=10]
    * @param {number} [options.idleThresholdMs=120000]
+   * @param {string|null} [options.persistDir] — null disables persistence
    */
   constructor(options = {}) {
     this.#maxMessages = options.maxMessages ?? DEFAULT_MAX_MESSAGES;
     this.#idleThresholdMs = options.idleThresholdMs ?? 180_000; // 3 minutes — gives agents breathing room
+    this.#persistDir = options.persistDir !== undefined ? options.persistDir : null;
+
+    if (this.#persistDir) {
+      this.#ensureDir();
+      this.#loadFromDisk();
+      this.#flushTimer = setInterval(() => this.#flushDirty(), FLUSH_INTERVAL_MS);
+      if (this.#flushTimer.unref) this.#flushTimer.unref();
+    }
   }
 
   /**
@@ -84,13 +115,20 @@ export class SessionTracker {
     this.#sessions.set(taskId, {
       taskId,
       taskTitle,
+      id: taskId,
+      type: "task",
       startedAt: Date.now(),
+      createdAt: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString(),
       endedAt: null,
       messages: [],
       totalEvents: 0,
+      turnCount: 0,
       status: "active",
       lastActivityAt: Date.now(),
+      metadata: {},
     });
+    this.#markDirty(taskId);
   }
 
   /**
@@ -102,24 +140,58 @@ export class SessionTracker {
    * - Copilot: { type: "message"|"tool_call"|"tool_result", ... }
    * - Claude: { type: "content_block_delta"|"message_stop", ... }
    *
+   * Also supports direct message objects: { role, content, timestamp, turnIndex }
+   *
+   * Auto-creates sessions for unknown taskIds when the event carries enough info.
+   *
    * @param {string} taskId
-   * @param {Object} event - Raw SDK event
+   * @param {Object} event - Raw SDK event or direct message object
    */
   recordEvent(taskId, event) {
-    const session = this.#sessions.get(taskId);
-    if (!session) return;
+    let session = this.#sessions.get(taskId);
+
+    // Auto-create session if it doesn't exist yet
+    if (!session) {
+      if (event && (event.role || event.type)) {
+        this.#autoCreateSession(taskId, event);
+        session = this.#sessions.get(taskId);
+      }
+      if (!session) return;
+    }
 
     session.totalEvents++;
     session.lastActivityAt = Date.now();
+    session.lastActiveAt = new Date().toISOString();
+
+    // Direct message format (role/content)
+    if (event && event.role && event.content !== undefined) {
+      const msg = {
+        role: event.role,
+        content: String(event.content).slice(0, MAX_MESSAGE_CHARS),
+        timestamp: event.timestamp || new Date().toISOString(),
+        turnIndex: event.turnIndex ?? session.turnCount,
+      };
+      session.turnCount++;
+      session.messages.push(msg);
+      if (session.messages.length > this.#maxMessages) {
+        session.messages.shift();
+      }
+      this.#markDirty(taskId);
+      return;
+    }
 
     const msg = this.#normalizeEvent(event);
-    if (!msg) return; // Skip uninteresting events
+    if (!msg) {
+      this.#markDirty(taskId);
+      return; // Skip uninteresting events — still update timestamp
+    }
 
     // Push to ring buffer (keep only last N)
     session.messages.push(msg);
     if (session.messages.length > this.#maxMessages) {
       session.messages.shift();
     }
+    this.#markDirty(taskId);
   }
 
   /**
@@ -133,6 +205,7 @@ export class SessionTracker {
 
     session.endedAt = Date.now();
     session.status = status;
+    this.#markDirty(taskId);
   }
 
   /**
@@ -171,7 +244,7 @@ export class SessionTracker {
 
     const lines = messages.map((msg) => {
       const ts = new Date(msg.timestamp).toISOString().slice(11, 19);
-      const prefix = this.#typePrefix(msg.type);
+      const prefix = this.#typePrefix(msg.type || msg.role || "unknown");
       const meta = msg.meta?.toolName ? ` [${msg.meta.toolName}]` : "";
       return `[${ts}] ${prefix}${meta}: ${msg.content}`;
     });
@@ -313,7 +386,213 @@ export class SessionTracker {
     return { active, completed, total: this.#sessions.size };
   }
 
+  // ── Persistence API ─────────────────────────────────────────────────────
+
+  /**
+   * Create a new session with explicit options.
+   * @param {{ id: string, type?: string, taskId?: string, metadata?: Object }} opts
+   */
+  createSession({ id, type = "manual", taskId, metadata = {} }) {
+    const now = new Date().toISOString();
+    const session = {
+      id,
+      taskId: taskId || id,
+      taskTitle: metadata.title || id,
+      type,
+      status: "active",
+      createdAt: now,
+      lastActiveAt: now,
+      startedAt: Date.now(),
+      endedAt: null,
+      messages: [],
+      totalEvents: 0,
+      turnCount: 0,
+      lastActivityAt: Date.now(),
+      metadata,
+    };
+    this.#sessions.set(id, session);
+    this.#markDirty(id);
+    this.#flushDirty(); // immediate write for create
+    return session;
+  }
+
+  /**
+   * List all sessions (metadata only, no full messages).
+   * Sorted by lastActiveAt descending.
+   * @returns {Array<Object>}
+   */
+  listAllSessions() {
+    const list = [];
+    for (const s of this.#sessions.values()) {
+      list.push({
+        id: s.id || s.taskId,
+        taskId: s.taskId,
+        type: s.type || "task",
+        status: s.status,
+        turnCount: s.turnCount || 0,
+        createdAt: s.createdAt || new Date(s.startedAt).toISOString(),
+        lastActiveAt: s.lastActiveAt || new Date(s.lastActivityAt).toISOString(),
+        preview: this.#lastMessagePreview(s),
+      });
+    }
+    list.sort((a, b) => (b.lastActiveAt || "").localeCompare(a.lastActiveAt || ""));
+    return list;
+  }
+
+  /**
+   * Get full session including all messages, read from disk if needed.
+   * @param {string} sessionId
+   * @returns {Object|null}
+   */
+  getSessionMessages(sessionId) {
+    const session = this.#sessions.get(sessionId);
+    if (!session) return null;
+    return { ...session };
+  }
+
+  /**
+   * Get a session by id (alias for getSession with id lookup).
+   * @param {string} sessionId
+   * @returns {Object|null}
+   */
+  getSessionById(sessionId) {
+    return this.#sessions.get(sessionId) ?? null;
+  }
+
+  /**
+   * Update session status.
+   * @param {string} sessionId
+   * @param {string} status
+   */
+  updateSessionStatus(sessionId, status) {
+    const session = this.#sessions.get(sessionId);
+    if (!session) return;
+    session.status = status;
+    if (status === "completed" || status === "archived") {
+      session.endedAt = Date.now();
+    }
+    this.#markDirty(sessionId);
+  }
+
+  /**
+   * Flush all dirty sessions to disk immediately.
+   */
+  flush() {
+    this.#flushDirty();
+  }
+
+  /**
+   * Stop the flush timer (for cleanup).
+   */
+  destroy() {
+    if (this.#flushTimer) {
+      clearInterval(this.#flushTimer);
+      this.#flushTimer = null;
+    }
+    this.#flushDirty();
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
+
+  /** Auto-create a session when recordEvent is called for an unknown taskId. */
+  #autoCreateSession(taskId, event) {
+    const type = event._sessionType || "task";
+    this.createSession({
+      id: taskId,
+      type,
+      taskId,
+      metadata: { autoCreated: true },
+    });
+  }
+
+  /** Get preview text from last message */
+  #lastMessagePreview(session) {
+    const last = session.messages?.at(-1);
+    if (!last) return "";
+    const content = last.content || "";
+    return content.slice(0, 100);
+  }
+
+  #markDirty(sessionId) {
+    if (this.#persistDir) {
+      this.#dirty.add(sessionId);
+    }
+  }
+
+  #ensureDir() {
+    if (this.#persistDir && !existsSync(this.#persistDir)) {
+      mkdirSync(this.#persistDir, { recursive: true });
+    }
+  }
+
+  #sessionFilePath(sessionId) {
+    // Sanitize sessionId for filesystem safety
+    const safe = String(sessionId).replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+    return resolve(this.#persistDir, `${safe}.json`);
+  }
+
+  #flushDirty() {
+    if (!this.#persistDir || this.#dirty.size === 0) return;
+    this.#ensureDir();
+    for (const sessionId of this.#dirty) {
+      const session = this.#sessions.get(sessionId);
+      if (!session) continue;
+      try {
+        const filePath = this.#sessionFilePath(sessionId);
+        const data = {
+          id: session.id || session.taskId,
+          taskId: session.taskId,
+          type: session.type || "task",
+          status: session.status,
+          createdAt: session.createdAt || new Date(session.startedAt).toISOString(),
+          lastActiveAt: session.lastActiveAt || new Date(session.lastActivityAt).toISOString(),
+          turnCount: session.turnCount || 0,
+          messages: session.messages || [],
+          metadata: session.metadata || {},
+        };
+        writeFileSync(filePath, JSON.stringify(data, null, 2));
+      } catch (err) {
+        // Silently ignore write errors — disk persistence is best-effort
+      }
+    }
+    this.#dirty.clear();
+  }
+
+  #loadFromDisk() {
+    if (!this.#persistDir || !existsSync(this.#persistDir)) return;
+    try {
+      const files = readdirSync(this.#persistDir).filter((f) => f.endsWith(".json"));
+      for (const file of files) {
+        try {
+          const raw = readFileSync(resolve(this.#persistDir, file), "utf8");
+          const data = JSON.parse(raw);
+          if (!data.id && !data.taskId) continue;
+          const id = data.id || data.taskId;
+          if (this.#sessions.has(id)) continue; // don't overwrite in-memory
+          this.#sessions.set(id, {
+            id,
+            taskId: data.taskId || id,
+            taskTitle: data.metadata?.title || id,
+            type: data.type || "task",
+            status: data.status || "completed",
+            createdAt: data.createdAt || new Date().toISOString(),
+            lastActiveAt: data.lastActiveAt || new Date().toISOString(),
+            startedAt: data.createdAt ? new Date(data.createdAt).getTime() : Date.now(),
+            endedAt: data.status !== "active" ? Date.now() : null,
+            messages: data.messages || [],
+            totalEvents: (data.messages || []).length,
+            turnCount: data.turnCount || 0,
+            lastActivityAt: data.lastActiveAt ? new Date(data.lastActiveAt).getTime() : Date.now(),
+            metadata: data.metadata || {},
+          });
+        } catch {
+          // Skip corrupt files
+        }
+      }
+    } catch {
+      // Directory read failed — proceed without disk data
+    }
+  }
 
   /**
    * Normalize a raw SDK event into a SessionMessage.
@@ -429,9 +708,57 @@ export class SessionTracker {
       case "tool_result":   return "RESULT";
       case "error":         return "ERROR";
       case "system":        return "SYS";
+      case "user":          return "USER";
+      case "assistant":     return "ASSISTANT";
       default:              return type.toUpperCase();
     }
   }
+}
+
+// ── Standalone exported functions (delegate to singleton) ───────────────────
+
+/**
+ * List all sessions (metadata only).
+ * @returns {Array<Object>}
+ */
+export function listAllSessions() {
+  return getSessionTracker().listAllSessions();
+}
+
+/**
+ * Get full session with all messages.
+ * @param {string} sessionId
+ * @returns {Object|null}
+ */
+export function getSessionMessages(sessionId) {
+  return getSessionTracker().getSessionMessages(sessionId);
+}
+
+/**
+ * Create a new session.
+ * @param {{ id: string, type?: string, taskId?: string, metadata?: Object }} opts
+ * @returns {Object}
+ */
+export async function createSession(opts) {
+  return getSessionTracker().createSession(opts);
+}
+
+/**
+ * Update session status.
+ * @param {string} sessionId
+ * @param {string} status
+ */
+export function updateSessionStatus(sessionId, status) {
+  return getSessionTracker().updateSessionStatus(sessionId, status);
+}
+
+/**
+ * Get a session by id.
+ * @param {string} sessionId
+ * @returns {Object|null}
+ */
+export function getSessionById(sessionId) {
+  return getSessionTracker().getSessionById(sessionId);
 }
 
 // ── Singleton ───────────────────────────────────────────────────────────────
@@ -446,7 +773,10 @@ let _instance = null;
  */
 export function getSessionTracker(options) {
   if (!_instance) {
-    _instance = new SessionTracker(options);
+    _instance = new SessionTracker({
+      persistDir: SESSIONS_DIR,
+      ...options,
+    });
     console.log(`${TAG} initialized (maxMessages=${_instance.getStats ? DEFAULT_MAX_MESSAGES : "?"})`);
   }
   return _instance;
