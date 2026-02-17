@@ -20,7 +20,7 @@ import {
 } from "../modules/state.js";
 import { ICONS } from "../modules/icons.js";
 import { cloneValue } from "../modules/utils.js";
-import { Card, Badge } from "../components/shared.js";
+import { Card, Badge, SkeletonCard } from "../components/shared.js";
 import { SegmentedControl, SliderControl } from "../components/forms.js";
 
 /* ─── Command history (up to 10 recent) ─── */
@@ -161,6 +161,9 @@ export function ControlTab() {
   }, [quickCmdInput, quickCmdPrefix, sendCmd]);
 
   return html`
+    <!-- Loading skeleton -->
+    ${!executor && !config && html`<${Card} title="Loading…"><${SkeletonCard} /><//>`}
+
     <!-- ── Executor Controls ── -->
     <${Card} title="Executor Controls">
       <div class="meta-text mb-sm">

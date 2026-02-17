@@ -92,6 +92,11 @@
   display: block;
 }
 
+/* Smooth tab content opacity transition */
+.main-content > * {
+  animation: fadeSlideUp 0.2s ease both;
+}
+
 /* ─── Bottom Navigation ─── */
 .bottom-nav {
   position: fixed;
@@ -150,6 +155,15 @@
   height: 2px;
   border-radius: 0 0 2px 2px;
   background: var(--accent);
+}
+
+.nav-item.active::after {
+  content: "";
+  position: absolute;
+  inset: 4px 6px;
+  border-radius: var(--radius-md, 10px);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  z-index: -1;
 }
 
 .nav-item svg {
@@ -219,6 +233,12 @@
   }
 
   .nav-item {
-    min-width: 72px;
+    min-width: 80px;
+    gap: 4px;
+  }
+
+  .nav-label {
+    font-size: 11px;
+    font-weight: 600;
   }
 }

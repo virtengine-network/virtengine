@@ -213,14 +213,18 @@ export function ToastContainer() {
 
 /**
  * Empty state display.
- * @param {{icon?: string, title?: string, description?: string, action?: {label: string, onClick: () => void}}} props
+ * @param {{icon?: string, title?: string, message?: string, description?: string, action?: {label: string, onClick: () => void}}} props
  */
-export function EmptyState({ icon, title, description, action }) {
+export function EmptyState({ icon, title, message, description, action }) {
   const iconSvg = icon && ICONS[icon] ? ICONS[icon] : null;
+  const displayIcon = iconSvg ? html`<div class="empty-state-icon">${iconSvg}</div>`
+    : icon ? html`<div class="empty-state-icon">${icon}</div>`
+    : null;
+  const displayTitle = title || message || null;
   return html`
     <div class="empty-state">
-      ${iconSvg ? html`<div class="empty-state-icon">${iconSvg}</div>` : null}
-      ${title ? html`<div class="empty-state-title">${title}</div>` : null}
+      ${displayIcon}
+      ${displayTitle ? html`<div class="empty-state-title">${displayTitle}</div>` : null}
       ${description
         ? html`<div class="empty-state-description">${description}</div>`
         : null}

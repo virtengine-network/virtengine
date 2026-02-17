@@ -34,7 +34,7 @@ import {
 } from "../modules/state.js";
 import { ICONS } from "../modules/icons.js";
 import { formatBytes } from "../modules/utils.js";
-import { Card, Badge, EmptyState } from "../components/shared.js";
+import { Card, Badge, EmptyState, SkeletonCard } from "../components/shared.js";
 import { SearchInput } from "../components/forms.js";
 
 /* ─── Log level helpers ─── */
@@ -186,6 +186,9 @@ export function LogsTab() {
   };
 
   return html`
+    <!-- Loading skeleton -->
+    ${!logsData?.value && !agentLogFiles?.value && html`<${Card} title="Loading Logs…"><${SkeletonCard} /><//>`}
+
     <!-- ── System Logs ── -->
     <${Card} title="System Logs">
       <div class="range-row mb-sm">

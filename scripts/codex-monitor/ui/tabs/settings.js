@@ -21,7 +21,7 @@ import {
   configData,
   showToast,
 } from "../modules/state.js";
-import { Card, Badge, ListItem } from "../components/shared.js";
+import { Card, Badge, ListItem, SkeletonCard } from "../components/shared.js";
 import { SegmentedControl, Collapsible, Toggle } from "../components/forms.js";
 
 /* ─── CloudStorage helpers ─── */
@@ -221,6 +221,8 @@ export function SettingsTab() {
       : "";
 
   return html`
+    ${!loaded && html`<${Card} title="Loading Settings…"><${SkeletonCard} /><//>`}
+
     <!-- ─── Account ─── -->
     <${Collapsible} title="👤 Account" defaultOpen=${true}>
       <${Card}>

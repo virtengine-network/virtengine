@@ -55,6 +55,20 @@
   --viewport-height: var(--tg-viewport-height, 100vh);
   --viewport-stable-height: var(--tg-viewport-stable-height, 100vh);
 
+  /* Spacing scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* Semantic accent aliases */
+  --accent-primary: var(--accent);
+  --accent-success: var(--color-done);
+  --accent-warning: var(--color-inreview);
+  --accent-error: var(--color-error);
+  --accent-danger: var(--color-error);
+
   /* Layout */
   --header-height: 52px;
   --nav-height: 56px;
