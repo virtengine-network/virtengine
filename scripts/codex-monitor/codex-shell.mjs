@@ -216,7 +216,7 @@ Key files:
 `;
 
 const THREAD_OPTIONS = {
-  sandboxMode: "danger-full-access",
+  sandboxMode: process.env.CODEX_SANDBOX || "workspace-write",
   workingDirectory: REPO_ROOT,
   skipGitRepoCheck: true,
   webSearchMode: "live",

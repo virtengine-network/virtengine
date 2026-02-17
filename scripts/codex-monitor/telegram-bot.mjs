@@ -946,6 +946,33 @@ function setStickyMenuState(chatId, patch) {
   stickyMenuState.set(chatId, { ...current, ...patch });
 }
 
+function isStickyMenuMessage(chatId, messageId) {
+  if (!chatId || !messageId) return false;
+  const state = stickyMenuState.get(chatId);
+  if (!state?.enabled || !state?.messageId) return false;
+  return String(state.messageId) === String(messageId);
+}
+
+function isStaleStickyMenuMessage(chatId, messageId) {
+  if (!chatId || !messageId) return false;
+  const state = stickyMenuState.get(chatId);
+  if (!state?.enabled || !state?.messageId) return false;
+  return String(state.messageId) !== String(messageId);
+}
+
+function ensureStickyMenuEnabled(chatId, messageId, screenId, params) {
+  const state = stickyMenuState.get(chatId);
+  if (state?.enabled) return true;
+  if (!messageId) return false;
+  setStickyMenuState(chatId, {
+    enabled: true,
+    messageId,
+    screenId: screenId || state?.screenId || "home",
+    params: params || state?.params || {},
+  });
+  return true;
+}
+
 function scheduleStickyMenuBump(chatId, lastMessageId) {
   const state = stickyMenuState.get(chatId);
   if (!state?.enabled || !state?.screenId) return;
@@ -3882,6 +3909,15 @@ async function showUiScreen(chatId, messageId, screenId, params = {}, opts = {})
     return;
   }
   const sticky = Boolean(opts.sticky);
+  const stickyActive = sticky || stickyMenuState.get(chatId)?.enabled;
+  const isCurrentSticky = isStickyMenuMessage(chatId, messageId);
+  const isStaleSticky =
+    !!messageId && stickyActive && !isCurrentSticky && isStaleStickyMenuMessage(chatId, messageId);
+  let resolvedMessageId = messageId;
+  if (isStaleSticky) {
+    await deleteDirect(chatId, messageId);
+    resolvedMessageId = null;
+  }
   const ctx = { chatId, params };
   const body =
     typeof screen.body === "function"
@@ -3897,12 +3933,17 @@ async function showUiScreen(chatId, messageId, screenId, params = {}, opts = {})
     parseMode: "Markdown",
     reply_markup: keyboard,
   };
-  if (messageId) {
-    await editDirect(chatId, messageId, text, sendOpts);
-    if (stickyMenuState.has(chatId)) {
-      setStickyMenuState(chatId, { screenId, params, messageId });
+  if (resolvedMessageId) {
+    await editDirect(chatId, resolvedMessageId, text, sendOpts);
+    if (stickyActive) {
+      setStickyMenuState(chatId, {
+        enabled: true,
+        screenId,
+        params,
+        messageId: resolvedMessageId,
+      });
     }
-  } else if (sticky) {
+  } else if (stickyActive) {
     const prev = stickyMenuState.get(chatId);
     if (prev?.messageId) {
       try {
@@ -3928,6 +3969,8 @@ async function showUiScreen(chatId, messageId, screenId, params = {}, opts = {})
 
 async function handleUiAction({ chatId, messageId, data }) {
   const { type, rest, raw } = parseUiAction(data);
+  const stickyEnabled = ensureStickyMenuEnabled(chatId, messageId);
+  const staleSticky = stickyEnabled && isStaleStickyMenuMessage(chatId, messageId);
   if (type === "cancel") {
     clearPendingUiInput(chatId);
     await sendReply(chatId, "✅ Input cancelled.");
@@ -3940,17 +3983,27 @@ async function handleUiAction({ chatId, messageId, data }) {
   if (type === "go") {
     const screenId = rest[0];
     const page = rest[1] ? parsePageParam(rest[1]) : 0;
-    await showUiScreen(chatId, messageId, screenId, { page }, {
-      sticky: stickyMenuState.get(chatId)?.enabled,
+    const resolvedMessageId =
+      staleSticky || !isStickyMenuMessage(chatId, messageId)
+        ? null
+        : messageId;
+    await showUiScreen(chatId, resolvedMessageId, screenId, { page }, {
+      sticky: stickyEnabled,
     });
     return;
   }
   if (type === "cmd") {
+    if (staleSticky && messageId) {
+      await deleteDirect(chatId, messageId);
+    }
     const command = raw.slice(4);
     await dispatchUiCommand(chatId, command);
     return;
   }
   if (type === "input") {
+    if (staleSticky && messageId) {
+      await deleteDirect(chatId, messageId);
+    }
     const key = rest[0];
     await promptUiInput(chatId, key);
     return;
@@ -3966,16 +4019,26 @@ async function handleUiAction({ chatId, messageId, data }) {
       return;
     }
     if (payload.type === "cmd") {
+      if (staleSticky && messageId) {
+        await deleteDirect(chatId, messageId);
+      }
       await dispatchUiCommand(chatId, payload.command);
       return;
     }
     if (payload.type === "input") {
+      if (staleSticky && messageId) {
+        await deleteDirect(chatId, messageId);
+      }
       await promptUiInput(chatId, payload.key, payload);
       return;
     }
     if (payload.type === "go") {
-      await showUiScreen(chatId, messageId, payload.screenId, payload.params, {
-        sticky: stickyMenuState.get(chatId)?.enabled,
+      const resolvedMessageId =
+        staleSticky || !isStickyMenuMessage(chatId, messageId)
+          ? null
+          : messageId;
+      await showUiScreen(chatId, resolvedMessageId, payload.screenId, payload.params, {
+        sticky: stickyEnabled,
       });
       return;
     }
@@ -7341,7 +7404,10 @@ async function handleFreeText(text, chatId, options = {}) {
     if (backgroundMode || activeAgentSession?.background) {
       await sendReply(chatId, finalMsg);
     } else {
-      await editDirect(chatId, messageId, finalMsg);
+      const finalMessageId = await editDirect(chatId, messageId, finalMsg);
+      if (finalMessageId) {
+        scheduleStickyMenuBump(chatId, finalMessageId);
+      }
     }
   } catch (err) {
     if (editTimer) clearTimeout(editTimer);
@@ -7360,7 +7426,10 @@ async function handleFreeText(text, chatId, options = {}) {
     if (backgroundMode || activeAgentSession?.background) {
       await sendReply(chatId, finalMsg);
     } else {
-      await editDirect(chatId, messageId, finalMsg);
+      const finalMessageId = await editDirect(chatId, messageId, finalMsg);
+      if (finalMessageId) {
+        scheduleStickyMenuBump(chatId, finalMessageId);
+      }
     }
   } finally {
     // ── Clean up agent session ────────────────────────────────────

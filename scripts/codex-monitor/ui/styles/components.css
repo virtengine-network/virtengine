@@ -2,32 +2,21 @@
 
 /* ─── Cards ─── */
 .card {
-  background: var(--glass-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: var(--bg-card);
   border-radius: var(--radius-lg);
   padding: var(--space-md);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--shadow-sm), var(--shadow-inset);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
   margin-bottom: var(--space-md, 12px);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
   position: relative;
   overflow: hidden;
 }
 
-.card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: var(--gradient-surface);
-  pointer-events: none;
-  border-radius: inherit;
-}
-
 .card:hover {
-  box-shadow: var(--shadow-md), var(--shadow-glow-sm);
-  border-color: var(--border-glow);
-  transform: translateY(-1px);
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
 }
 
 .card-title {
@@ -55,30 +44,20 @@
 }
 
 .stat-card {
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-card);
   border-radius: var(--radius-md);
   padding: 16px 12px;
   text-align: center;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   position: relative;
   overflow: hidden;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
-}
-
-.stat-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: var(--gradient-surface);
-  pointer-events: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
 }
 
 .stat-card:hover {
-  border-color: var(--border-glow);
-  box-shadow: var(--shadow-glow-sm);
-  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-md);
 }
 
 .stat-value {
@@ -117,77 +96,75 @@
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   border: 1px solid transparent;
 }
 
 .badge-todo {
-  background: rgba(139, 149, 162, 0.12);
+  background: rgba(139, 148, 158, 0.15);
   color: var(--color-todo);
-  border-color: rgba(139, 149, 162, 0.15);
+  border-color: rgba(139, 148, 158, 0.25);
 }
 .badge-inprogress {
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(88, 166, 255, 0.18);
   color: var(--color-inprogress);
-  border-color: rgba(99, 102, 241, 0.2);
+  border-color: rgba(88, 166, 255, 0.35);
 }
 .badge-inreview {
-  background: rgba(245, 158, 11, 0.12);
+  background: rgba(210, 153, 34, 0.18);
   color: var(--color-inreview);
-  border-color: rgba(245, 158, 11, 0.2);
+  border-color: rgba(210, 153, 34, 0.35);
 }
 .badge-done {
-  background: rgba(16, 185, 129, 0.12);
+  background: rgba(46, 160, 67, 0.18);
   color: var(--color-done);
-  border-color: rgba(16, 185, 129, 0.2);
+  border-color: rgba(46, 160, 67, 0.35);
 }
 .badge-error {
-  background: rgba(248, 113, 113, 0.12);
+  background: rgba(248, 81, 73, 0.18);
   color: var(--color-error);
-  border-color: rgba(248, 113, 113, 0.2);
+  border-color: rgba(248, 81, 73, 0.35);
 }
 .badge-cancelled {
-  background: rgba(107, 114, 128, 0.12);
+  background: rgba(110, 118, 129, 0.18);
   color: var(--color-cancelled);
-  border-color: rgba(107, 114, 128, 0.15);
+  border-color: rgba(110, 118, 129, 0.3);
 }
 
 .badge-critical {
-  background: rgba(220, 38, 38, 0.12);
+  background: rgba(248, 81, 73, 0.18);
   color: var(--color-critical);
-  border-color: rgba(220, 38, 38, 0.2);
+  border-color: rgba(248, 81, 73, 0.35);
 }
 .badge-high {
-  background: rgba(245, 158, 11, 0.12);
+  background: rgba(210, 153, 34, 0.18);
   color: var(--color-high);
-  border-color: rgba(245, 158, 11, 0.2);
+  border-color: rgba(210, 153, 34, 0.35);
 }
 .badge-medium {
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(88, 166, 255, 0.18);
   color: var(--color-medium);
-  border-color: rgba(99, 102, 241, 0.2);
+  border-color: rgba(88, 166, 255, 0.35);
 }
 .badge-low {
-  background: rgba(139, 149, 162, 0.12);
+  background: rgba(139, 148, 158, 0.15);
   color: var(--color-low);
-  border-color: rgba(139, 149, 162, 0.15);
+  border-color: rgba(139, 148, 158, 0.25);
 }
 
 .badge-info {
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(88, 166, 255, 0.18);
   color: var(--color-inprogress);
-  border-color: rgba(99, 102, 241, 0.2);
+  border-color: rgba(88, 166, 255, 0.35);
 }
 .badge-warning {
-  background: rgba(245, 158, 11, 0.12);
+  background: rgba(210, 153, 34, 0.18);
   color: var(--color-inreview);
-  border-color: rgba(245, 158, 11, 0.2);
+  border-color: rgba(210, 153, 34, 0.35);
 }
 .badge-log {
-  background: rgba(139, 149, 162, 0.08);
+  background: rgba(139, 148, 158, 0.12);
   color: var(--text-secondary);
-  border-color: rgba(139, 149, 162, 0.1);
+  border-color: rgba(139, 148, 158, 0.2);
 }
 
 /* ─── Chips / Filters ─── */
@@ -203,13 +180,11 @@
   border-radius: var(--radius-full);
   font-size: 12px;
   font-weight: 600;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform 0.15s ease;
   min-height: 32px;
   display: inline-flex;
   align-items: center;
@@ -219,11 +194,15 @@
   transform: scale(0.95);
 }
 
+.chip:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
+}
+
 .chip.active {
-  background: var(--gradient-accent);
-  color: var(--accent-text);
-  border-color: transparent;
-  box-shadow: var(--shadow-glow-sm);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* ─── Buttons ─── */
@@ -238,7 +217,7 @@
   font-weight: 600;
   border: none;
   cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.15s ease, opacity 0.15s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   min-height: 44px;
   -webkit-tap-highlight-color: transparent;
   position: relative;
@@ -250,27 +229,32 @@
   opacity: 0.85;
 }
 
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .btn-primary {
-  background: var(--gradient-accent);
+  background: var(--accent);
   color: var(--accent-text);
-  box-shadow: var(--shadow-glow-sm);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-primary:hover {
-  box-shadow: var(--shadow-glow);
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-md);
 }
 
 .btn-secondary {
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-card);
   color: var(--text-primary);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
 }
 
 .btn-secondary:hover {
-  border-color: var(--border-glow);
-  box-shadow: var(--shadow-glow-sm);
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-ghost {
@@ -280,17 +264,17 @@
 }
 
 .btn-ghost:hover {
-  background: var(--glass-highlight);
+  background: var(--bg-card-hover);
 }
 
 .btn-danger {
-  background: rgba(248, 113, 113, 0.12);
+  background: rgba(248, 81, 73, 0.12);
   color: var(--color-error);
-  border: 1px solid rgba(248, 113, 113, 0.15);
+  border: 1px solid rgba(248, 81, 73, 0.25);
 }
 
 .btn-danger:hover {
-  box-shadow: 0 0 12px var(--glow-error);
+  background: rgba(248, 81, 73, 0.18);
 }
 
 .btn-sm {
@@ -310,10 +294,8 @@
   width: 100%;
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   background: var(--bg-input);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   color: var(--text-primary);
   font-size: 14px;
   font-family: inherit;
@@ -370,15 +352,13 @@ select.input {
 
 /* ─── Task Cards ─── */
 .task-card {
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-card);
   border-radius: var(--radius-md);
   padding: 14px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   margin-bottom: 8px;
-  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-  border-left: 3px solid var(--glass-border);
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  border-left: 3px solid transparent;
   position: relative;
 }
 
@@ -387,9 +367,8 @@ select.input {
 }
 
 .task-card:hover {
-  border-color: var(--border-glow);
-  box-shadow: var(--shadow-glow-sm);
-  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
 }
 
 .task-card-header {
@@ -415,7 +394,7 @@ select.input {
 /* ─── Progress Bar ─── */
 .progress-bar {
   height: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: #21262d;
   border-radius: var(--radius-full);
   overflow: hidden;
   margin-bottom: 8px;
@@ -427,7 +406,6 @@ select.input {
   background: var(--gradient-progress);
   border-radius: var(--radius-full);
   transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 0 8px var(--glow-progress);
   position: relative;
 }
 
@@ -464,8 +442,8 @@ select.input {
 /* ─── Segmented Control ─── */
 .segmented-control {
   display: inline-flex;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: var(--radius-full);
   padding: 3px;
   gap: 2px;
@@ -486,31 +464,31 @@ select.input {
 }
 
 .segmented-btn.active {
-  background: var(--gradient-accent);
+  background: var(--accent);
   color: var(--accent-text);
-  box-shadow: var(--shadow-glow-sm);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ─── Log Box (Terminal) ─── */
 .log-box {
-  background: rgba(6, 8, 16, 0.9);
-  color: #c9d1d9;
+  background: var(--bg-primary);
+  color: var(--text-primary);
   padding: 12px;
   border-radius: var(--radius-md);
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: "IBM Plex Mono", "JetBrains Mono", "SF Mono", "Fira Code", monospace;
   font-size: 11px;
   line-height: 1.5;
   max-height: 300px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
-  border: 1px solid rgba(99, 102, 241, 0.1);
-  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.3), 0 0 1px rgba(99, 102, 241, 0.15);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 0 20px rgba(1, 4, 9, 0.4);
 }
 
 /* ─── Skeleton Loader ─── */
 .skeleton {
-  background: linear-gradient(90deg, var(--glass-bg) 25%, rgba(255,255,255,0.06) 50%, var(--glass-bg) 75%);
+  background: linear-gradient(90deg, var(--bg-card) 25%, rgba(240,246,252,0.06) 50%, var(--bg-card) 75%);
   background-size: 200% 100%;
   border-radius: var(--radius-md);
   animation: shimmer 1.5s ease-in-out infinite;
@@ -558,10 +536,8 @@ select.input {
 
 .modal-content {
   background: var(--bg-elevated);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-bottom: none;
   width: 100%;
   max-width: 500px;
@@ -570,7 +546,7 @@ select.input {
   padding: 20px 16px;
   padding-bottom: calc(20px + var(--safe-bottom));
   animation: springUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 -10px 30px rgba(1, 4, 9, 0.4);
 }
 
 .modal-handle {
@@ -603,30 +579,28 @@ select.input {
 
 .toast {
   background: var(--bg-elevated);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   color: var(--text-primary);
   border-radius: var(--radius-md);
   padding: 12px 16px;
   font-size: 13px;
   font-weight: 500;
   box-shadow: var(--shadow-lg);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   animation: slideDown 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   pointer-events: auto;
 }
 
 .toast-success {
   border-left: 3px solid var(--color-done);
-  box-shadow: var(--shadow-lg), 0 0 12px var(--glow-success);
+  box-shadow: var(--shadow-lg);
 }
 .toast-error {
   border-left: 3px solid var(--color-error);
-  box-shadow: var(--shadow-lg), 0 0 12px var(--glow-error);
+  box-shadow: var(--shadow-lg);
 }
 .toast-info {
   border-left: 3px solid var(--color-inprogress);
-  box-shadow: var(--shadow-lg), 0 0 12px var(--glow-progress);
+  box-shadow: var(--shadow-lg);
 }
 
 /* ─── Collapsible Section ─── */
@@ -671,9 +645,9 @@ select.input {
   border-radius: var(--radius-full);
   font-size: 11px;
   font-weight: 600;
-  background: var(--glass-bg);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
 }
 
 /* ─── Pull to Refresh ─── */
@@ -863,8 +837,8 @@ select.input {
   width: 44px;
   height: 24px;
   border-radius: 12px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   transition:
     background var(--transition-fast),
     border-color var(--transition-fast),
@@ -873,9 +847,9 @@ select.input {
 }
 
 .toggle.active .toggle-track {
-  background: var(--gradient-accent);
+  background: var(--accent);
   border-color: transparent;
-  box-shadow: var(--shadow-glow-sm);
+  box-shadow: var(--shadow-sm);
 }
 
 .toggle-thumb {
@@ -948,15 +922,13 @@ select.input {
 
 /* ─── Settings Section ─── */
 .settings-section {
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--bg-card);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   padding: 0;
   margin-bottom: 16px;
   overflow: hidden;
-  box-shadow: var(--shadow-inset);
+  box-shadow: var(--shadow-sm);
 }
 
 .settings-section .list-item {
@@ -994,13 +966,11 @@ select.input {
   justify-content: center;
   gap: 6px;
   padding: 16px 8px;
-  background: var(--glass-bg);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--bg-card);
   border-radius: var(--radius-md);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
   -webkit-tap-highlight-color: transparent;
   font-size: 11px;
   font-weight: 500;
@@ -1014,15 +984,15 @@ select.input {
 }
 
 .action-card:hover {
-  border-color: var(--border-glow);
-  box-shadow: var(--shadow-glow-sm);
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
 }
 
 .action-card svg {
   width: 24px;
   height: 24px;
   color: var(--accent);
-  filter: drop-shadow(0 0 4px var(--accent-glow));
+  filter: none;
 }
 
 /* ─── Utility Classes ─── */
@@ -1109,12 +1079,10 @@ select.input {
   gap: 4px;
   padding: 10px 4px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   cursor: default;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  background: var(--glass-bg);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--bg-card);
   position: relative;
 }
 
@@ -1133,26 +1101,26 @@ select.input {
 }
 
 .slot-idle {
-  background: var(--glass-bg);
-  border-color: var(--glass-border);
-  opacity: 0.5;
+  background: var(--bg-card);
+  border-color: var(--border);
+  opacity: 0.6;
 }
 
 .slot-busy,
 .slot-running {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(99, 102, 241, 0.3);
+  background: rgba(88, 166, 255, 0.12);
+  border-color: rgba(88, 166, 255, 0.4);
   animation: glowPulse 2s ease-in-out infinite;
 }
 
 .slot-error {
-  background: rgba(248, 113, 113, 0.08);
-  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.4);
 }
 
 .slot-done {
-  background: rgba(16, 185, 129, 0.08);
-  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(46, 160, 67, 0.12);
+  border-color: rgba(46, 160, 67, 0.4);
 }
 
 @keyframes slot-pulse {
@@ -1163,7 +1131,7 @@ select.input {
 /* ─── Agent Progress Bar ─── */
 .agent-progress-bar {
   height: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: #21262d;
   border-radius: var(--radius-full);
   overflow: hidden;
 }
@@ -1173,7 +1141,6 @@ select.input {
   background: var(--gradient-progress, linear-gradient(90deg, #6366f1, #818cf8));
   border-radius: var(--radius-full);
   width: 100%;
-  box-shadow: 0 0 6px var(--glow-progress);
 }
 
 .agent-progress-pulse {
@@ -1194,18 +1161,16 @@ select.input {
 
 /* ─── Workspace Viewer ─── */
 .workspace-viewer {
-  background: var(--glass-bg);
+  background: var(--bg-card);
   border-radius: var(--radius-lg, 12px);
   overflow: hidden;
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
 }
 
 .workspace-log {
-  background: rgba(6, 8, 16, 0.9);
-  color: #e0e0e0;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace;
   font-size: 12px;
   line-height: 1.5;
   padding: 12px;
@@ -1213,7 +1178,7 @@ select.input {
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
-  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 0 20px rgba(1, 4, 9, 0.4);
 }
 
 .workspace-header {
@@ -1221,14 +1186,14 @@ select.input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--border);
 }
 
 .workspace-controls {
   display: flex;
   gap: 8px;
   padding: 12px;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--border);
 }
 
 .workspace-controls .input {
@@ -1240,8 +1205,8 @@ select.input {
 }
 
 .workspace-context .card {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
 }
 
 .workspace-diff {
@@ -1253,15 +1218,15 @@ select.input {
 }
 
 .mono {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace;
   font-size: 12px;
 }
 
 .branch-row {
   width: 100%;
   text-align: left;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   margin-bottom: 6px;
@@ -1276,8 +1241,8 @@ select.input {
 }
 
 .branch-row:hover {
-  background: var(--glass-highlight);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
 }
 
 .branch-name {

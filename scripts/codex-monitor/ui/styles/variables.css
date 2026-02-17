@@ -1,37 +1,36 @@
 /* ─── VirtEngine Control Center — CSS Custom Properties ─── */
-/* Uses Telegram native CSS variables as PRIMARY with fallbacks */
-/* Design Language: "Mission Control" — glassmorphism, glow, depth */
+/* GitHub-inspired dark theme with Telegram fallbacks */
 
 :root {
   /* Telegram provides these natively in WebApp context */
   /* We use them directly and provide fallbacks for browser testing */
 
-  /* Core colors - map to TG native vars with premium dark fallbacks */
-  --bg-primary: var(--tg-theme-bg-color, #0a0e1a);
-  --bg-secondary: var(--tg-theme-secondary-bg-color, #0f1629);
-  --bg-card: var(--tg-theme-section-bg-color, rgba(15, 23, 42, 0.6));
-  --bg-surface: var(--tg-theme-secondary-bg-color, rgba(10, 15, 30, 0.8));
-  --bg-input: var(--tg-theme-secondary-bg-color, rgba(15, 23, 42, 0.7));
-  --bg-card-hover: rgba(255, 255, 255, 0.04);
-  --bg-elevated: rgba(20, 30, 55, 0.9);
+  /* Core colors (GitHub Dark) */
+  --bg-primary: var(--tg-theme-bg-color, #0d1117);
+  --bg-secondary: var(--tg-theme-secondary-bg-color, #161b22);
+  --bg-card: var(--tg-theme-section-bg-color, #161b22);
+  --bg-surface: var(--tg-theme-secondary-bg-color, #0d1117);
+  --bg-input: var(--tg-theme-secondary-bg-color, #0d1117);
+  --bg-card-hover: rgba(240, 246, 252, 0.05);
+  --bg-elevated: #1c2128;
 
-  --text-primary: var(--tg-theme-text-color, #f1f5f9);
+  --text-primary: var(--tg-theme-text-color, #c9d1d9);
   --text-secondary: var(
     --tg-theme-subtitle-text-color,
-    var(--tg-theme-hint-color, #94a3b8)
+    var(--tg-theme-hint-color, #8b949e)
   );
-  --text-hint: var(--tg-theme-hint-color, #64748b);
-  --text-bright: #ffffff;
+  --text-hint: var(--tg-theme-hint-color, #6e7681);
+  --text-bright: #f0f6fc;
 
-  --accent: var(--tg-theme-button-color, var(--tg-theme-link-color, #6366f1));
-  --accent-text: var(--tg-theme-button-text-color, #ffffff);
-  --accent-hover: var(--tg-theme-accent-text-color, #818cf8);
+  --accent: var(--tg-theme-button-color, var(--tg-theme-link-color, #2f81f7));
+  --accent-text: var(--tg-theme-button-text-color, #f0f6fc);
+  --accent-hover: var(--tg-theme-accent-text-color, #58a6ff);
 
-  --link-color: var(--tg-theme-link-color, #6366f1);
-  --destructive: var(--tg-theme-destructive-text-color, #f87171);
+  --link-color: var(--tg-theme-link-color, #58a6ff);
+  --destructive: var(--tg-theme-destructive-text-color, #f85149);
 
-  --border: var(--tg-theme-section-separator-color, rgba(255, 255, 255, 0.06));
-  --border-strong: rgba(255, 255, 255, 0.12);
+  --border: var(--tg-theme-section-separator-color, #30363d);
+  --border-strong: #3d444d;
   --header-text: var(
     --tg-theme-section-header-text-color,
     var(--text-secondary)
@@ -85,55 +84,53 @@
   --radius-full: 9999px;
 
   /* Shadows */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25);
-  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.35);
-  --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.4);
-  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-sm: 0 1px 2px rgba(1, 4, 9, 0.4);
+  --shadow-md: 0 6px 18px rgba(1, 4, 9, 0.35);
+  --shadow-lg: 0 16px 32px rgba(1, 4, 9, 0.45);
+  --shadow-xl: 0 24px 56px rgba(1, 4, 9, 0.55);
+  --shadow-inset: inset 0 1px 0 rgba(240, 246, 252, 0.04);
 
   /* Glass System */
-  --glass-bg: rgba(15, 23, 42, 0.45);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-blur: blur(24px);
-  --glass-highlight: rgba(255, 255, 255, 0.05);
+  --glass-bg: var(--bg-card);
+  --glass-border: var(--border);
+  --glass-blur: blur(0px);
+  --glass-highlight: rgba(240, 246, 252, 0.04);
 
   /* Glow System */
-  --accent-glow: rgba(99, 102, 241, 0.35);
-  --accent-subtle: rgba(99, 102, 241, 0.12);
-  --glow-progress: rgba(99, 102, 241, 0.3);
-  --glow-success: rgba(16, 185, 129, 0.3);
-  --glow-warning: rgba(245, 158, 11, 0.3);
-  --glow-error: rgba(248, 113, 113, 0.3);
-  --shadow-glow: 0 0 20px var(--accent-glow);
-  --shadow-glow-sm: 0 0 10px var(--accent-glow);
-  --border-glow: rgba(99, 102, 241, 0.3);
+  --accent-glow: rgba(88, 166, 255, 0.25);
+  --accent-subtle: rgba(88, 166, 255, 0.18);
+  --glow-progress: rgba(88, 166, 255, 0.3);
+  --glow-success: rgba(46, 160, 67, 0.3);
+  --glow-warning: rgba(210, 153, 34, 0.3);
+  --glow-error: rgba(248, 81, 73, 0.3);
+  --shadow-glow: 0 0 18px var(--accent-glow);
+  --shadow-glow-sm: 0 0 8px var(--accent-glow);
+  --border-glow: rgba(88, 166, 255, 0.35);
 
   /* Status colors (keep custom - TG doesn't provide these) */
-  --color-todo: #8b95a2;
-  --color-inprogress: #6366f1;
-  --color-inreview: #f59e0b;
-  --color-done: #10b981;
-  --color-error: #f87171;
-  --color-cancelled: #6b7280;
-  --color-critical: #dc2626;
-  --color-high: #f59e0b;
-  --color-medium: #6366f1;
-  --color-low: #8b95a2;
+  --color-todo: #8b949e;
+  --color-inprogress: #58a6ff;
+  --color-inreview: #d29922;
+  --color-done: #2ea043;
+  --color-error: #f85149;
+  --color-cancelled: #6e7681;
+  --color-critical: #f85149;
+  --color-high: #d29922;
+  --color-medium: #58a6ff;
+  --color-low: #8b949e;
 
   /* Gradients */
-  --gradient-accent: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
-  --gradient-accent-hover: linear-gradient(135deg, #818cf8 0%, #a78bfa 100%);
-  --gradient-progress: linear-gradient(90deg, #6366f1 0%, #10b981 100%);
-  --gradient-hero: linear-gradient(135deg, rgba(99,102,241,.15) 0%, rgba(139,92,246,.08) 50%, rgba(16,185,129,.1) 100%);
-  --gradient-surface: linear-gradient(180deg, rgba(255,255,255,.03) 0%, transparent 100%);
-  --gradient-radial-glow: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,.12) 0%, transparent 70%);
-  --gradient-mesh: radial-gradient(at 20% 80%, rgba(99,102,241,.06) 0%, transparent 50%),
-    radial-gradient(at 80% 20%, rgba(139,92,246,.05) 0%, transparent 50%),
-    radial-gradient(at 50% 50%, rgba(16,185,129,.03) 0%, transparent 50%);
+  --gradient-accent: linear-gradient(180deg, #2f81f7 0%, #1f6feb 100%);
+  --gradient-accent-hover: linear-gradient(180deg, #58a6ff 0%, #2f81f7 100%);
+  --gradient-progress: linear-gradient(90deg, #2f81f7 0%, #2ea043 100%);
+  --gradient-hero: none;
+  --gradient-surface: none;
+  --gradient-radial-glow: none;
+  --gradient-mesh: none;
 
   /* Backdrop */
-  --backdrop: rgba(0, 0, 0, 0.6);
-  --backdrop-blur: blur(16px);
+  --backdrop: rgba(1, 4, 9, 0.75);
+  --backdrop-blur: blur(6px);
 
   /* Transitions */
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
@@ -146,34 +143,32 @@
 /* Light theme - Telegram sets --tg-color-scheme */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg-primary: var(--tg-theme-bg-color, #f8faff);
-    --bg-secondary: var(--tg-theme-secondary-bg-color, #eef2f9);
-    --bg-card: var(--tg-theme-section-bg-color, rgba(255, 255, 255, 0.8));
-    --bg-surface: var(--tg-theme-secondary-bg-color, rgba(241, 245, 249, 0.8));
-    --bg-input: var(--tg-theme-secondary-bg-color, rgba(241, 245, 249, 0.9));
-    --bg-card-hover: rgba(0, 0, 0, 0.02);
-    --bg-elevated: rgba(255, 255, 255, 0.95);
-    --text-primary: var(--tg-theme-text-color, #0f172a);
+    --bg-primary: var(--tg-theme-bg-color, #ffffff);
+    --bg-secondary: var(--tg-theme-secondary-bg-color, #f6f8fa);
+    --bg-card: var(--tg-theme-section-bg-color, #ffffff);
+    --bg-surface: var(--tg-theme-secondary-bg-color, #ffffff);
+    --bg-input: var(--tg-theme-secondary-bg-color, #ffffff);
+    --bg-card-hover: rgba(27, 31, 36, 0.04);
+    --bg-elevated: #ffffff;
+    --text-primary: var(--tg-theme-text-color, #24292f);
     --text-secondary: var(
       --tg-theme-subtitle-text-color,
-      var(--tg-theme-hint-color, #64748b)
+      var(--tg-theme-hint-color, #57606a)
     );
-    --text-hint: var(--tg-theme-hint-color, #94a3b8);
-    --text-bright: #0f172a;
-    --border: var(--tg-theme-section-separator-color, rgba(0, 0, 0, 0.08));
-    --border-strong: rgba(0, 0, 0, 0.15);
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.1);
-    --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.12);
-    --glass-bg: rgba(255, 255, 255, 0.6);
-    --glass-border: rgba(0, 0, 0, 0.06);
-    --glass-highlight: rgba(255, 255, 255, 0.8);
-    --accent-glow: rgba(99, 102, 241, 0.2);
-    --accent-subtle: rgba(99, 102, 241, 0.08);
-    --gradient-mesh: radial-gradient(at 20% 80%, rgba(99,102,241,.04) 0%, transparent 50%),
-      radial-gradient(at 80% 20%, rgba(139,92,246,.03) 0%, transparent 50%),
-      radial-gradient(at 50% 50%, rgba(16,185,129,.02) 0%, transparent 50%);
-    --gradient-radial-glow: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,.06) 0%, transparent 70%);
+    --text-hint: var(--tg-theme-hint-color, #6e7781);
+    --text-bright: #24292f;
+    --border: var(--tg-theme-section-separator-color, #d0d7de);
+    --border-strong: #afb8c1;
+    --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.12);
+    --shadow-md: 0 6px 14px rgba(31, 35, 40, 0.12);
+    --shadow-lg: 0 12px 28px rgba(31, 35, 40, 0.18);
+    --shadow-xl: 0 18px 40px rgba(31, 35, 40, 0.2);
+    --glass-bg: #ffffff;
+    --glass-border: #d0d7de;
+    --glass-highlight: rgba(27, 31, 36, 0.04);
+    --accent-glow: rgba(9, 105, 218, 0.15);
+    --accent-subtle: rgba(9, 105, 218, 0.12);
+    --gradient-mesh: none;
+    --gradient-radial-glow: none;
   }
 }

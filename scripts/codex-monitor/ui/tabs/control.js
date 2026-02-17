@@ -14,14 +14,13 @@ import {
   configData,
   loadConfig,
   showToast,
-  refreshTab,
   runOptimistic,
   scheduleRefresh,
 } from "../modules/state.js";
 import { ICONS } from "../modules/icons.js";
-import { cloneValue } from "../modules/utils.js";
+import { cloneValue, truncate } from "../modules/utils.js";
 import { Card, Badge, SkeletonCard } from "../components/shared.js";
-import { SegmentedControl, SliderControl } from "../components/forms.js";
+import { SegmentedControl } from "../components/forms.js";
 
 /* ─── Command registry for autocomplete ─── */
 const CMD_REGISTRY = [
@@ -63,8 +62,9 @@ export function ControlTab() {
 
   /* Form inputs */
   const [commandInput, setCommandInput] = useState("");
-  const [startTaskInput, setStartTaskInput] = useState("");
-  const [retryInput, setRetryInput] = useState("");
+  const [startTaskId, setStartTaskId] = useState("");
+  const [retryTaskId, setRetryTaskId] = useState("");
+  const [retryReason, setRetryReason] = useState("");
   const [askInput, setAskInput] = useState("");
   const [steerInput, setSteerInput] = useState("");
   const [quickCmdInput, setQuickCmdInput] = useState("");
@@ -73,6 +73,11 @@ export function ControlTab() {
   const [maxParallel, setMaxParallel] = useState(execData?.maxParallel ?? 0);
   const [cmdHistory, setCmdHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [backlogTasks, setBacklogTasks] = useState([]);
+  const [retryTasks, setRetryTasks] = useState([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const startTaskIdRef = useRef("");
+  const retryTaskIdRef = useRef("");
 
   /* ── Autocomplete state ── */
   const [acItems, setAcItems] = useState([]);
@@ -100,6 +105,14 @@ export function ControlTab() {
     } catch (_) { /* ignore corrupt data */ }
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
+
+  useEffect(() => {
+    startTaskIdRef.current = startTaskId;
+  }, [startTaskId]);
+
+  useEffect(() => {
+    retryTaskIdRef.current = retryTaskId;
+  }, [retryTaskId]);
 
   /* ── Autocomplete filter ── */
   useEffect(() => {
@@ -190,6 +203,72 @@ export function ControlTab() {
     },
     [],
   );
+
+  const refreshTaskOptions = useCallback(async () => {
+    setTasksLoading(true);
+    try {
+      const res = await apiFetch("/api/tasks?page=0&pageSize=200", {
+        _silent: true,
+      });
+      const all = Array.isArray(res?.data) ? res.data : [];
+      const priorityRank = { critical: 0, high: 1, medium: 2, low: 3 };
+      const score = (t) =>
+        priorityRank[String(t?.priority || "").toLowerCase()] ?? 9;
+      const byPriority = (a, b) => {
+        const pa = score(a);
+        const pb = score(b);
+        if (pa !== pb) return pa - pb;
+        const ta = String(a?.updated_at || a?.updatedAt || "");
+        const tb = String(b?.updated_at || b?.updatedAt || "");
+        return tb.localeCompare(ta);
+      };
+
+      const backlog = all
+        .filter((t) =>
+          ["todo", "backlog", "open"].includes(
+            String(t?.status || "").toLowerCase(),
+          ),
+        )
+        .sort(byPriority);
+      const retryable = all
+        .filter((t) =>
+          ["error", "cancelled", "blocked", "failed", "inreview"].includes(
+            String(t?.status || "").toLowerCase(),
+          ),
+        )
+        .sort(byPriority);
+
+      setBacklogTasks(backlog);
+      setRetryTasks(retryable);
+
+      if (backlog.length > 0) {
+        const current = String(startTaskIdRef.current || "");
+        if (!backlog.some((t) => String(t?.id) === current)) {
+          setStartTaskId(String(backlog[0].id || ""));
+        }
+      } else {
+        setStartTaskId("");
+      }
+
+      if (retryable.length > 0) {
+        const currentRetry = String(retryTaskIdRef.current || "");
+        if (!retryable.some((t) => String(t?.id) === currentRetry)) {
+          setRetryTaskId(String(retryable[0].id || ""));
+        }
+      } else {
+        setRetryTaskId("");
+      }
+    } catch {
+      setBacklogTasks([]);
+      setRetryTasks([]);
+    } finally {
+      setTasksLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshTaskOptions();
+  }, [refreshTaskOptions]);
 
   /* ── Executor controls ── */
   const handlePause = async () => {
@@ -338,6 +417,50 @@ export function ControlTab() {
   const toggleOutput = useCallback((idx) => {
     setExpandedOutputs((prev) => ({ ...prev, [idx]: !prev[idx] }));
   }, []);
+
+  const handleStartTask = useCallback(async () => {
+    const taskId = String(startTaskId || "").trim();
+    if (!taskId) {
+      showToast("Select a backlog task to start", "error");
+      return;
+    }
+    haptic("medium");
+    try {
+      await apiFetch("/api/tasks/start", {
+        method: "POST",
+        body: JSON.stringify({ taskId }),
+      });
+      showToast("Task started", "success");
+      refreshTaskOptions();
+      scheduleRefresh(150);
+    } catch {
+      /* toast via apiFetch */
+    }
+  }, [startTaskId, refreshTaskOptions]);
+
+  const handleRetryTask = useCallback(async () => {
+    const taskId = String(retryTaskId || "").trim();
+    if (!taskId) {
+      showToast("Select a task to retry", "error");
+      return;
+    }
+    haptic("medium");
+    try {
+      await apiFetch("/api/tasks/retry", {
+        method: "POST",
+        body: JSON.stringify({
+          taskId,
+          retryReason: retryReason.trim() || undefined,
+        }),
+      });
+      showToast("Task retried", "success");
+      setRetryReason("");
+      refreshTaskOptions();
+      scheduleRefresh(150);
+    } catch {
+      /* toast via apiFetch */
+    }
+  }, [retryTaskId, retryReason, refreshTaskOptions]);
 
   return html`
     <!-- Loading skeleton -->
@@ -512,35 +635,65 @@ export function ControlTab() {
     <!-- ── Task Ops ── -->
     <${Card} title="Task Ops">
       <div class="input-row mb-sm">
-        <input
+        <select
           class="input"
-          placeholder="Task ID"
-          value=${startTaskInput}
-          onInput=${(e) => setStartTaskInput(e.target.value)}
-        />
+          value=${startTaskId}
+          onChange=${(e) => setStartTaskId(e.target.value)}
+        >
+          <option value="">Select backlog task…</option>
+          ${backlogTasks.map(
+            (task) => html`
+              <option key=${task.id} value=${task.id}>
+                ${truncate(task.title || "(untitled)", 48)} · ${task.id}
+              </option>
+            `,
+          )}
+        </select>
         <button
           class="btn btn-secondary btn-sm"
-          onClick=${() => {
-            if (startTaskInput.trim())
-              sendCmd(`/starttask ${startTaskInput.trim()}`);
-          }}
+          disabled=${!startTaskId}
+          onClick=${handleStartTask}
         >
           ▶ Start
         </button>
+        <button
+          class="btn btn-ghost btn-sm"
+          onClick=${refreshTaskOptions}
+          title="Refresh task list"
+        >
+          ↻
+        </button>
+      </div>
+      <div class="meta-text mb-sm">
+        ${tasksLoading
+          ? "Loading tasks…"
+          : `${backlogTasks.length} backlog · ${retryTasks.length} retryable`}
       </div>
       <div class="input-row">
+        <select
+          class="input"
+          value=${retryTaskId}
+          onChange=${(e) => setRetryTaskId(e.target.value)}
+        >
+          <option value="">Select task to retry…</option>
+          ${retryTasks.map(
+            (task) => html`
+              <option key=${task.id} value=${task.id}>
+                ${truncate(task.title || "(untitled)", 48)} · ${task.id}
+              </option>
+            `,
+          )}
+        </select>
         <input
           class="input"
-          placeholder="Retry reason"
-          value=${retryInput}
-          onInput=${(e) => setRetryInput(e.target.value)}
+          placeholder="Retry reason (passed to agent)"
+          value=${retryReason}
+          onInput=${(e) => setRetryReason(e.target.value)}
         />
         <button
           class="btn btn-secondary btn-sm"
-          onClick=${() =>
-            sendCmd(
-              retryInput.trim() ? `/retry ${retryInput.trim()}` : "/retry",
-            )}
+          disabled=${!retryTaskId}
+          onClick=${handleRetryTask}
         >
           ↻ Retry
         </button>
@@ -679,5 +832,6 @@ export function ControlTab() {
       .cmd-output-panel { margin-top: 0; background: rgba(0,0,0,0.4); border-radius: 0 0 8px 8px; padding: 8px 12px; font-family: monospace; font-size: 0.8rem; color: #4ade80; max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
       @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     </style>
+
   `;
 }

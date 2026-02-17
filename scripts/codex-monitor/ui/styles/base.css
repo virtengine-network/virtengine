@@ -16,16 +16,14 @@ body {
 
 body {
   font-family:
-    "Inter",
-    -apple-system,
-    BlinkMacSystemFont,
+    "IBM Plex Sans",
+    "Source Sans 3",
+    "Public Sans",
     "Segoe UI",
     sans-serif;
   font-size: 15px;
   color: var(--text-primary);
   background: var(--bg-primary);
-  background-image: var(--gradient-mesh);
-  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
@@ -41,21 +39,7 @@ body {
   position: relative;
 }
 
-/* Ambient background glow */
-#app::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background: var(--gradient-radial-glow);
-  pointer-events: none;
-  z-index: 0;
-  animation: ambientDrift 20s ease-in-out infinite alternate;
-}
-
-@keyframes ambientDrift {
-  0% { opacity: 0.7; transform: translateY(0); }
-  100% { opacity: 1; transform: translateY(-30px); }
-}
+/* Ambient background glow removed for GitHub-style flat surfaces */
 
 /* Selection styling */
 ::selection {
@@ -78,6 +62,6 @@ body {
 }
 
 .log-box::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(240, 246, 252, 0.2);
   border-radius: var(--radius-full);
 }

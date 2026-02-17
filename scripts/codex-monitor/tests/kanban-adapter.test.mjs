@@ -12,6 +12,10 @@ vi.mock("../config.mjs", () => ({
   loadConfig: loadConfigMock,
 }));
 
+vi.mock("../fetch-runtime.mjs", () => ({
+  fetchWithFallback: fetchWithFallbackMock,
+}));
+
 
 const {
   getKanbanAdapter,
@@ -63,6 +67,7 @@ describe("kanban-adapter github backend", () => {
   const originalTaskLabelEnforce = process.env.CODEX_MONITOR_ENFORCE_TASK_LABEL;
 
   beforeEach(() => {
+    execFileMock.mockReset();
     vi.clearAllMocks();
     delete process.env.GITHUB_REPOSITORY;
     delete process.env.GITHUB_REPO_OWNER;
@@ -255,30 +260,58 @@ describe("kanban-adapter github backend", () => {
   });
 
   it("reopens issue and syncs status labels for open-state transitions", async () => {
-    mockGh("✓ Reopened issue #42");
-    mockGh("✓ Edited labels");
-    mockGh(
-      JSON.stringify({
-        number: 42,
-        title: "example",
-        body: "",
-        state: "open",
-        url: "https://github.com/acme/widgets/issues/42",
-        labels: [{ name: "inprogress" }],
-        assignees: [],
-      }),
-    );
-    mockGh("[]");
+    execFileMock.mockImplementation((_cmd, args, _opts, cb) => {
+      const joined = args.join(" ");
+      if (joined.includes("issue reopen")) {
+        cb(null, { stdout: "✓ Reopened issue #42", stderr: "" });
+        return;
+      }
+      if (joined.includes("label create")) {
+        cb(null, { stdout: "✓ Created label", stderr: "" });
+        return;
+      }
+      if (joined.includes("issue edit")) {
+        cb(null, { stdout: "✓ Edited labels", stderr: "" });
+        return;
+      }
+      if (joined.includes("issue view")) {
+        cb(
+          null,
+          {
+            stdout: JSON.stringify({
+              number: 42,
+              title: "example",
+              body: "",
+              state: "open",
+              url: "https://github.com/acme/widgets/issues/42",
+              labels: [{ name: "inprogress" }],
+              assignees: [],
+            }),
+            stderr: "",
+          },
+        );
+        return;
+      }
+      if (args[0] === "api" && args[1]?.includes("/issues/42/comments")) {
+        cb(null, { stdout: "[]", stderr: "" });
+        return;
+      }
+      cb(null, { stdout: "[]", stderr: "" });
+    });
 
     const adapter = getKanbanAdapter();
     const task = await adapter.updateTaskStatus("42", "inprogress");
 
     expect(task?.id).toBe("42");
     expect(task?.status).toBe("inprogress");
-    expect(execFileMock.mock.calls[0][1]).toContain("reopen");
-    expect(execFileMock.mock.calls[1][1]).toContain("--add-label");
-    expect(execFileMock.mock.calls[1][1]).toContain("inprogress");
-    expect(execFileMock.mock.calls[1][1]).toContain("--remove-label");
+    const callArgs = execFileMock.mock.calls.map((call) => call[1].join(" "));
+    expect(callArgs.some((args) => args.includes("reopen"))).toBe(true);
+    expect(
+      callArgs.some(
+        (args) => args.includes("--add-label") && args.includes("inprogress"),
+      ),
+    ).toBe(true);
+    expect(callArgs.some((args) => args.includes("--remove-label"))).toBe(true);
   });
 
   it("persists, reads, and ignores shared state through issue labels/comments", async () => {

@@ -2286,9 +2286,9 @@ function Get-TaskContextBlock {
     $lines += "Description:`n$description"
     $taskUrl = if ($Info.task_id) { Get-TaskUrl -TaskId $Info.task_id } else { $null }
     if ($taskUrl) { $lines += "Task URL: $taskUrl" }
-    $lines += "If VE_TASK_TITLE/VE_TASK_DESCRIPTION are missing, treat this as a VK task:"
-    $lines += "- Worktree paths often include .git/worktrees/ or vibe-kanban."
-    $lines += "- VK tasks always map to a ve/<id>-<slug> branch."
+    $lines += "If VE_TASK_TITLE/VE_TASK_DESCRIPTION are missing, treat this as an orchestrated task:"
+    $lines += "- Worktree paths often include .git/worktrees/ or a task runner path (e.g., vibe-kanban)."
+    $lines += "- Tasks typically map to a ve/<id>-<slug> branch."
     $lines += ""
     $lines += "IMPORTANT: Your job is to COMPLETE the task described above END TO END."
     $lines += "Implement the code changes, ensure tests pass, then commit and push."

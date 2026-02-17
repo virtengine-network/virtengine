@@ -100,14 +100,18 @@ const STATUS_MAP = {
   // VK statuses
   todo: "todo",
   inprogress: "inprogress",
+  started: "inprogress",
   "in-progress": "inprogress",
   in_progress: "inprogress",
   inreview: "inreview",
   "in-review": "inreview",
   in_review: "inreview",
+  "in review": "inreview",
+  blocked: "blocked",
   done: "done",
   cancelled: "cancelled",
   canceled: "cancelled",
+  backlog: "todo",
   // GitHub Issues
   open: "todo",
   closed: "done",
@@ -122,6 +126,63 @@ function normaliseStatus(raw) {
   if (!raw) return "todo";
   const key = String(raw).toLowerCase().trim();
   return STATUS_MAP[key] || "todo";
+}
+
+const STATUS_LABEL_KEYS = new Set([
+  "todo",
+  "backlog",
+  "inprogress",
+  "in-progress",
+  "in_progress",
+  "inreview",
+  "in-review",
+  "in_review",
+  "blocked",
+]);
+
+function statusFromLabels(labels) {
+  if (!Array.isArray(labels)) return null;
+  for (const label of labels) {
+    const key = String(label || "")
+      .trim()
+      .toLowerCase();
+    if (STATUS_LABEL_KEYS.has(key)) {
+      return normaliseStatus(key);
+    }
+  }
+  return null;
+}
+
+function normalizeSharedStatePayload(sharedState) {
+  if (!sharedState || typeof sharedState !== "object") return null;
+  const normalized = { ...sharedState };
+  if (!normalized.ownerId && normalized.owner_id) {
+    normalized.ownerId = normalized.owner_id;
+  }
+  if (!normalized.attemptToken && normalized.attempt_token) {
+    normalized.attemptToken = normalized.attempt_token;
+  }
+  if (!normalized.attemptStarted && normalized.attempt_started) {
+    normalized.attemptStarted = normalized.attempt_started;
+  }
+  if (!normalized.heartbeat && normalized.ownerHeartbeat) {
+    normalized.heartbeat = normalized.ownerHeartbeat;
+  }
+  if (
+    normalized.retryCount == null &&
+    normalized.retry_count != null &&
+    Number.isFinite(Number(normalized.retry_count))
+  ) {
+    normalized.retryCount = Number(normalized.retry_count);
+  }
+  if (
+    !normalized.status &&
+    normalized.attemptStatus &&
+    ["claimed", "working", "stale"].includes(normalized.attemptStatus)
+  ) {
+    normalized.status = normalized.attemptStatus;
+  }
+  return normalized;
 }
 
 /**
@@ -151,6 +212,28 @@ function parseRepoSlug(raw) {
   const [owner, repo] = cleaned.split("/", 2);
   if (!owner || !repo) return null;
   return { owner, repo };
+}
+
+function extractBranchFromText(text) {
+  const raw = String(text || "");
+  if (!raw) return null;
+  const tableMatch = raw.match(/\|\s*\*\*Branch\*\*\s*\|\s*`?([^`|\s]+)`?\s*\|/i);
+  if (tableMatch?.[1]) return tableMatch[1];
+  const inlineMatch = raw.match(/branch:\s*`?([^\s`]+)`?/i);
+  if (inlineMatch?.[1]) return inlineMatch[1];
+  return null;
+}
+
+function extractPrFromText(text) {
+  const raw = String(text || "");
+  if (!raw) return null;
+  const tableMatch = raw.match(/\|\s*\*\*PR\*\*\s*\|\s*#?(\d+)/i);
+  if (tableMatch?.[1]) return tableMatch[1];
+  const inlineMatch = raw.match(/pr:\s*#?(\d+)/i);
+  if (inlineMatch?.[1]) return inlineMatch[1];
+  const urlMatch = raw.match(/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/i);
+  if (urlMatch?.[1]) return urlMatch[1];
+  return null;
 }
 
 class InternalAdapter {
@@ -842,6 +925,7 @@ class GitHubIssuesAdapter {
           .toLowerCase(),
       ),
     );
+    const labelStatus = statusFromLabels(labels);
 
     // Determine status from project Status field value
     const projectStatus =
@@ -853,12 +937,8 @@ class GitHubIssuesAdapter {
       // Fallback to content state + labels
       if (content.state === "closed" || content.state === "CLOSED") {
         status = "done";
-      } else if (labelSet.has("inprogress") || labelSet.has("in-progress")) {
-        status = "inprogress";
-      } else if (labelSet.has("inreview") || labelSet.has("in-review")) {
-        status = "inreview";
-      } else if (labelSet.has("blocked")) {
-        status = "blocked";
+      } else if (labelStatus) {
+        status = labelStatus;
       } else {
         status = "todo";
       }
@@ -1275,9 +1355,16 @@ class GitHubIssuesAdapter {
 
       // Map codex status to project status option using configurable mapping
       const targetStatusName = this._normalizeProjectStatus(status, true);
-      const statusOption = fields.statusOptions.find(
+      const normalizedTarget = normaliseStatus(status);
+      let statusOption = fields.statusOptions.find(
         (opt) => opt.name.toLowerCase() === targetStatusName.toLowerCase(),
       );
+
+      if (!statusOption) {
+        statusOption = fields.statusOptions.find(
+          (opt) => normaliseStatus(opt.name) === normalizedTarget,
+        );
+      }
 
       if (!statusOption) {
         console.warn(
@@ -1415,6 +1502,44 @@ class GitHubIssuesAdapter {
     return JSON.parse(text);
   }
 
+  async _ensureLabelExists(label) {
+    const name = String(label || "").trim();
+    if (!name) return;
+    const colorByLabel = {
+      inprogress: "2563eb",
+      "in-progress": "2563eb",
+      inreview: "f59e0b",
+      "in-review": "f59e0b",
+      blocked: "dc2626",
+    };
+    const color = colorByLabel[name.toLowerCase()] || "94a3b8";
+    try {
+      await this._gh(
+        [
+          "label",
+          "create",
+          name,
+          "--repo",
+          `${this._owner}/${this._repo}`,
+          "--color",
+          color,
+          "--description",
+          `codex-monitor status: ${name}`,
+        ],
+        { parseJson: false },
+      );
+    } catch (err) {
+      const msg = String(err?.message || err).toLowerCase();
+      if (
+        msg.includes("already exists") ||
+        msg.includes("label") && msg.includes("exists")
+      ) {
+        return;
+      }
+      console.warn(`${TAG} failed to ensure label "${name}": ${err?.message || err}`);
+    }
+  }
+
   async listProjects() {
     // GitHub doesn't have "projects" in the same sense — return repo as project
     return [
@@ -1454,9 +1579,12 @@ class GitHubIssuesAdapter {
           // Enrich with shared state from comments
           for (const task of filtered) {
             try {
-              const sharedState = await this.readSharedStateFromIssue(task.id);
+              const sharedState = normalizeSharedStatePayload(
+                await this.readSharedStateFromIssue(task.id),
+              );
               if (sharedState) {
                 task.meta.sharedState = sharedState;
+                task.sharedState = sharedState;
               }
             } catch (err) {
               console.warn(
@@ -1511,9 +1639,12 @@ class GitHubIssuesAdapter {
     // Enrich with shared state from comments
     for (const task of normalized) {
       try {
-        const sharedState = await this.readSharedStateFromIssue(task.id);
+        const sharedState = normalizeSharedStatePayload(
+          await this.readSharedStateFromIssue(task.id),
+        );
         if (sharedState) {
           task.meta.sharedState = sharedState;
+          task.sharedState = sharedState;
         }
       } catch (err) {
         // Non-critical - continue without shared state
@@ -1533,22 +1664,63 @@ class GitHubIssuesAdapter {
         `GitHub Issues: invalid issue number "${issueNumber}" — expected a numeric ID, got a UUID or non-numeric string`,
       );
     }
-    const issue = await this._gh([
-      "issue",
-      "view",
-      num,
-      "--repo",
-      `${this._owner}/${this._repo}`,
-      "--json",
-      "number,title,body,state,url,assignees,labels,milestone,comments",
-    ]);
-    const task = this._normaliseIssue(issue);
+    let issue = null;
+    try {
+      issue = await this._gh([
+        "issue",
+        "view",
+        num,
+        "--repo",
+        `${this._owner}/${this._repo}`,
+        "--json",
+        "number,title,body,state,url,assignees,labels,milestone,comments",
+      ]);
+    } catch (err) {
+      console.warn(
+        `${TAG} failed to fetch issue #${num}: ${err.message || err}`,
+      );
+    }
+    const task = issue
+      ? this._normaliseIssue(issue)
+      : {
+          id: String(num),
+          title: "",
+          description: "",
+          status: "todo",
+          assignee: null,
+          priority: null,
+          projectId: `${this._owner}/${this._repo}`,
+          branchName: null,
+          prNumber: null,
+          meta: {},
+          taskUrl: null,
+          backend: "github",
+        };
+
+    if (issue && (!task.branchName || !task.prNumber)) {
+      const comments = Array.isArray(issue?.comments) ? issue.comments : [];
+      for (const comment of comments) {
+        const body = comment?.body || comment?.bodyText || comment?.body_html || "";
+        if (!task.branchName) {
+          const branch = extractBranchFromText(body);
+          if (branch) task.branchName = branch;
+        }
+        if (!task.prNumber) {
+          const pr = extractPrFromText(body);
+          if (pr) task.prNumber = pr;
+        }
+        if (task.branchName && task.prNumber) break;
+      }
+    }
 
     // Enrich with shared state from comments
     try {
-      const sharedState = await this.readSharedStateFromIssue(num);
+      const sharedState = normalizeSharedStatePayload(
+        await this.readSharedStateFromIssue(num),
+      );
       if (sharedState) {
         task.meta.sharedState = sharedState;
+        task.sharedState = sharedState;
       }
     } catch (err) {
       // Non-critical - continue without shared state
@@ -1614,10 +1786,19 @@ class GitHubIssuesAdapter {
       for (const label of removeLabels) {
         editArgs.push("--remove-label", label);
       }
+      const applyStatusLabels = async () =>
+        this._gh(editArgs, { parseJson: false });
       try {
-        await this._gh(editArgs, { parseJson: false });
-      } catch {
-        // Label might not exist — non-critical
+        await applyStatusLabels();
+      } catch (err) {
+        if (nextLabel) {
+          try {
+            await this._ensureLabelExists(nextLabel);
+            await applyStatusLabels();
+          } catch {
+            // Label might not exist — non-critical
+          }
+        }
       }
     }
 
@@ -1659,7 +1840,27 @@ class GitHubIssuesAdapter {
       }
     }
 
-    return this.getTask(issueNumber);
+    try {
+      return await this.getTask(issueNumber);
+    } catch (err) {
+      console.warn(
+        `${TAG} failed to fetch updated issue #${num} after status change: ${err.message}`,
+      );
+      return {
+        id: num,
+        title: "",
+        description: "",
+        status: normalised,
+        assignee: null,
+        priority: null,
+        projectId: `${this._owner}/${this._repo}`,
+        branchName: null,
+        prNumber: null,
+        meta: {},
+        taskUrl: null,
+        backend: "github",
+      };
+    }
   }
 
   async updateTask(issueNumber, patch = {}) {
@@ -1969,6 +2170,10 @@ class GitHubIssuesAdapter {
     if (!/^\d+$/.test(num)) {
       throw new Error(`Invalid issue number: ${issueNumber}`);
     }
+    const normalizedState = normalizeSharedStatePayload(sharedState);
+    if (!normalizedState) {
+      throw new Error(`Invalid shared state payload for issue #${num}`);
+    }
 
     const attemptWithRetry = async (fn, maxRetries = 1) => {
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -1999,11 +2204,11 @@ class GitHubIssuesAdapter {
 
       // Determine new codex label based on status
       let newCodexLabel = null;
-      if (sharedState.status === "claimed") {
+      if (normalizedState.status === "claimed") {
         newCodexLabel = this._codexLabels.claimed;
-      } else if (sharedState.status === "working") {
+      } else if (normalizedState.status === "working") {
         newCodexLabel = this._codexLabels.working;
-      } else if (sharedState.status === "stale") {
+      } else if (normalizedState.status === "stale") {
         newCodexLabel = this._codexLabels.stale;
       }
 
@@ -2051,13 +2256,15 @@ class GitHubIssuesAdapter {
         c.body?.includes("<!-- codex-monitor-state"),
       );
 
-      const [agentId, workstationId] = sharedState.ownerId.split("/").reverse();
-      const stateJson = JSON.stringify(sharedState, null, 2);
+      const [agentId, workstationId] = normalizedState.ownerId
+        .split("/")
+        .reverse();
+      const stateJson = JSON.stringify(normalizedState, null, 2);
       const commentBody = `<!-- codex-monitor-state
 ${stateJson}
 -->
-**Codex Monitor Status**: Agent \`${agentId}\` on \`${workstationId}\` is ${sharedState.status === "working" ? "working on" : sharedState.status === "claimed" ? "claiming" : "stale for"} this task.
-*Last heartbeat: ${sharedState.heartbeat}*`;
+**Codex Monitor Status**: Agent \`${agentId}\` on \`${workstationId}\` is ${normalizedState.status === "working" ? "working on" : normalizedState.status === "claimed" ? "claiming" : "stale for"} this task.
+*Last heartbeat: ${normalizedState.heartbeat || normalizedState.ownerHeartbeat}*`;
 
       if (stateCommentIndex >= 0) {
         // Update existing comment
@@ -2123,15 +2330,15 @@ ${stateJson}
       }
 
       const stateJson = match[1].trim();
-      const state = JSON.parse(stateJson);
+      const state = normalizeSharedStatePayload(JSON.parse(stateJson));
 
       // Validate required fields
       if (
-        !state.ownerId ||
-        !state.attemptToken ||
-        !state.attemptStarted ||
-        !state.heartbeat ||
-        !state.status
+        !state?.ownerId ||
+        !state?.attemptToken ||
+        !state?.attemptStarted ||
+        !(state?.heartbeat || state?.ownerHeartbeat) ||
+        !state?.status
       ) {
         console.warn(
           `[kanban] invalid shared state in #${num}: missing required fields`,
@@ -2403,15 +2610,12 @@ To re-enable codex-monitor for this task, remove the \`${this._codexLabels.ignor
           .toLowerCase(),
       ),
     );
+    const labelStatus = statusFromLabels(labels);
     let status = "todo";
     if (issue.state === "closed" || issue.state === "CLOSED") {
       status = "done";
-    } else if (labelSet.has("inprogress") || labelSet.has("in-progress")) {
-      status = "inprogress";
-    } else if (labelSet.has("inreview") || labelSet.has("in-review")) {
-      status = "inreview";
-    } else if (labelSet.has("blocked")) {
-      status = "blocked";
+    } else if (labelStatus) {
+      status = labelStatus;
     }
 
     // Check for codex-monitor labels
@@ -2615,9 +2819,12 @@ class JiraAdapter {
       const errorText =
         payload?.errorMessages?.join("; ") ||
         (payload?.errors ? Object.values(payload.errors || {}).join("; ") : "");
-      throw new Error(
+      const error = new Error(
         `Jira API ${method} ${path} failed (${response.status}): ${errorText || String(payload || response.statusText || "Unknown error")}`,
       );
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
     }
     return payload;
   }
@@ -2919,6 +3126,33 @@ class JiraAdapter {
     );
   }
 
+  _jiraSearchParams(jql, maxResults, fields) {
+    const params = new URLSearchParams();
+    params.set("jql", jql);
+    params.set("maxResults", String(Math.min(Number(maxResults) || 0, 1000)));
+    if (fields) params.set("fields", fields);
+    return params.toString();
+  }
+
+  async _searchIssues(jql, maxResults, fields) {
+    const query = this._jiraSearchParams(jql, maxResults, fields);
+    try {
+      return await this._jira(`/rest/api/3/search/jql?${query}`);
+    } catch (err) {
+      const status = err?.status;
+      const message = String(err?.message || "");
+      const shouldFallback =
+        status === 404 ||
+        status === 410 ||
+        message.includes("/search/jql") ||
+        message.toLowerCase().includes("api has been removed");
+      if (!shouldFallback) {
+        throw err;
+      }
+      return this._jira(`/rest/api/3/search?${query}`);
+    }
+  }
+
   async _listIssueComments(issueKey) {
     const comments = [];
     let startAt = 0;
@@ -2942,12 +3176,14 @@ class JiraAdapter {
     );
     if (!match) return null;
     try {
-      const parsed = JSON.parse(String(match[1] || "").trim());
+      const parsed = normalizeSharedStatePayload(
+        JSON.parse(String(match[1] || "").trim()),
+      );
       if (
         !parsed?.ownerId ||
         !parsed?.attemptToken ||
         !parsed?.attemptStarted ||
-        !parsed?.heartbeat ||
+        !(parsed?.heartbeat || parsed?.ownerHeartbeat) ||
         !parsed?.status
       ) {
         return null;
@@ -2986,14 +3222,15 @@ class JiraAdapter {
   }
 
   _buildSharedStateComment(sharedState) {
-    const ownerParts = String(sharedState.ownerId || "").split("/");
+    const normalized = normalizeSharedStatePayload(sharedState) || sharedState;
+    const ownerParts = String(normalized?.ownerId || "").split("/");
     const workstationId = ownerParts[0] || "unknown-workstation";
     const agentId = ownerParts[1] || "unknown-agent";
-    const json = JSON.stringify(sharedState, null, 2);
+    const json = JSON.stringify(normalized, null, 2);
     return (
       `<!-- codex-monitor-state\n${json}\n-->\n` +
-      `Codex Monitor Status: Agent ${agentId} on ${workstationId} is ${sharedState.status} this task.\n` +
-      `Last heartbeat: ${sharedState.heartbeat}`
+      `Codex Monitor Status: Agent ${agentId} on ${workstationId} is ${normalized?.status} this task.\n` +
+      `Last heartbeat: ${normalized?.heartbeat || normalized?.ownerHeartbeat || ""}`
     );
   }
 
@@ -3065,8 +3302,10 @@ class JiraAdapter {
       Number(filters.limit || 0) > 0
         ? Number(filters.limit)
         : this._taskListLimit;
-    const data = await this._jira(
-      `/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=${Math.min(maxResults, 1000)}&fields=${encodeURIComponent("summary,description,status,assignee,priority,project,labels,comment,created,updated")}`,
+    const data = await this._searchIssues(
+      jql,
+      maxResults,
+      "summary,description,status,assignee,priority,project,labels,comment,created,updated",
     );
     let tasks = (Array.isArray(data?.issues) ? data.issues : []).map((issue) =>
       this._normaliseIssue(issue),
@@ -3083,8 +3322,13 @@ class JiraAdapter {
 
     for (const task of tasks) {
       try {
-        const sharedState = await this.readSharedStateFromIssue(task.id);
-        if (sharedState) task.meta.sharedState = sharedState;
+        const sharedState = normalizeSharedStatePayload(
+          await this.readSharedStateFromIssue(task.id),
+        );
+        if (sharedState) {
+          task.meta.sharedState = sharedState;
+          task.sharedState = sharedState;
+        }
       } catch (err) {
         console.warn(
           `${TAG} failed to read shared state for ${task.id}: ${err.message}`,
@@ -3099,8 +3343,13 @@ class JiraAdapter {
     const issue = await this._fetchIssue(issueKey);
     const task = this._normaliseIssue(issue);
     try {
-      const sharedState = await this.readSharedStateFromIssue(issueKey);
-      if (sharedState) task.meta.sharedState = sharedState;
+      const sharedState = normalizeSharedStatePayload(
+        await this.readSharedStateFromIssue(issueKey),
+      );
+      if (sharedState) {
+        task.meta.sharedState = sharedState;
+        task.sharedState = sharedState;
+      }
     } catch (err) {
       console.warn(
         `${TAG} failed to read shared state for ${issueKey}: ${err.message}`,
@@ -3345,12 +3594,13 @@ class JiraAdapter {
    */
   async persistSharedStateToIssue(issueKey, sharedState) {
     const key = this._validateIssueKey(issueKey);
+    const normalizedState = normalizeSharedStatePayload(sharedState);
     if (
-      !sharedState?.ownerId ||
-      !sharedState?.attemptToken ||
-      !sharedState?.attemptStarted ||
-      !sharedState?.heartbeat ||
-      !["claimed", "working", "stale"].includes(sharedState?.status)
+      !normalizedState?.ownerId ||
+      !normalizedState?.attemptToken ||
+      !normalizedState?.attemptStarted ||
+      !(normalizedState?.heartbeat || normalizedState?.ownerHeartbeat) ||
+      !["claimed", "working", "stale"].includes(normalizedState?.status)
     ) {
       throw new Error(
         `Jira: invalid shared state payload for ${key} (missing required fields)`,
@@ -3366,9 +3616,9 @@ class JiraAdapter {
       "codex:stale",
     ];
     const targetLabel =
-      sharedState.status === "claimed"
+      normalizedState.status === "claimed"
         ? this._codexLabels.claimed
-        : sharedState.status === "working"
+        : normalizedState.status === "working"
           ? this._codexLabels.working
           : this._codexLabels.stale;
     const labelsToRemove = allCodexLabels.filter((label) => label !== targetLabel);
@@ -3376,29 +3626,32 @@ class JiraAdapter {
       await this._setIssueLabels(key, [targetLabel], labelsToRemove);
       const stateFieldPayload = {};
       if (this._sharedStateFields.ownerId) {
-        stateFieldPayload[this._sharedStateFields.ownerId] = sharedState.ownerId;
+        stateFieldPayload[this._sharedStateFields.ownerId] =
+          normalizedState.ownerId;
       }
       if (this._sharedStateFields.attemptToken) {
         stateFieldPayload[this._sharedStateFields.attemptToken] =
-          sharedState.attemptToken;
+          normalizedState.attemptToken;
       }
       if (this._sharedStateFields.attemptStarted) {
-        const iso = this._normalizeIsoTimestamp(sharedState.attemptStarted);
+        const iso = this._normalizeIsoTimestamp(normalizedState.attemptStarted);
         if (iso) stateFieldPayload[this._sharedStateFields.attemptStarted] = iso;
       }
       if (this._sharedStateFields.heartbeat) {
-        const iso = this._normalizeIsoTimestamp(sharedState.heartbeat);
+        const iso = this._normalizeIsoTimestamp(
+          normalizedState.heartbeat || normalizedState.ownerHeartbeat,
+        );
         if (iso) stateFieldPayload[this._sharedStateFields.heartbeat] = iso;
       }
       if (this._sharedStateFields.retryCount) {
-        const retryCount = Number(sharedState.retryCount || 0);
+        const retryCount = Number(normalizedState.retryCount || 0);
         if (Number.isFinite(retryCount)) {
           stateFieldPayload[this._sharedStateFields.retryCount] = retryCount;
         }
       }
       if (this._sharedStateFields.stateJson) {
         stateFieldPayload[this._sharedStateFields.stateJson] = JSON.stringify(
-          sharedState,
+          normalizedState,
         );
       }
       if (Object.keys(stateFieldPayload).length > 0) {
@@ -3407,7 +3660,7 @@ class JiraAdapter {
           body: { fields: stateFieldPayload },
         });
       }
-      return this._createOrUpdateSharedStateComment(key, sharedState);
+      return this._createOrUpdateSharedStateComment(key, normalizedState);
     } catch (err) {
       console.warn(
         `${TAG} failed to persist shared state for ${key}: ${err.message}`,
@@ -3484,12 +3737,12 @@ class JiraAdapter {
           const raw = rawFields[this._sharedStateFields.stateJson];
           if (typeof raw === "string" && raw.trim()) {
             try {
-              const parsed = JSON.parse(raw);
+              const parsed = normalizeSharedStatePayload(JSON.parse(raw));
               if (
                 parsed?.ownerId &&
                 parsed?.attemptToken &&
                 parsed?.attemptStarted &&
-                parsed?.heartbeat &&
+                (parsed?.heartbeat || parsed?.ownerHeartbeat) &&
                 ["claimed", "working", "stale"].includes(parsed?.status)
               ) {
                 return parsed;
@@ -3524,7 +3777,7 @@ class JiraAdapter {
           fromFields.heartbeat &&
           fromFields.status
         ) {
-          return fromFields;
+          return normalizeSharedStatePayload(fromFields);
         }
       }
       const comments = await this._listIssueComments(key);
@@ -3533,8 +3786,10 @@ class JiraAdapter {
         return text.includes("<!-- codex-monitor-state");
       });
       if (!stateComment) return null;
-      const parsed = this._extractSharedStateFromText(
-        this._commentToText(stateComment.body),
+      const parsed = normalizeSharedStatePayload(
+        this._extractSharedStateFromText(
+          this._commentToText(stateComment.body),
+        ),
       );
       return parsed || null;
     } catch (err) {

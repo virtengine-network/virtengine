@@ -84,23 +84,39 @@ const SORT_OPTIONS = [
   { value: "title", label: "Title" },
 ];
 
-function StartTaskModal({ task, defaultSdk = "auto", onClose, onStart }) {
+export function StartTaskModal({
+  task,
+  defaultSdk = "auto",
+  allowTaskIdInput = false,
+  onClose,
+  onStart,
+}) {
   const [sdk, setSdk] = useState(defaultSdk || "auto");
   const [model, setModel] = useState("");
+  const [taskIdInput, setTaskIdInput] = useState(task?.id || "");
   const [starting, setStarting] = useState(false);
 
   useEffect(() => {
     setSdk(defaultSdk || "auto");
   }, [defaultSdk]);
 
+  useEffect(() => {
+    setTaskIdInput(task?.id || "");
+  }, [task?.id]);
+
   const canModel = sdk && sdk !== "auto";
+  const resolvedTaskId = (task?.id || taskIdInput || "").trim();
 
   const handleStart = async () => {
-    if (!task?.id || starting) return;
+    if (starting) return;
+    if (!resolvedTaskId) {
+      showToast("Task ID is required", "error");
+      return;
+    }
     setStarting(true);
     try {
       await onStart?.({
-        taskId: task.id,
+        taskId: resolvedTaskId,
         sdk: sdk && sdk !== "auto" ? sdk : undefined,
         model: model.trim() ? model.trim() : undefined,
       });
@@ -114,9 +130,19 @@ function StartTaskModal({ task, defaultSdk = "auto", onClose, onStart }) {
   return html`
     <${Modal} title="Start Task" onClose=${onClose}>
       <div class="meta-text mb-sm">
-        ${task?.title || "(untitled)"} · ${task?.id}
+        ${task?.title || "(untitled)"} · ${task?.id || "—"}
       </div>
       <div class="flex-col gap-md">
+        ${(allowTaskIdInput || !task?.id) &&
+        html`
+          <div class="card-subtitle">Task ID</div>
+          <input
+            class="input"
+            placeholder="e.g. task-123"
+            value=${taskIdInput}
+            onInput=${(e) => setTaskIdInput(e.target.value)}
+          />
+        `}
         <div class="card-subtitle">Executor SDK</div>
         <select class="input" value=${sdk} onChange=${(e) => setSdk(e.target.value)}>
           ${["auto", "codex", "copilot", "claude"].map(
@@ -134,7 +160,7 @@ function StartTaskModal({ task, defaultSdk = "auto", onClose, onStart }) {
         <button
           class="btn btn-primary"
           onClick=${handleStart}
-          disabled=${starting}
+          disabled=${starting || !resolvedTaskId}
         >
           ${starting ? "Starting…" : "▶ Start Task"}
         </button>
@@ -387,7 +413,6 @@ export function TasksTab() {
   const [showCreate, setShowCreate] = useState(false);
   const [detailTask, setDetailTask] = useState(null);
   const [startTarget, setStartTarget] = useState(null);
-  const [manualMode, setManualMode] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isSearching, setIsSearching] = useState(false);
@@ -412,6 +437,9 @@ export function TasksTab() {
   const pageSize = tasksPageSize?.value ?? 8;
   const totalPages = tasksTotalPages?.value ?? 1;
   const defaultSdk = executorData.value?.data?.sdk || "auto";
+  const activeSlots = executorData.value?.data?.slots || [];
+  const hasActiveSlots = activeSlots.length > 0;
+  const completedOnly = filterVal === "done";
 
   /* Search (local fuzzy filter on already-loaded data) */
   const searchLower = searchVal.trim().toLowerCase();
@@ -422,8 +450,6 @@ export function TasksTab() {
           .includes(searchLower),
       )
     : tasks;
-
-  const canManual = Boolean(executorData.value?.data);
 
   /* ── Handlers ── */
   const handleFilter = async (s) => {
@@ -656,8 +682,35 @@ export function TasksTab() {
           <button class="view-toggle-btn ${!isKanban ? 'active' : ''}" onClick=${() => { viewMode.value = 'list'; haptic(); }}>☰ List</button>
           <button class="view-toggle-btn ${isKanban ? 'active' : ''}" onClick=${() => { viewMode.value = 'kanban'; haptic(); }}>▦ Board</button>
         </div>
+        <button
+          class="btn btn-ghost btn-sm"
+          onClick=${() => handleFilter(completedOnly ? "all" : "done")}
+        >
+          ${completedOnly ? "Show All" : "Show Completed"}
+        </button>
       </div>
-      <${EmptyState} message="No tasks yet. Create one to get started!" icon="\u{1F4CB}" />
+      ${hasActiveSlots &&
+      html`
+        <${Card} title="Active Slots">
+          ${activeSlots.map(
+            (slot) => html`
+              <div key=${slot.taskId} class="list-item">
+                <div class="list-item-content">
+                  <div class="list-item-title">
+                    ${truncate(slot.taskTitle || "(untitled)", 50)}
+                  </div>
+                  <div class="meta-text">
+                    ${slot.taskId} · ${slot.branch || "no branch"}
+                  </div>
+                </div>
+                <${Badge} status="inprogress" text="running" />
+              </div>
+            `,
+          )}
+        <//>
+      `}
+      ${!hasActiveSlots &&
+      html`<${EmptyState} message="No tasks yet. Create one to get started!" icon="\u{1F4CB}" />`}
       <button class="fab" onClick=${() => { haptic(); setShowCreate(true); }}>${ICONS.plus}</button>
       ${showCreate && html`<${CreateTaskModalInline} onClose=${() => setShowCreate(false)} />`}
     `;
@@ -681,6 +734,12 @@ export function TasksTab() {
         <button class="view-toggle-btn ${!isKanban ? 'active' : ''}" onClick=${() => { viewMode.value = 'list'; haptic(); }}>☰ List</button>
         <button class="view-toggle-btn ${isKanban ? 'active' : ''}" onClick=${() => { viewMode.value = 'kanban'; haptic(); }}>▦ Board</button>
       </div>
+      <button
+        class="btn btn-ghost btn-sm"
+        onClick=${() => handleFilter(completedOnly ? "all" : "done")}
+      >
+        ${completedOnly ? "Show All" : "Show Completed"}
+      </button>
       <div style="position:relative">
         <button
           class="btn btn-secondary btn-sm export-btn"
@@ -762,25 +821,8 @@ export function TasksTab() {
         <span class="pill">${visible.length} shown</span>
       </div>
 
-      <!-- Manual mode + batch mode toggles -->
+      <!-- Batch mode toggle -->
       <div class="flex-between mb-sm">
-        <label
-          class="meta-text toggle-label"
-          onClick=${() => {
-            if (canManual) {
-              setManualMode(!manualMode);
-              haptic();
-            }
-          }}
-        >
-          <input
-            type="checkbox"
-            checked=${manualMode}
-            disabled=${!canManual}
-            style="accent-color:var(--accent)"
-          />
-          Manual Mode
-        </label>
         <label
           class="meta-text toggle-label"
           onClick=${() => {
@@ -873,9 +915,7 @@ export function TasksTab() {
           ${!batchMode &&
           html`
             <div class="btn-row mt-sm" onClick=${(e) => e.stopPropagation()}>
-              ${manualMode &&
-              task.status === "todo" &&
-              canManual &&
+              ${task.status === "todo" &&
               html`
                 <button
                   class="btn btn-primary btn-sm"
@@ -945,7 +985,7 @@ export function TasksTab() {
       <${TaskDetailModal}
         task=${detailTask}
         onClose=${() => setDetailTask(null)}
-        onStart=${manualMode && canManual ? (task) => openStartModal(task) : null}
+        onStart=${(task) => openStartModal(task)}
       />
     `}
     ${startTarget &&
@@ -953,6 +993,7 @@ export function TasksTab() {
       <${StartTaskModal}
         task=${startTarget}
         defaultSdk=${defaultSdk}
+        allowTaskIdInput=${false}
         onClose=${() => setStartTarget(null)}
         onStart=${startTask}
       />

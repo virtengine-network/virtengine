@@ -27,6 +27,7 @@ import {
   getTrend,
   getDashboardHistory,
 } from "../modules/state.js";
+import { navigateTo } from "../modules/router.js";
 import { ICONS } from "../modules/icons.js";
 import { cloneValue, formatRelative, truncate } from "../modules/utils.js";
 import {
@@ -43,6 +44,7 @@ import {
   PullToRefresh,
   SliderControl,
 } from "../components/forms.js";
+import { StartTaskModal } from "./tasks.js";
 
 /* ─── Quick Action definitions ─── */
 const QUICK_ACTIONS = [
@@ -53,6 +55,12 @@ const QUICK_ACTIONS = [
     action: "create",
     icon: "➕",
     color: "var(--color-inprogress)",
+  },
+  {
+    label: "Start Task",
+    action: "start",
+    icon: "▶",
+    color: "var(--color-todo)",
   },
   { label: "Plan", cmd: "/plan", icon: "📋", color: "var(--color-inreview)" },
   {
@@ -156,6 +164,7 @@ export function CreateTaskModal({ onClose }) {
 /* ─── DashboardTab ─── */
 export function DashboardTab() {
   const [showCreate, setShowCreate] = useState(false);
+  const [showStartModal, setShowStartModal] = useState(false);
   const status = statusData.value;
   const executor = executorData.value;
   const project = projectSummary.value;
@@ -163,6 +172,7 @@ export function DashboardTab() {
   const summary = status?.success_metrics || {};
   const execData = executor?.data;
   const mode = executor?.mode || "vk";
+  const defaultSdk = execData?.sdk || "auto";
 
   const running = Number(counts.running || counts.inprogress || 0);
   const review = Number(counts.review || counts.inreview || 0);
@@ -241,10 +251,29 @@ export function DashboardTab() {
     haptic();
     if (action.action === "create") {
       setShowCreate(true);
+    } else if (action.action === "start") {
+      setShowStartModal(true);
     } else if (action.cmd) {
       try {
-        await sendCommandToChat(action.cmd);
-        showToast(`Sent: ${action.cmd}`, "success");
+        if (action.cmd.startsWith("/status")) {
+          await refreshTab("dashboard");
+          showToast("Status refreshed", "success");
+        } else if (action.cmd.startsWith("/health")) {
+          const res = await apiFetch("/api/health", { _silent: true });
+          const uptime = Number(res?.uptime || 0);
+          showToast(`Health OK · uptime ${Math.round(uptime)}s`, "success");
+        } else if (action.cmd.startsWith("/logs")) {
+          navigateTo("logs");
+          await refreshTab("logs");
+          showToast("Opened logs", "success");
+        } else if (action.cmd.startsWith("/menu")) {
+          navigateTo("control");
+          showToast("Opened control panel", "success");
+        } else {
+          await sendCommandToChat(action.cmd);
+          showToast(`Sent: ${action.cmd}`, "success");
+          scheduleRefresh(120);
+        }
         const btn = e?.currentTarget;
         if (btn) {
           btn.classList.add("quick-action-sent");
@@ -255,6 +284,20 @@ export function DashboardTab() {
       }
     }
   };
+
+  const handleModalStart = useCallback(async ({ taskId, sdk, model }) => {
+    if (!taskId) return;
+    await apiFetch("/api/tasks/start", {
+      method: "POST",
+      body: JSON.stringify({
+        taskId,
+        ...(sdk ? { sdk } : {}),
+        ...(model ? { model } : {}),
+      }),
+    });
+    showToast("Task started", "success");
+    scheduleRefresh(150);
+  }, []);
 
   /* ── Recent activity (last 5 tasks from global tasks signal) ── */
   const recentTasks = (tasksData.value || []).slice(0, 5);
@@ -422,5 +465,16 @@ export function DashboardTab() {
     <!-- Create Task Modal -->
     ${showCreate &&
     html`<${CreateTaskModal} onClose=${() => setShowCreate(false)} />`}
+
+    ${showStartModal &&
+    html`
+      <${StartTaskModal}
+        task=${null}
+        defaultSdk=${defaultSdk}
+        allowTaskIdInput=${true}
+        onClose=${() => setShowStartModal(false)}
+        onStart=${handleModalStart}
+      />
+    `}
   `;
 }

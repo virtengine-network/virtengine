@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { getConsoleLevel, LogLevel } from "./lib/logger.mjs";
 import { isBenignErrorMention } from "./utils.mjs";
 import { resolvePromptTemplate } from "./agent-prompts.mjs";
+import { resolveCodexProfileRuntime } from "./codex-model-profiles.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -450,7 +451,7 @@ export function runCodexExec(
       // Auto-detect Azure: if OPENAI_BASE_URL contains .openai.azure.com,
       // configure the CLI for Azure via -c overrides and AZURE_OPENAI_API_KEY.
       // Otherwise strip OPENAI_BASE_URL so the CLI uses its ChatGPT OAuth.
-      const codexEnv = { ...process.env };
+      const { env: codexEnv } = resolveCodexProfileRuntime(process.env);
       const baseUrl = codexEnv.OPENAI_BASE_URL || "";
       const isAzure = baseUrl.includes(".openai.azure.com");
       if (isAzure) {

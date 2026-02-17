@@ -208,6 +208,7 @@ import {
   createTask as createKanbanTask,
 } from "./kanban-adapter.mjs";
 import { resolvePromptTemplate } from "./agent-prompts.mjs";
+import { resolveCodexProfileRuntime } from "./codex-model-profiles.mjs";
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
 
 // ── Anomaly signal file path (shared with ve-orchestrator.ps1) ──────────────
@@ -421,7 +422,12 @@ function getActiveKanbanBackend() {
 
 function isVkRuntimeRequired() {
   const backend = getActiveKanbanBackend();
-  return backend === "vk" || executorMode === "vk" || executorMode === "hybrid";
+  const runtimeExecutorMode = getExecutorMode();
+  return (
+    backend === "vk" ||
+    runtimeExecutorMode === "vk" ||
+    runtimeExecutorMode === "hybrid"
+  );
 }
 
 function isVkSpawnAllowed() {
@@ -758,6 +764,39 @@ let selfRestartDeferCount = 0;
 let deferredMonitorRestartTimer = null;
 let pendingMonitorRestartReason = "";
 let selfRestartWatcherEnabled = isSelfRestartWatcherEnabled();
+
+function buildCodexSdkOptionsForMonitor() {
+  const { env: resolvedEnv } = resolveCodexProfileRuntime(process.env);
+  const baseUrl = resolvedEnv.OPENAI_BASE_URL || "";
+  const isAzure = baseUrl.includes(".openai.azure.com");
+  const env = { ...resolvedEnv };
+  // For SDK compatibility, pass Azure endpoint via provider config instead of OPENAI_BASE_URL.
+  delete env.OPENAI_BASE_URL;
+
+  if (isAzure) {
+    if (env.OPENAI_API_KEY && !env.AZURE_OPENAI_API_KEY) {
+      env.AZURE_OPENAI_API_KEY = env.OPENAI_API_KEY;
+    }
+    const azureModel = env.CODEX_MODEL || undefined;
+    return {
+      env,
+      config: {
+        model_provider: "azure",
+        model_providers: {
+          azure: {
+            name: "Azure OpenAI",
+            base_url: baseUrl,
+            env_key: "AZURE_OPENAI_API_KEY",
+            wire_api: "responses",
+          },
+        },
+        ...(azureModel ? { model: azureModel } : {}),
+      },
+    };
+  }
+
+  return { env };
+}
 
 // ── Self-restart marker: detect if this process was spawned by a code-change restart
 const selfRestartMarkerPath = resolve(
@@ -1737,7 +1776,7 @@ async function runCodexRecovery(reason) {
         throw new Error(codexDisabledReason || "Codex SDK not available");
       }
     }
-    const codex = new CodexClient();
+    const codex = new CodexClient(buildCodexSdkOptionsForMonitor());
     const thread = codex.startThread();
     const prompt = `You are monitoring a Node.js orchestrator.
 A local service (vibe-kanban) is unreachable.
@@ -3054,9 +3093,9 @@ function buildRetryPrompt(attemptInfo, reason, logTail) {
 
   parts.push(
     "",
-    "If VE_TASK_TITLE/VE_TASK_DESCRIPTION are missing, treat this as a VK task:",
-    "Worktree paths often include .git/worktrees/ or vibe-kanban.",
-    "VK tasks always map to a ve/<id>-<slug> branch.",
+    "If VE_TASK_TITLE/VE_TASK_DESCRIPTION are missing, treat this as an orchestrated task:",
+    "Worktree paths often include .git/worktrees/ or a task runner path (e.g., vibe-kanban).",
+    "Tasks typically map to a ve/<id>-<slug> branch.",
     "Resume with the context above, then commit/push/PR as usual.",
   );
 
@@ -6913,6 +6952,10 @@ function startTaskPlannerStatusLoop() {
 }
 
 async function maybeTriggerTaskPlanner(reason, details) {
+  if (internalTaskExecutor?.isPaused?.()) {
+    console.log("[monitor] task planner skipped: executor paused");
+    return;
+  }
   if (plannerMode === "disabled") {
     console.log(`[monitor] task planner skipped: mode=disabled`);
     return;
@@ -7708,6 +7751,9 @@ async function triggerTaskPlanner(
     allowCodexWhenDisabled = false,
   } = {},
 ) {
+  if (internalTaskExecutor?.isPaused?.()) {
+    return { status: "skipped", reason: "executor_paused" };
+  }
   if (plannerMode === "disabled") {
     return { status: "skipped", reason: "planner_disabled" };
   }
@@ -7976,7 +8022,7 @@ async function triggerTaskPlannerViaCodex(
     numTasks,
   );
   const agentPrompt = agentPrompts.planner;
-  const codex = new CodexClient();
+  const codex = new CodexClient(buildCodexSdkOptionsForMonitor());
   const thread = codex.startThread();
   const prompt = [
     agentPrompt,
@@ -8294,7 +8340,7 @@ ${logTail}
         const ready = await ensureCodexSdkReady();
         if (!ready) throw new Error(codexDisabledReason || "Codex SDK N/A");
       }
-      const codex = new CodexClient();
+      const codex = new CodexClient(buildCodexSdkOptionsForMonitor());
       const thread = codex.startThread();
       const result = await thread.run(prompt);
       const analysisPath = logPath.replace(/\.log$/, "-analysis.txt");

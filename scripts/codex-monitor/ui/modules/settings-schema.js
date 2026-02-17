@@ -83,7 +83,19 @@ export const SETTINGS_SCHEMA = [
 
   // ── AI Provider Keys ────────────────────────────────────────
   { key: "OPENAI_API_KEY",                 label: "OpenAI API Key",             category: "executor", type: "secret", sensitive: true, description: "OpenAI API key for Codex SDK. Required if using Codex executor." },
+  { key: "AZURE_OPENAI_API_KEY",           label: "Azure API Key",              category: "executor", type: "secret", sensitive: true, description: "Azure OpenAI API key (used when provider/profile is azure)." },
   { key: "CODEX_MODEL",                    label: "Codex Model",                category: "executor", type: "string", defaultVal: "gpt-4o", description: "Model for Codex SDK. E.g., gpt-4o, o3, o4-mini." },
+  { key: "CODEX_MODEL_PROFILE",            label: "Active Model Profile",       category: "executor", type: "select", defaultVal: "xl", options: ["xl", "m"], description: "Select active Codex model profile for runtime sessions." },
+  { key: "CODEX_MODEL_PROFILE_SUBAGENT",   label: "Subagent Profile",           category: "executor", type: "select", defaultVal: "m", options: ["xl", "m"], description: "Default profile to prefer for subagent-style delegated work." },
+  { key: "CODEX_MODEL_PROFILE_XL_PROVIDER", label: "XL Provider",               category: "executor", type: "select", defaultVal: "openai", options: ["openai", "azure", "compatible"], description: "Provider for XL profile." },
+  { key: "CODEX_MODEL_PROFILE_XL_MODEL",   label: "XL Model",                   category: "executor", type: "string", defaultVal: "gpt-5.3-codex", description: "Model/deployment name for XL profile." },
+  { key: "CODEX_MODEL_PROFILE_XL_BASE_URL", label: "XL Base URL",               category: "executor", type: "string", description: "Optional base URL override for XL profile.", validate: "^$|^https?://" },
+  { key: "CODEX_MODEL_PROFILE_XL_API_KEY", label: "XL API Key",                 category: "executor", type: "secret", sensitive: true, description: "Optional profile-scoped API key for XL profile." },
+  { key: "CODEX_MODEL_PROFILE_M_PROVIDER", label: "M Provider",                 category: "executor", type: "select", defaultVal: "openai", options: ["openai", "azure", "compatible"], description: "Provider for M profile." },
+  { key: "CODEX_MODEL_PROFILE_M_MODEL",    label: "M Model",                    category: "executor", type: "string", defaultVal: "gpt-5.1-codex-mini", description: "Model/deployment name for M profile." },
+  { key: "CODEX_MODEL_PROFILE_M_BASE_URL", label: "M Base URL",                 category: "executor", type: "string", description: "Optional base URL override for M profile.", validate: "^$|^https?://" },
+  { key: "CODEX_MODEL_PROFILE_M_API_KEY", label: "M API Key",                  category: "executor", type: "secret", sensitive: true, description: "Optional profile-scoped API key for M profile." },
+  { key: "CODEX_SUBAGENT_MODEL",           label: "Subagent Model",             category: "executor", type: "string", defaultVal: "gpt-5.1-codex-mini", description: "Preferred lightweight model for delegated/subagent work." },
   { key: "ANTHROPIC_API_KEY",              label: "Anthropic API Key",          category: "executor", type: "secret", sensitive: true, description: "Anthropic API key for Claude SDK. Required if using Claude executor." },
   { key: "CLAUDE_MODEL",                   label: "Claude Model",               category: "executor", type: "string", defaultVal: "claude-opus-4-6", description: "Model for Claude SDK. E.g., claude-opus-4-6, claude-sonnet-4-5." },
   { key: "COPILOT_MODEL",                  label: "Copilot Model",              category: "executor", type: "string", defaultVal: "gpt-5", description: "Model for Copilot SDK sessions." },
@@ -120,7 +132,7 @@ export const SETTINGS_SCHEMA = [
   { key: "VE_COORDINATOR_PRIORITY",        label: "Coordinator Priority",       category: "network", type: "number", defaultVal: 10, min: 1, max: 100, description: "Lower value = higher priority in coordinator election." },
 
   // ── Security / Sandbox ────────────────────────────────────
-  { key: "CODEX_SANDBOX",                  label: "Sandbox Mode",               category: "security", type: "select", defaultVal: "danger-full-access", options: ["danger-full-access", "workspace-write", "read-only"], description: "Agent filesystem access level. 'workspace-write' restricts to project directory." },
+  { key: "CODEX_SANDBOX",                  label: "Sandbox Mode",               category: "security", type: "select", defaultVal: "workspace-write", options: ["workspace-write", "danger-full-access", "read-only"], description: "Agent filesystem access level. 'workspace-write' is permissive within workspace while avoiding full host access." },
   { key: "CONTAINER_ENABLED",              label: "Container Isolation",        category: "security", type: "boolean", defaultVal: false, description: "Run agent tasks inside Docker/Podman containers for OS-level isolation.", restart: true },
   { key: "CONTAINER_RUNTIME",              label: "Container Runtime",          category: "security", type: "select", defaultVal: "docker", options: ["auto", "docker", "podman", "container"], description: "Container engine to use for isolated execution." },
   { key: "CONTAINER_IMAGE",                label: "Container Image",            category: "security", type: "string", defaultVal: "node:22-slim", description: "Docker image for agent execution containers." },

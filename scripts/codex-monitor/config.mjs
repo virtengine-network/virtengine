@@ -37,6 +37,10 @@ function hasSetupMarkers(dir) {
   return markers.some((name) => existsSync(resolve(dir, name)));
 }
 
+function hasConfigFiles(dir) {
+  return CONFIG_FILES.some((name) => existsSync(resolve(dir, name)));
+}
+
 function isPathInside(parent, child) {
   const rel = relative(parent, child);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
@@ -56,7 +60,7 @@ function isWslInteropRuntime() {
 function resolveConfigDir(repoRoot) {
   const repoPath = resolve(repoRoot || process.cwd());
   const packageDir = resolve(__dirname);
-  if (isPathInside(repoPath, packageDir) || hasSetupMarkers(packageDir)) {
+  if (isPathInside(repoPath, packageDir) || hasConfigFiles(packageDir)) {
     return packageDir;
   }
   const preferWindowsDirs =

@@ -31,6 +31,18 @@ import { createDaemonCrashTracker } from "./daemon-restart-policy.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 
+function getArgValue(flag) {
+  const match = args.find((arg) => arg.startsWith(`${flag}=`));
+  if (match) {
+    return match.slice(flag.length + 1).trim();
+  }
+  const idx = args.indexOf(flag);
+  if (idx >= 0 && args[idx + 1] && !args[idx + 1].startsWith("--")) {
+    return args[idx + 1].trim();
+  }
+  return "";
+}
+
 // ── Version (read from package.json — single source of truth) ────────────────
 
 const VERSION = JSON.parse(
@@ -647,6 +659,10 @@ async function main() {
 
   // Handle --setup
   if (args.includes("--setup") || args.includes("setup")) {
+    const configDirArg = getArgValue("--config-dir");
+    if (configDirArg) {
+      process.env.CODEX_MONITOR_DIR = configDirArg;
+    }
     const { runSetup } = await import("./setup.mjs");
     await runSetup();
     process.exit(0);
@@ -664,6 +680,10 @@ async function main() {
   const { shouldRunSetup } = await import("./setup.mjs");
   if (shouldRunSetup()) {
     console.log("\n  🚀 First run detected — launching setup wizard...\n");
+    const configDirArg = getArgValue("--config-dir");
+    if (configDirArg) {
+      process.env.CODEX_MONITOR_DIR = configDirArg;
+    }
     const { runSetup } = await import("./setup.mjs");
     await runSetup();
     console.log("\n  Setup complete! Starting codex-monitor...\n");

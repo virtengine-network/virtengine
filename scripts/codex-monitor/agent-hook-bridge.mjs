@@ -189,6 +189,11 @@ async function run() {
       sdk: agent,
       taskId: process.env.VE_TASK_ID || "",
       taskTitle: process.env.VE_TASK_TITLE || "",
+      taskDescription:
+        process.env.VE_TASK_DESCRIPTION ||
+        process.env.VE_DESCRIPTION ||
+        process.env.VK_DESCRIPTION ||
+        "",
       branch: process.env.VE_BRANCH_NAME || "",
       worktreePath: process.cwd(),
       extra: {

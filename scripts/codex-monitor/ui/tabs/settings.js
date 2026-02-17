@@ -270,6 +270,11 @@ const SETTINGS_STYLES = `
   border: 1px solid rgba(245,166,35,0.25);
   color: var(--warning, #f5a623);
 }
+.settings-banner-info {
+  background: rgba(90,124,255,0.12);
+  border: 1px solid rgba(90,124,255,0.25);
+  color: var(--accent, #5a7cff);
+}
 .settings-banner-text { flex: 1; }
 /* Diff display for confirm dialog */
 .settings-diff {
@@ -398,6 +403,7 @@ function maskValue(val) {
 function ServerConfigMode() {
   /* Data loading state */
   const [serverData, setServerData] = useState(null);     // { KEY: "value" } from API
+  const [serverMeta, setServerMeta] = useState(null);     // { envPath, configPath, configDir }
   const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -430,12 +436,14 @@ function ServerConfigMode() {
       const res = await apiFetch("/api/settings");
       if (res?.ok && res.data) {
         setServerData(res.data);
+        setServerMeta(res.meta || null);
       } else {
         throw new Error(res?.error || "Unexpected response format");
       }
     } catch (err) {
       setLoadError(err.message || "Failed to load settings");
       setServerData(null);
+      setServerMeta(null);
     } finally {
       setLoading(false);
     }
@@ -806,6 +814,18 @@ function ServerConfigMode() {
       <div class="settings-banner settings-banner-warn">
         <span>⚡</span>
         <span class="settings-banner-text">Connection lost — reconnecting…</span>
+      </div>
+    `}
+
+    ${serverMeta?.configPath &&
+    !loadError &&
+    html`
+      <div class="settings-banner settings-banner-info">
+        <span>🧭</span>
+        <span class="settings-banner-text">
+          Settings are saved to <code>${serverMeta.envPath}</code> and synced to
+          <code>${serverMeta.configPath}</code> for supported keys.
+        </span>
       </div>
     `}
 

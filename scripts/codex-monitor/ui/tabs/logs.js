@@ -13,7 +13,7 @@ import htm from "htm";
 
 const html = htm.bind(h);
 
-import { haptic, showAlert } from "../modules/telegram.js";
+import { haptic, showAlert, getTg } from "../modules/telegram.js";
 import { apiFetch, sendCommandToChat } from "../modules/api.js";
 import {
   logsData,
@@ -107,18 +107,34 @@ function highlightLine(text, search, isRegex) {
 const LINE_HEIGHT = 20;
 const SCROLL_BUFFER = 20;
 
+function isMobileViewport() {
+  const tg = getTg?.();
+  const platform = String(tg?.platform || "").toLowerCase();
+  if (platform === "ios" || platform === "android" || platform === "android_x") {
+    return true;
+  }
+  if (typeof globalThis !== "undefined" && globalThis.matchMedia) {
+    return globalThis.matchMedia("(max-width: 680px)").matches;
+  }
+  return false;
+}
+
 /* ─── LogsTab ─── */
 export function LogsTab() {
   const logRef = useRef(null);
   const tailRef = useRef(null);
   const isAtBottomRef = useRef(true);
 
-  const [localLogLines, setLocalLogLines] = useState(logsLines?.value ?? 200);
+  const isMobile = useMemo(() => isMobileViewport(), []);
+  const [localLogLines, setLocalLogLines] = useState(() => {
+    const base = logsLines?.value ?? 200;
+    return isMobile ? Math.min(base, 20) : base;
+  });
   const [localAgentLines, setLocalAgentLines] = useState(
     agentLogLines?.value ?? 200,
   );
   const [contextQuery, setContextQuery] = useState("");
-  const [logLevel, setLogLevel] = useState("all");
+  const [logLevel, setLogLevel] = useState(isMobile ? "error" : "all");
   const [logSearch, setLogSearch] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [regexMode, setRegexMode] = useState(false);
@@ -127,6 +143,25 @@ export function LogsTab() {
   const [branchDetail, setBranchDetail] = useState(null);
   const [branchLoading, setBranchLoading] = useState(false);
   const [branchError, setBranchError] = useState(null);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    if (logsLines) logsLines.value = 20;
+    setLocalLogLines(20);
+    setLogLevel("error");
+    loadLogs();
+  }, [isMobile]);
+
+  const branchFileDetails = useMemo(() => {
+    if (!branchDetail) return [];
+    if (Array.isArray(branchDetail.filesDetailed) && branchDetail.filesDetailed.length) {
+      return branchDetail.filesDetailed;
+    }
+    if (Array.isArray(branchDetail.files) && branchDetail.files.length) {
+      return branchDetail.files.map((file) => ({ file }));
+    }
+    return [];
+  }, [branchDetail]);
 
   /* Raw log text */
   const rawLogText = logsData?.value?.lines
@@ -254,12 +289,17 @@ export function LogsTab() {
 
   const openWorkspace = (detail) => {
     if (!detail) return;
-    const taskId = detail?.activeSlot?.taskId || detail?.worktree?.taskKey || null;
-    const taskTitle = detail?.activeSlot?.taskTitle || detail?.branch || "Workspace";
+    const target =
+      detail?.workspaceTarget ||
+      {
+        taskId: detail?.activeSlot?.taskId || detail?.worktree?.taskKey || null,
+        taskTitle: detail?.activeSlot?.taskTitle || detail?.branch || "Workspace",
+        branch: detail?.branch || null,
+      };
     agentWorkspaceTarget.value = {
-      taskId,
-      taskTitle,
-      branch: detail?.branch || null,
+      taskId: target.taskId || null,
+      taskTitle: target.taskTitle || detail?.branch || "Workspace",
+      branch: target.branch || detail?.branch || null,
     };
     navigateTo("agents");
   };
@@ -634,16 +674,27 @@ export function LogsTab() {
           html`<div class="meta-text mb-sm">Base: ${branchDetail.base}</div>`}
           ${branchDetail.activeSlot &&
           html`<div class="meta-text mb-sm">Active Agent: ${branchDetail.activeSlot.taskTitle || branchDetail.activeSlot.taskId}</div>`}
+          ${branchDetail.worktree?.path &&
+          html`<div class="meta-text mb-sm">Worktree: <span class="mono">${branchDetail.worktree.path}</span></div>`}
           <div class="btn-row mb-sm">
-            ${(branchDetail.activeSlot || branchDetail.worktree) &&
+            ${(branchDetail.workspaceTarget || branchDetail.activeSlot || branchDetail.worktree) &&
             html`<button class="btn btn-primary btn-sm" onClick=${() => openWorkspace(branchDetail)}>
-              🔍 Open Workspace
+              🔍 Open Workspace Viewer
             </button>`}
             <button
               class="btn btn-ghost btn-sm"
               onClick=${() => copyToClipboard(branchDetail.diffStat || "", "Diff")}
             >📋 Copy Diff</button>
           </div>
+          ${branchDetail.diffSummary &&
+          html`
+            <div class="meta-text mb-sm">
+              Diff: ${branchDetail.diffSummary.totalFiles || 0} files ·
+              +${branchDetail.diffSummary.totalAdditions || 0} ·
+              -${branchDetail.diffSummary.totalDeletions || 0}
+              ${branchDetail.diffSummary.binaryFiles ? `· ${branchDetail.diffSummary.binaryFiles} binary` : ""}
+            </div>
+          `}
           ${branchDetail.commits?.length > 0 &&
           html`
             <div class="card mb-sm">
@@ -651,7 +702,9 @@ export function LogsTab() {
               ${branchDetail.commits.map(
                 (cm) => html`
                   <div class="meta-text" key=${cm.hash}>
-                    <span class="mono">${cm.hash}</span> ${cm.message || ""} ${cm.time ? `· ${cm.time}` : ""}
+                    <span class="mono">${cm.hash}</span> ${cm.message || ""}
+                    ${cm.authorName ? `· ${cm.authorName}` : ""}${cm.authorEmail ? ` <${cm.authorEmail}>` : ""}
+                    ${cm.time ? `· ${cm.time}` : ""}${cm.authorDate ? `· ${new Date(cm.authorDate).toLocaleString()}` : ""}
                   </div>
                 `,
               )}
@@ -659,9 +712,18 @@ export function LogsTab() {
           `}
           <div class="card mb-sm">
             <div class="card-title">Files Changed</div>
-            ${branchDetail.files?.length
-              ? branchDetail.files.map(
-                  (f) => html`<div class="meta-text" key=${f}>${f}</div>`,
+            ${branchFileDetails.length
+              ? branchFileDetails.map(
+                  (f) => html`
+                    <div class="meta-text" key=${f.file}>
+                      <span class="mono">${f.file}</span>
+                      ${typeof f.additions === "number" &&
+                      html`<span class="pill" style="margin-left:6px">+${f.additions}</span>`}
+                      ${typeof f.deletions === "number" &&
+                      html`<span class="pill" style="margin-left:6px">-${f.deletions}</span>`}
+                      ${f.binary && html`<span class="pill" style="margin-left:6px">binary</span>`}
+                    </div>
+                  `,
                 )
               : html`<div class="meta-text">No diff against base.</div>`}
           </div>

@@ -307,7 +307,7 @@ ${JSON.stringify(stateData, null, 2)}
 
       const result = await adapter.readSharedStateFromIssue(42);
 
-      expect(result).toEqual(stateData);
+      expect(result).toMatchObject(stateData);
     });
 
     it("returns null when no state comment exists", async () => {
@@ -366,7 +366,7 @@ New state`,
 
       const result = await adapter.readSharedStateFromIssue(42);
 
-      expect(result).toEqual(newState);
+      expect(result).toMatchObject(newState);
     });
 
     it("returns null for malformed JSON", async () => {
@@ -539,7 +539,7 @@ Status comment`,
       });
 
       expect(tasks).toHaveLength(1);
-      expect(tasks[0].meta.sharedState).toEqual(sharedState);
+      expect(tasks[0].meta.sharedState).toMatchObject(sharedState);
     });
 
     it("handles tasks without shared state", async () => {

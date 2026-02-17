@@ -139,23 +139,123 @@ function WorkspaceViewer({ agent, onClose }) {
 
   const renderChanges = () => {
     const ctx = contextData?.context;
-    if (!ctx) {
+    const matches = contextData?.matches || {};
+    const diagnostics = contextData?.diagnostics || {};
+    const sessionInfo = contextData?.session || null;
+    const slotInfo = contextData?.slot || null;
+
+    const formatReason = (reason) => {
+      const map = {
+        "no-matching-slots-or-worktrees": "No matching active slots or worktrees found.",
+        "no-session-match": "No matching session found.",
+        "no-worktree-match": "No matching worktree found.",
+        "worktree-path-missing": "Matched worktree path missing or inaccessible.",
+      };
+      return map[reason] || reason;
+    };
+
+    const renderMatchList = (title, items, renderItem) => {
+      if (!items || items.length === 0) return null;
       return html`
-        <div class="chat-view chat-empty-state">
-          <div class="session-empty-icon">📋</div>
-          <div class="session-empty-text">No workspace context available</div>
+        <div class="card mb-sm">
+          <div class="card-title">${title}</div>
+          ${items.map((item, i) => html`
+            <div class="meta-text" key=${i}>
+              ${renderItem(item)}
+            </div>
+          `)}
+        </div>
+      `;
+    };
+
+    if (!ctx) {
+      const reasons = diagnostics?.reasons || [];
+      const hints = diagnostics?.hints || [];
+      return html`
+        <div class="workspace-context">
+          <div class="card mb-sm">
+            <div class="card-title">Workspace Context Unavailable</div>
+            <div class="meta-text">Query: ${contextData?.query || query || "unknown"}</div>
+            ${reasons.length > 0 &&
+              html`<div class="meta-text mt-xs">
+                ${reasons.map((r) => formatReason(r)).join(" ")}
+              </div>`}
+            ${hints.length > 0 &&
+              html`<div class="meta-text mt-xs">
+                ${hints.join(" ")}
+              </div>`}
+            ${(diagnostics?.searched?.activeSlots != null ||
+              diagnostics?.searched?.activeWorktrees != null ||
+              diagnostics?.searched?.sessions != null) &&
+              html`<div class="meta-text mt-xs">
+                Searched: ${diagnostics?.searched?.activeSlots ?? 0} slots · ${diagnostics?.searched?.activeWorktrees ?? 0} worktrees · ${diagnostics?.searched?.sessions ?? 0} sessions
+              </div>`}
+          </div>
+
+          ${renderMatchList("Worktree Matches", matches.worktrees, (wt) =>
+            html`<span class="mono">${wt.name || wt.branch || "worktree"}</span> ${wt.path ? `· ${wt.path}` : ""}`)}
+          ${renderMatchList("Slot Matches", matches.slots, (slot) =>
+            html`<span class="mono">${slot.taskId || slot.taskTitle || "slot"}</span> ${slot.branch ? `· ${slot.branch}` : ""}`)}
+          ${renderMatchList("Session Matches", matches.sessions, (sess) =>
+            html`<span class="mono">${sess.id || sess.taskId || "session"}</span> ${sess.status ? `· ${sess.status}` : ""}`)}
+
+          ${sessionInfo && html`
+            <div class="card mb-sm">
+              <div class="card-title">Session</div>
+              <div class="meta-text">
+                <span class="mono">${sessionInfo.id || sessionInfo.taskId}</span>
+                ${sessionInfo.status ? ` · ${sessionInfo.status}` : ""}
+              </div>
+              ${sessionInfo.preview &&
+                html`<div class="meta-text mt-xs">${truncate(sessionInfo.preview, 120)}</div>`}
+              <button class="btn btn-ghost btn-sm mt-sm" onClick=${() => setActiveTab("stream")}>
+                💬 View Stream
+              </button>
+            </div>
+          `}
         </div>
       `;
     }
+
     const files = ctx.changedFiles || [];
     const commits = ctx.recentCommits || [];
+    const aheadBehind = ctx.gitAheadBehind || "";
     return html`
       <div class="workspace-context">
         <div class="card mb-sm">
           <div class="card-title">Branch</div>
           <div class="meta-text">${ctx.gitBranch || agent.branch || "unknown"}</div>
           <div class="meta-text mt-xs">${ctx.path || "unknown path"}</div>
+          ${aheadBehind &&
+            html`<div class="meta-text mt-xs">Ahead/Behind: ${aheadBehind}</div>`}
         </div>
+        ${sessionInfo && html`
+          <div class="card mb-sm">
+            <div class="card-title">Session</div>
+            <div class="meta-text">
+              <span class="mono">${sessionInfo.id || sessionInfo.taskId}</span>
+              ${sessionInfo.status ? ` · ${sessionInfo.status}` : ""}
+            </div>
+            ${sessionInfo.lastActiveAt &&
+              html`<div class="meta-text mt-xs">Last Active: ${sessionInfo.lastActiveAt}</div>`}
+            ${sessionInfo.preview &&
+              html`<div class="meta-text mt-xs">${truncate(sessionInfo.preview, 140)}</div>`}
+            <button class="btn btn-ghost btn-sm mt-sm" onClick=${() => setActiveTab("stream")}>
+              💬 View Stream
+            </button>
+          </div>
+        `}
+        ${slotInfo && html`
+          <div class="card mb-sm">
+            <div class="card-title">Active Slot</div>
+            <div class="meta-text">
+              ${slotInfo.taskTitle || slotInfo.taskId || "slot"}
+              ${slotInfo.status ? ` · ${slotInfo.status}` : ""}
+            </div>
+            ${slotInfo.branch &&
+              html`<div class="meta-text mt-xs">Branch: ${slotInfo.branch}</div>`}
+          </div>
+        `}
         ${commits.length > 0 &&
         html`
           <div class="card mb-sm">
@@ -341,6 +441,18 @@ export function AgentsTab() {
   const [expandedSlot, setExpandedSlot] = useState(null);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const workspaceTarget = agentWorkspaceTarget.value;
+
+  useEffect(() => {
+    const current = selectedSessionId.value;
+    const sessions = sessionsData.value || [];
+    if (current || sessions.length === 0) return;
+    const activeSession =
+      sessions.find((s) => s.status === "active" || s.status === "running") ||
+      sessions[0];
+    if (activeSession?.id) {
+      selectedSessionId.value = activeSession.id;
+    }
+  }, [sessionsData.value, selectedSessionId.value]);
 
   useEffect(() => {
     if (!workspaceTarget) return;

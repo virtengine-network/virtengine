@@ -1,52 +1,65 @@
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { execSync } from "node:child_process";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  evaluateBranchSafetyForPush,
-  normalizeBaseBranch,
-} from "../git-safety.mjs";
+const spawnSyncMock = vi.hoisted(() => vi.fn());
+
+vi.mock("node:child_process", () => ({
+  spawnSync: spawnSyncMock,
+}));
+
+const { evaluateBranchSafetyForPush, normalizeBaseBranch } = await import(
+  "../git-safety.mjs"
+);
 
 describe("git-safety", () => {
   let repoDir = "";
+  let gitState = null;
 
-  beforeEach(async () => {
-    repoDir = await mkdtemp(resolve(tmpdir(), "git-safety-"));
-    execSync("git init -b main", { cwd: repoDir, stdio: "pipe" });
-    execSync('git config user.email "test@test.com"', {
-      cwd: repoDir,
-      stdio: "pipe",
+  function setGitState({ baseFiles = 0, headFiles = 0, diff = null } = {}) {
+    gitState = {
+      fileCounts: new Map([
+        ["origin/main", baseFiles],
+        ["HEAD", headFiles],
+      ]),
+      diffStats: new Map([
+        [
+          "origin/main...HEAD",
+          diff || { files: 0, inserted: 0, deleted: 0 },
+        ],
+      ]),
+    };
+  }
+
+  beforeEach(() => {
+    repoDir = "/tmp/git-safety";
+    setGitState({
+      baseFiles: 600,
+      headFiles: 600,
+      diff: { files: 0, inserted: 0, deleted: 0 },
     });
-    execSync('git config user.name "Test"', { cwd: repoDir, stdio: "pipe" });
-
-    await mkdir(resolve(repoDir, "src"), { recursive: true });
-    const writes = [];
-    for (let i = 0; i < 600; i += 1) {
-      writes.push(
-        writeFile(resolve(repoDir, "src", `file-${i}.txt`), `file ${i}\n`),
-      );
-    }
-    await Promise.all(writes);
-    execSync("git add -A && git commit -m base", { cwd: repoDir, stdio: "pipe" });
-
-    const mainHead = execSync("git rev-parse HEAD", {
-      cwd: repoDir,
-      encoding: "utf8",
-      stdio: "pipe",
-    }).trim();
-    // Simulate the ref normally present in worktrees with a fetched remote.
-    execSync(`git update-ref refs/remotes/origin/main ${mainHead}`, {
-      cwd: repoDir,
-      stdio: "pipe",
+    spawnSyncMock.mockImplementation((_cmd, args) => {
+      const [command, ...rest] = args;
+      if (command === "ls-tree" && rest[0] === "-r") {
+        const ref = rest[2];
+        const count = gitState.fileCounts.get(ref);
+        if (count == null) {
+          return { status: 1, stdout: "" };
+        }
+        const files = Array.from({ length: count }, (_, i) => `file-${i}.txt`);
+        return { status: 0, stdout: files.join("\n") };
+      }
+      if (command === "diff" && rest[0] === "--numstat") {
+        const range = rest[1];
+        const stats = gitState.diffStats.get(range);
+        if (!stats) return { status: 1, stdout: "" };
+        if (stats.files <= 0) return { status: 0, stdout: "" };
+        const lines = [
+          `${stats.inserted}\t${stats.deleted}\tfile-0.txt`,
+          ...Array.from({ length: stats.files - 1 }, (_, i) => `0\t0\tfile-${i + 1}.txt`),
+        ];
+        return { status: 0, stdout: lines.join("\n") };
+      }
+      return { status: 1, stdout: "" };
     });
-  });
-
-  afterEach(async () => {
-    if (repoDir) {
-      await rm(repoDir, { recursive: true, force: true });
-    }
   });
 
   it("normalizes base branch names", () => {
@@ -69,10 +82,11 @@ describe("git-safety", () => {
   });
 
   it("flags README-only destructive branch states", async () => {
-    execSync("git checkout -b ve/test", { cwd: repoDir, stdio: "pipe" });
-    execSync("git rm -r --quiet src", { cwd: repoDir, stdio: "pipe" });
-    await writeFile(resolve(repoDir, "README.md"), "# test\n");
-    execSync("git add -A && git commit -m init", { cwd: repoDir, stdio: "pipe" });
+    setGitState({
+      baseFiles: 600,
+      headFiles: 1,
+      diff: { files: 600, inserted: 0, deleted: 600 },
+    });
 
     const safety = evaluateBranchSafetyForPush(repoDir, { baseBranch: "main" });
     expect(safety.safe).toBe(false);
@@ -80,11 +94,6 @@ describe("git-safety", () => {
   });
 
   it("supports explicit bypass for emergency pushes", async () => {
-    execSync("git checkout -b ve/test", { cwd: repoDir, stdio: "pipe" });
-    execSync("git rm -r --quiet src", { cwd: repoDir, stdio: "pipe" });
-    await writeFile(resolve(repoDir, "README.md"), "# test\n");
-    execSync("git add -A && git commit -m init", { cwd: repoDir, stdio: "pipe" });
-
     const prev = process.env.VE_ALLOW_DESTRUCTIVE_PUSH;
     process.env.VE_ALLOW_DESTRUCTIVE_PUSH = "1";
     try {

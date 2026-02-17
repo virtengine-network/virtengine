@@ -43,6 +43,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { resolveRepoRoot } from "./repo-root.mjs";
+import { resolveCodexProfileRuntime } from "./codex-model-profiles.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -124,9 +125,10 @@ async function withSanitizedOpenAiEnv(fn) {
  * Otherwise strips OPENAI_BASE_URL so the SDK uses its default auth.
  */
 function buildCodexSdkOptions() {
-  const baseUrl = process.env.OPENAI_BASE_URL || "";
+  const { env: resolvedEnv } = resolveCodexProfileRuntime(process.env);
+  const baseUrl = resolvedEnv.OPENAI_BASE_URL || "";
   const isAzure = baseUrl.includes(".openai.azure.com");
-  const env = { ...process.env };
+  const env = { ...resolvedEnv };
   // Always strip OPENAI_BASE_URL — for Azure we use config overrides,
   // for non-Azure the CLI should use its built-in endpoint.
   delete env.OPENAI_BASE_URL;
@@ -442,10 +444,9 @@ async function launchCodexThread(prompt, cwd, timeoutMs, extra = {}) {
   }
 
   // ── 2. Create an ephemeral thread ────────────────────────────────────────
-  // Sandbox policy: configurable via CODEX_SANDBOX env var or config
-  // Options: "danger-full-access" (default — full write access for worktree workflows),
-  //          "workspace-write" (restricted — breaks with worktrees), "read-only"
-  const sandboxPolicy = process.env.CODEX_SANDBOX || "danger-full-access";
+  // Sandbox policy: configurable via CODEX_SANDBOX env var.
+  // Default is workspace-write: permissive for repo tasks while avoiding full host access.
+  const sandboxPolicy = process.env.CODEX_SANDBOX || "workspace-write";
 
   // Pass feature overrides via --config so sub-agent and memory features are
   // available even if ~/.codex/config.toml hasn't been patched yet.
@@ -1659,7 +1660,7 @@ async function resumeCodexThread(threadId, prompt, cwd, timeoutMs, extra = {}) {
 
   let thread;
   try {
-    const sandboxPolicy = process.env.CODEX_SANDBOX || "danger-full-access";
+    const sandboxPolicy = process.env.CODEX_SANDBOX || "workspace-write";
     thread = codex.resumeThread(threadId, {
       sandboxMode: sandboxPolicy,
       workingDirectory: cwd,

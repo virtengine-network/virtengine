@@ -193,7 +193,12 @@ export async function applyStoredDefaults() {
 
   if (maxP != null) {
     const current = executorData.value;
-    if (!current || current.maxParallel !== maxP) {
+    const currentMax =
+      current?.data?.maxParallel ??
+      current?.maxParallel ??
+      null;
+    const isPaused = Boolean(current?.paused || current?.data?.paused);
+    if (!isPaused && currentMax !== maxP) {
       promises.push(
         apiFetch("/api/executor/maxparallel", {
           method: "POST",

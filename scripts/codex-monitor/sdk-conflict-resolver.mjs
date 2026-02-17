@@ -21,6 +21,7 @@ import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { launchEphemeralThread } from "./agent-pool.mjs";
 import { resolvePromptTemplate } from "./agent-prompts.mjs";
+import { resolveCodexProfileRuntime } from "./codex-model-profiles.mjs";
 import {
   evaluateBranchSafetyForPush,
   normalizeBaseBranch,
@@ -742,7 +743,7 @@ export async function resolveConflictsWithSDK({
  *
  * Priority order:
  *  1. Fresh Codex SDK thread — same capabilities as /background but isolated.
- *  2. Codex CLI fallback — `codex exec` with danger-full-access sandbox.
+ *  2. Codex CLI fallback — `codex exec` with configurable sandbox.
  *  3. Copilot CLI fallback.
  */
 async function launchSDKAgent(prompt, cwd, timeoutMs) {
@@ -764,7 +765,7 @@ async function launchSDKAgent(prompt, cwd, timeoutMs) {
     );
   }
 
-  // ── Fallback: Codex CLI with danger-full-access ─────────────────────────
+  // ── Fallback: Codex CLI with configurable sandbox ───────────────────────
   const codexAvailable = await isCommandAvailable("codex");
   if (codexAvailable) {
     return launchCodexExec(prompt, cwd, timeoutMs);
@@ -806,7 +807,7 @@ function launchCodexExec(prompt, cwd, timeoutMs) {
         "--ask-for-approval",
         "never",
         "--sandbox",
-        "danger-full-access",
+        process.env.CODEX_SANDBOX || "workspace-write",
         "-C",
         cwd,
       ];
@@ -818,7 +819,7 @@ function launchCodexExec(prompt, cwd, timeoutMs) {
 
       // Auto-detect Azure: configure Codex CLI for Azure via -c overrides,
       // or strip OPENAI_BASE_URL so it uses ChatGPT OAuth for non-Azure.
-      const codexEnv = { ...process.env };
+      const { env: codexEnv } = resolveCodexProfileRuntime(process.env);
       const baseUrl = codexEnv.OPENAI_BASE_URL || "";
       const isAzure = baseUrl.includes(".openai.azure.com");
       if (isAzure) {

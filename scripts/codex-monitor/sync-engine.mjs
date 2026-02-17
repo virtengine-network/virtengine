@@ -50,9 +50,27 @@ const SHARED_STATE_STALE_THRESHOLD_MS =
  * @returns {boolean}
  */
 function isHeartbeatStale(heartbeat, staleThresholdMs) {
+  if (!heartbeat) return true;
   const heartbeatTime = new Date(heartbeat).getTime();
+  if (!Number.isFinite(heartbeatTime)) return true;
   const now = Date.now();
   return now - heartbeatTime > staleThresholdMs;
+}
+
+function getSharedStatePayload(task) {
+  if (!task) return null;
+  return task.sharedState || task.meta?.sharedState || null;
+}
+
+function getSharedHeartbeat(state) {
+  if (!state) return null;
+  return state.ownerHeartbeat || state.heartbeat || state.owner_heartbeat || null;
+}
+
+function isSharedStateStaleForDecision(state, staleThresholdMs) {
+  const heartbeat = getSharedHeartbeat(state);
+  if (!heartbeat) return false;
+  return isHeartbeatStale(heartbeat, staleThresholdMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -369,19 +387,23 @@ export class SyncEngine {
         const newExternal = normalizedExternalStatus;
 
         // Read shared state metadata from external adapter (e.g., GitHub comments)
-        if (SHARED_STATE_ENABLED && normalizedExt.sharedState) {
-          try {
-            // Merge shared state data into internal task meta
-            updateTask(ext.id, {
-              sharedStateOwnerId: normalizedExt.sharedState.ownerId,
-              sharedStateHeartbeat: normalizedExt.sharedState.ownerHeartbeat,
-              sharedStateRetryCount: normalizedExt.sharedState.retryCount,
-            });
-          } catch (err) {
-            console.warn(
-              TAG,
-              `Failed to merge shared state for ${ext.id}: ${err.message}`,
-            );
+        if (SHARED_STATE_ENABLED) {
+          const sharedStatePayload = getSharedStatePayload(normalizedExt);
+          if (sharedStatePayload) {
+            try {
+              const heartbeat = getSharedHeartbeat(sharedStatePayload);
+              // Merge shared state data into internal task meta
+              updateTask(ext.id, {
+                sharedStateOwnerId: sharedStatePayload.ownerId,
+                sharedStateHeartbeat: heartbeat,
+                sharedStateRetryCount: sharedStatePayload.retryCount,
+              });
+            } catch (err) {
+              console.warn(
+                TAG,
+                `Failed to merge shared state for ${ext.id}: ${err.message}`,
+              );
+            }
           }
         }
 
@@ -396,7 +418,15 @@ export class SyncEngine {
             // if internal is ALSO behind (i.e., orchestrator didn't advance it).
             // When internal is at or ahead of the old external, the backward
             // move is most likely a VK restart / state loss — re-push instead.
-            if (internalRank >= oldExternalRank) {
+            const sharedStatePayload = getSharedStatePayload(normalizedExt) || {
+              ownerId: internal.sharedStateOwnerId,
+              ownerHeartbeat: internal.sharedStateHeartbeat,
+            };
+            const sharedStateStale = isSharedStateStaleForDecision(
+              sharedStatePayload,
+              SHARED_STATE_STALE_THRESHOLD_MS,
+            );
+            if (internalRank >= oldExternalRank && !sharedStateStale) {
               // Internal was actively progressed by orchestrator — ignore
               // the stale external value and mark dirty for re-push.
               updateTask(ext.id, {
@@ -529,17 +559,22 @@ export class SyncEngine {
       if (SHARED_STATE_ENABLED) {
         try {
           const sharedState = await getSharedState(task.id);
-          if (sharedState && sharedState.ownerId !== task.claimedBy) {
-            // Another owner has a fresher claim - check heartbeat
+          const localOwner =
+            task.sharedStateOwnerId ||
+            task.meta?.sharedState?.ownerId ||
+            task.claimedBy ||
+            null;
+          if (sharedState) {
+            const heartbeat = getSharedHeartbeat(sharedState);
             const stale = isHeartbeatStale(
-              sharedState.ownerHeartbeat,
+              heartbeat,
               SHARED_STATE_STALE_THRESHOLD_MS,
             );
-            if (!stale) {
+            if (!stale && sharedState.ownerId !== localOwner) {
               // Active conflict - skip push and log
               console.log(
                 TAG,
-                `Skipping push for ${task.id} — active claim by ${sharedState.ownerId} (heartbeat: ${sharedState.ownerHeartbeat})`,
+                `Skipping push for ${task.id} — active claim by ${sharedState.ownerId} (heartbeat: ${heartbeat || "unknown"})`,
               );
               result.conflicts++;
               continue;

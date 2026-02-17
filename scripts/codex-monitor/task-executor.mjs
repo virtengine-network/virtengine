@@ -15,6 +15,7 @@ import {
   existsSync,
   appendFileSync,
   mkdirSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { execSync, spawnSync } from "node:child_process";
@@ -83,6 +84,7 @@ import {
   releaseTask as releaseTaskClaim,
 } from "./task-claims.mjs";
 import { initPresence, getPresenceState } from "./presence.mjs";
+import { getSharedState } from "./shared-state-manager.mjs";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -139,6 +141,9 @@ const STREAM_STALLED_KILL_MS = 20 * 60_000; // 20 minutes stalled after continue
 const MAX_IDLE_CONTINUES = 5;
 /** Minimum elapsed time before watchdog even starts checking (agent setup phase) */
 const WATCHDOG_WARMUP_MS = 5 * 60_000; // 5 minutes warmup
+const SHARED_STATE_ENABLED = process.env.SHARED_STATE_ENABLED !== "false";
+const SHARED_STATE_STALE_THRESHOLD_MS =
+  Number(process.env.SHARED_STATE_STALE_THRESHOLD_MS) || 300_000;
 const NO_COMMIT_STATE_FILE = resolve(
   dirname(fileURLToPath(import.meta.url)),
   ".cache",
@@ -149,6 +154,16 @@ const RUNTIME_STATE_FILE = resolve(
   ".cache",
   "task-executor-runtime.json",
 );
+const ORCHESTRATOR_PAUSE_FILE = (() => {
+  try {
+    const cfg = loadConfig();
+    const base = cfg?.statusPath ? dirname(cfg.statusPath) : null;
+    if (base) return resolve(base, "ve-orchestrator-pause.json");
+  } catch {
+    /* best effort */
+  }
+  return resolve(dirname(fileURLToPath(import.meta.url)), ".cache", "ve-orchestrator-pause.json");
+})();
 
 const PRIORITY_RANK = {
   critical: 4,
@@ -175,6 +190,28 @@ function normalizePriority(value) {
   return "medium";
 }
 
+function writeOrchestratorPauseState(paused, reason, extra = {}) {
+  try {
+    mkdirSync(dirname(ORCHESTRATOR_PAUSE_FILE), { recursive: true });
+    const payload = {
+      paused: Boolean(paused),
+      reason: reason ? String(reason) : null,
+      pauseUntil: Number.isFinite(extra.pauseUntil)
+        ? new Date(extra.pauseUntil).toISOString()
+        : null,
+      updatedAt: new Date().toISOString(),
+      source: extra.source || "task-executor",
+    };
+    writeFileSync(
+      ORCHESTRATOR_PAUSE_FILE,
+      JSON.stringify(payload, null, 2),
+      "utf8",
+    );
+  } catch (err) {
+    console.warn(`${TAG} failed to write orchestrator pause state: ${err.message}`);
+  }
+}
+
 function normalizeRequirementsProfile(value) {
   const profile = String(value || "")
     .trim()
@@ -189,6 +226,13 @@ function clampInt(value, min, max, fallback) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
+function isSharedHeartbeatStale(heartbeat, thresholdMs) {
+  if (!heartbeat) return true;
+  const ts = new Date(heartbeat).getTime();
+  if (!Number.isFinite(ts)) return true;
+  return Date.now() - ts > thresholdMs;
 }
 
 function extractBacklogCandidates(outputText) {
@@ -680,6 +724,9 @@ class TaskExecutor {
     this._running = false;
     this._paused = false;
     this._pausedAt = null;
+    this._pauseUntil = null;
+    this._pauseReason = null;
+    this._pauseTimer = null;
     this._pollTimer = null;
     this._pollInProgress = false;
     this._resolvedProjectId = null;
@@ -842,6 +889,23 @@ class TaskExecutor {
             : parsed.paused
               ? Date.now()
               : null;
+        const pauseUntil = Number(parsed?.pauseUntil || 0);
+        this._pauseUntil =
+          parsed.paused && Number.isFinite(pauseUntil) && pauseUntil > 0
+            ? pauseUntil
+            : null;
+        this._pauseReason =
+          parsed.paused && parsed?.pauseReason
+            ? String(parsed.pauseReason)
+            : null;
+        if (this._pauseUntil && this._pauseUntil <= Date.now()) {
+          this._paused = false;
+          this._pausedAt = null;
+          this._pauseUntil = null;
+          this._pauseReason = null;
+        } else if (this._paused && this._pauseUntil) {
+          this._schedulePauseExpiry();
+        }
       }
       const nextId = Number(parsed?.nextAgentInstanceId || 1);
       if (Number.isFinite(nextId) && nextId > 0) {
@@ -919,6 +983,8 @@ class TaskExecutor {
           {
             paused: this._paused,
             pausedAt: this._pausedAt,
+            pauseUntil: this._pauseUntil,
+            pauseReason: this._pauseReason,
             nextAgentInstanceId: this._nextAgentInstanceId,
             slots,
             savedAt: new Date().toISOString(),
@@ -1147,6 +1213,10 @@ class TaskExecutor {
     this._running = false;
     this._stopWatchdog();
     this._stopAllTaskClaimRenewals();
+    if (this._pauseTimer) {
+      clearTimeout(this._pauseTimer);
+      this._pauseTimer = null;
+    }
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
@@ -1173,10 +1243,11 @@ class TaskExecutor {
    * Pause task dispatch — running tasks continue, but no new tasks are picked up.
    * @returns {boolean} true if paused (false if already paused)
    */
-  pause() {
+  pause(reason = null) {
     if (this._paused) return false;
     this._paused = true;
     this._pausedAt = Date.now();
+    this._pauseReason = reason ? String(reason) : this._pauseReason;
     this._saveRuntimeState();
     console.log(
       `${TAG} paused — no new tasks will be dispatched (active: ${this._activeSlots.size})`,
@@ -1195,11 +1266,38 @@ class TaskExecutor {
       : 0;
     this._paused = false;
     this._pausedAt = null;
+    this._pauseUntil = null;
+    this._pauseReason = null;
+    if (this._pauseTimer) {
+      clearTimeout(this._pauseTimer);
+      this._pauseTimer = null;
+    }
     this._saveRuntimeState();
     console.log(
       `${TAG} resumed after ${pauseDuration}s pause — will pick up tasks on next poll`,
     );
     return true;
+  }
+
+  /**
+   * Pause task dispatch for a fixed duration.
+   * @param {number} durationMs
+   * @param {string|null} reason
+   * @returns {boolean}
+   */
+  pauseFor(durationMs, reason = null) {
+    const changed = this.pause(reason);
+    if (!Number.isFinite(durationMs) || durationMs <= 0) {
+      return changed;
+    }
+    this._pauseUntil = Date.now() + durationMs;
+    this._pauseReason = reason ? String(reason) : this._pauseReason;
+    this._schedulePauseExpiry();
+    this._saveRuntimeState();
+    console.log(
+      `${TAG} pause expires in ${Math.round(durationMs / 1000)}s (${reason || "unspecified"})`,
+    );
+    return changed;
   }
 
   /**
@@ -1212,16 +1310,34 @@ class TaskExecutor {
 
   /**
    * Get pause info for status display.
-   * @returns {{ paused: boolean, pausedAt: number|null, pauseDuration: number }}
+   * @returns {{ paused: boolean, pausedAt: number|null, pauseUntil: number|null, pauseReason: string|null, pauseDuration: number }}
    */
   getPauseInfo() {
     return {
       paused: this._paused,
       pausedAt: this._pausedAt,
+      pauseUntil: this._pauseUntil,
+      pauseReason: this._pauseReason,
       pauseDuration: this._pausedAt
         ? Math.round((Date.now() - this._pausedAt) / 1000)
         : 0,
     };
+  }
+
+  _schedulePauseExpiry() {
+    if (!this._pauseUntil) return;
+    const delay = Math.max(0, this._pauseUntil - Date.now());
+    if (this._pauseTimer) {
+      clearTimeout(this._pauseTimer);
+    }
+    this._pauseTimer = setTimeout(() => {
+      if (this._paused && this._pauseUntil && Date.now() >= this._pauseUntil) {
+        this.resume();
+      }
+    }, delay);
+    if (this._pauseTimer?.unref) {
+      this._pauseTimer.unref();
+    }
   }
 
   // ── Slot Watchdog ──────────────────────────────────────────────────────
@@ -1667,16 +1783,72 @@ class TaskExecutor {
     /** @type {Array<Object>} */
     const resumable = [];
     let resetToTodo = 0;
+    let reconciledDrift = 0;
+    let skippedForActiveClaim = 0;
 
     for (const task of inProgressTasks) {
       const id = task?.id || task?.task_id;
       if (!id || this._activeSlots.has(id)) continue;
 
-      const ageMs = getTaskAgeMs(task);
+      const internalTask = getInternalTask(id);
+      const internalStatus = internalTask?.status || null;
+      if (internalTask && internalStatus && internalStatus !== "inprogress") {
+        try {
+          await updateTaskStatus(id, internalStatus);
+        } catch {
+          /* best effort */
+        }
+        this._removeRuntimeSlot(id);
+        reconciledDrift++;
+        continue;
+      }
+
+      if (SHARED_STATE_ENABLED) {
+        try {
+          const sharedState = await getSharedState(id, this.repoRoot);
+          const ownerId = sharedState?.ownerId || null;
+          const heartbeat =
+            sharedState?.ownerHeartbeat || sharedState?.heartbeat || null;
+          if (
+            ownerId &&
+            ownerId !== this._instanceId &&
+            !isSharedHeartbeatStale(heartbeat, SHARED_STATE_STALE_THRESHOLD_MS)
+          ) {
+            skippedForActiveClaim++;
+            continue;
+          }
+        } catch {
+          /* best effort */
+        }
+      }
+
+      let ageMs = getTaskAgeMs(task);
+      if (internalTask) {
+        const internalAge = getTaskAgeMs(internalTask);
+        if (internalAge > 0) {
+          ageMs = ageMs > 0 ? Math.min(ageMs, internalAge) : internalAge;
+        }
+      }
       const hasThread = activeThreads.has(String(id));
       const isFreshEnough =
         ageMs === 0 || ageMs <= INPROGRESS_RECOVERY_MAX_AGE_MS;
       if (hasThread || isFreshEnough) {
+        if (!internalTask) {
+          try {
+            addInternalTask({
+              id,
+              title: task?.title || "",
+              description: task?.description || "",
+              status: "inprogress",
+              externalStatus: "inprogress",
+              externalId: task?.externalId || null,
+              externalBackend: task?.backend || null,
+              projectId: task?.projectId || null,
+            });
+          } catch {
+            /* best effort */
+          }
+        }
         resumable.push({ ...task, id });
         continue;
       }
@@ -1706,7 +1878,13 @@ class TaskExecutor {
 
     if (toDispatch.length > 0 || resetToTodo > 0) {
       console.log(
-        `${TAG} in-progress recovery: resumed ${toDispatch.length}, reset ${resetToTodo} stale task(s) to todo`,
+        `${TAG} in-progress recovery: resumed ${toDispatch.length}, reset ${resetToTodo} stale task(s) to todo` +
+          (reconciledDrift > 0
+            ? `, reconciled ${reconciledDrift} drifted task(s)`
+            : "") +
+          (skippedForActiveClaim > 0
+            ? `, skipped ${skippedForActiveClaim} active claim(s)`
+            : ""),
       );
     }
   }
@@ -1720,6 +1898,8 @@ class TaskExecutor {
       running: this._running,
       paused: this._paused,
       pausedAt: this._pausedAt,
+      pauseUntil: this._pauseUntil,
+      pauseReason: this._pauseReason,
       pauseDuration: this._pausedAt
         ? Math.round((Date.now() - this._pausedAt) / 1000)
         : 0,
@@ -2149,7 +2329,17 @@ class TaskExecutor {
   async executeTask(task, options = {}) {
     const taskId = task.id || task.task_id;
     const taskTitle = task.title || "(untitled)";
+    if (this._paused) {
+      console.log(
+        `${TAG} executor paused — skipping task "${taskTitle}" (${taskId})`,
+      );
+      return;
+    }
+    const requestedBranch = String(
+      options?.branch || options?.resumeBranch || "",
+    ).trim();
     const branch =
+      requestedBranch ||
       task.branchName ||
       task.meta?.branch_name ||
       `ve/${taskId.substring(0, 8)}-${slugify(taskTitle)}`;
@@ -2354,6 +2544,7 @@ class TaskExecutor {
       executeHooks("SessionStart", {
         taskId,
         taskTitle,
+        taskDescription: task.description || task.body || "",
         branch,
         sdk: slot.sdk || "unknown",
         slot: slot.index,
@@ -2368,6 +2559,11 @@ class TaskExecutor {
       // Mirror to internal store
       try {
         setInternalStatus(taskId, "inprogress", "task-executor");
+      } catch {
+        /* best-effort */
+      }
+      try {
+        updateInternalTask(taskId, { branchName: branch });
       } catch {
         /* best-effort */
       }
@@ -2457,7 +2653,10 @@ class TaskExecutor {
         }).stdout?.trim() || "";
 
       // 5. Build prompt
-      const prompt = this._buildTaskPrompt(task, wt.path);
+      const prompt = this._buildTaskPrompt(task, wt.path, {
+        retryReason: options?.retryReason,
+        branch,
+      });
 
       // 5b. Create per-task AbortController for watchdog integration
       const taskAbortController = new AbortController();
@@ -2688,8 +2887,9 @@ class TaskExecutor {
    * @returns {string}
    * @private
    */
-  _buildTaskPrompt(task, worktreePath) {
+  _buildTaskPrompt(task, worktreePath, opts = {}) {
     const branch =
+      String(opts?.branch || "").trim() ||
       task.branchName ||
       task.meta?.branch_name ||
       spawnSync("git", ["branch", "--show-current"], {
@@ -2698,10 +2898,22 @@ class TaskExecutor {
         timeout: 5000,
       }).stdout?.trim() ||
       "unknown";
+    const retryReason = String(opts?.retryReason || "").trim();
 
     const lines = [
       `# ${task.id || task.task_id} — ${task.title}`,
       ``,
+    ];
+    if (retryReason) {
+      lines.push(
+        `## Manual Retry Context`,
+        `Reason: ${retryReason}`,
+        `Resume on branch: \`${branch}\``,
+        `If this branch has no meaningful commits yet, create a fresh branch and proceed.`,
+        ``,
+      );
+    }
+    lines.push(
       `## Description`,
       task.description ||
         "No description provided. Check the task URL for details.",
@@ -2730,7 +2942,7 @@ class TaskExecutor {
       `- Use conventional commits: feat|fix|docs|refactor|test(scope): description`,
       `- Follow existing code patterns in the repository`,
       ``,
-    ];
+    );
 
     // Agent endpoint info for self-reporting
     const endpointPort = process.env.AGENT_ENDPOINT_PORT || "18432";
@@ -3057,6 +3269,7 @@ class TaskExecutor {
     executeHooks("SessionStop", {
       taskId: task.id || task.task_id,
       taskTitle,
+      taskDescription: task.description || task.body || "",
       success: result.success,
       attempts: result.attempts,
       output: (result.output || "").slice(0, 500),
@@ -3161,6 +3374,7 @@ class TaskExecutor {
           const hookResult = await executeBlockingHooks("TaskComplete", {
             taskId: task.id || task.task_id,
             taskTitle: task.title,
+            taskDescription: task.description || task.body || "",
             worktreePath,
             success: true,
             hasCommits: true,
@@ -3197,6 +3411,7 @@ class TaskExecutor {
           executeHooks("PostPR", {
             taskId: task.id || task.task_id,
             taskTitle: task.title,
+            taskDescription: task.description || task.body || "",
             prUrl: pr.url || pr,
             branch: pr.branch,
           }).catch(() => {});
@@ -3394,14 +3609,7 @@ class TaskExecutor {
         console.warn(
           `${TAG} too many rate limits — pausing executor for 5 minutes`,
         );
-        this._running = false;
-        setTimeout(
-          () => {
-            this._running = true;
-            console.log(`${TAG} executor resumed after rate limit pause`);
-          },
-          5 * 60 * 1000,
-        );
+        this.pauseFor(5 * 60 * 1000, "rate-limit");
       }
 
       try {
@@ -4023,6 +4231,7 @@ class TaskExecutor {
         const prHookResult = await executeBlockingHooks("PrePR", {
           taskId: task.id || task.task_id,
           taskTitle: task.title,
+          taskDescription: task.description || task.body || "",
           branch,
           worktreePath,
         });

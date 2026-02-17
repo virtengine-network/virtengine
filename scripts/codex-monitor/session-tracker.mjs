@@ -427,12 +427,14 @@ export class SessionTracker {
       list.push({
         id: s.id || s.taskId,
         taskId: s.taskId,
+        title: s.taskTitle || s.title || null,
         type: s.type || "task",
         status: s.status,
         turnCount: s.turnCount || 0,
         createdAt: s.createdAt || new Date(s.startedAt).toISOString(),
         lastActiveAt: s.lastActiveAt || new Date(s.lastActivityAt).toISOString(),
         preview: this.#lastMessagePreview(s),
+        lastMessage: this.#lastMessagePreview(s),
       });
     }
     list.sort((a, b) => (b.lastActiveAt || "").localeCompare(a.lastActiveAt || ""));
@@ -492,6 +494,60 @@ export class SessionTracker {
     this.#flushDirty();
   }
 
+  /**
+   * Merge any on-disk session updates into memory.
+   * Useful when another process writes session files.
+   */
+  refreshFromDisk() {
+    if (!this.#persistDir) return;
+    this.#ensureDir();
+    let files = [];
+    try {
+      files = readdirSync(this.#persistDir).filter((f) => f.endsWith(".json"));
+    } catch {
+      return;
+    }
+    for (const file of files) {
+      const filePath = resolve(this.#persistDir, file);
+      try {
+        const raw = readFileSync(filePath, "utf8");
+        const data = JSON.parse(raw || "{}");
+        const sessionId = String(data.id || data.taskId || "").trim();
+        if (!sessionId) continue;
+        const lastActiveAt =
+          Date.parse(data.lastActiveAt || "") ||
+          Date.parse(data.updatedAt || "") ||
+          0;
+        const existing = this.#sessions.get(sessionId);
+        const existingLast =
+          existing?.lastActivityAt ||
+          Date.parse(existing?.lastActiveAt || "") ||
+          0;
+        if (existing && existingLast >= lastActiveAt) {
+          continue;
+        }
+        this.#sessions.set(sessionId, {
+          taskId: data.taskId || sessionId,
+          taskTitle: data.title || data.taskTitle || null,
+          id: sessionId,
+          type: data.type || "task",
+          startedAt: Date.parse(data.createdAt || "") || Date.now(),
+          createdAt: data.createdAt || new Date().toISOString(),
+          lastActiveAt: data.lastActiveAt || data.updatedAt || new Date().toISOString(),
+          endedAt: data.endedAt || null,
+          messages: Array.isArray(data.messages) ? data.messages : [],
+          totalEvents: Array.isArray(data.messages) ? data.messages.length : 0,
+          turnCount: data.turnCount || 0,
+          status: data.status || "active",
+          lastActivityAt: lastActiveAt || Date.now(),
+          metadata: data.metadata || {},
+        });
+      } catch {
+        /* ignore corrupt session file */
+      }
+    }
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
 
   /** Auto-create a session when recordEvent is called for an unknown taskId. */
@@ -542,6 +598,8 @@ export class SessionTracker {
         const data = {
           id: session.id || session.taskId,
           taskId: session.taskId,
+          title: session.taskTitle || session.title || null,
+          taskTitle: session.taskTitle || null,
           type: session.type || "task",
           status: session.status,
           createdAt: session.createdAt || new Date(session.startedAt).toISOString(),

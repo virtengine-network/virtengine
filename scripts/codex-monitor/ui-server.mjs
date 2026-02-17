@@ -25,7 +25,6 @@ function getLocalLanIp() {
 import { WebSocketServer } from "ws";
 import { getKanbanAdapter } from "./kanban-adapter.mjs";
 import { getActiveThreads } from "./agent-pool.mjs";
-import { loadConfig } from "./config.mjs";
 import {
   listActiveWorktrees,
   getWorktreeStats,
@@ -125,37 +124,6 @@ const projectSyncWebhookMetrics = {
 };
 
 // ── Settings API: Known env keys from settings schema ──
-const CONFIG_FILE_NAMES = [
-  "codex-monitor.config.json",
-  ".codex-monitor.json",
-  "codex-monitor.json",
-];
-
-function resolveConfigFilePath(configDir) {
-  for (const name of CONFIG_FILE_NAMES) {
-    const candidate = resolve(configDir, name);
-    if (existsSync(candidate)) return candidate;
-  }
-  return resolve(configDir, "codex-monitor.config.json");
-}
-
-function resolveSettingsPaths() {
-  let configDir = __dirname;
-  try {
-    const config = loadConfig();
-    if (config?.configDir) {
-      configDir = config.configDir;
-    }
-  } catch {
-    // fallback to module directory
-  }
-  return {
-    configDir,
-    envPath: resolve(configDir, ".env"),
-    configPath: resolveConfigFilePath(configDir),
-  };
-}
-
 const SETTINGS_KNOWN_KEYS = [
   "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_ALLOWED_CHAT_IDS",
   "TELEGRAM_INTERVAL_MIN", "TELEGRAM_COMMAND_POLL_TIMEOUT_SEC", "TELEGRAM_AGENT_TIMEOUT_MIN",
@@ -212,10 +180,10 @@ const SETTINGS_SENSITIVE_KEYS = new Set([
 const SETTINGS_KNOWN_SET = new Set(SETTINGS_KNOWN_KEYS);
 let _settingsLastUpdateTime = 0;
 
-function updateEnvFile(changes, envPath) {
-  const resolvedEnvPath = envPath || resolve(__dirname, ".env");
+function updateEnvFile(changes) {
+  const envPath = resolve(__dirname, '.env');
   let content = '';
-  try { content = readFileSync(resolvedEnvPath, 'utf8'); } catch { content = ''; }
+  try { content = readFileSync(envPath, 'utf8'); } catch { content = ''; }
 
   const lines = content.split('\n');
   const updated = new Set();
@@ -237,254 +205,8 @@ function updateEnvFile(changes, envPath) {
     }
   }
 
-  writeFileSync(resolvedEnvPath, lines.join('\n'), 'utf8');
+  writeFileSync(envPath, lines.join('\n'), 'utf8');
   return Array.from(updated);
-}
-
-function normalizePrimaryAgent(value) {
-  const raw = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (!raw) return "codex-sdk";
-  if (["codex", "codex-sdk"].includes(raw)) return "codex-sdk";
-  if (["copilot", "copilot-sdk", "github-copilot"].includes(raw))
-    return "copilot-sdk";
-  if (["claude", "claude-sdk", "claude_code", "claude-code"].includes(raw))
-    return "claude-sdk";
-  return raw;
-}
-
-function normalizeKanbanBackend(value) {
-  const backend = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (["internal", "github", "jira", "vk"].includes(backend)) {
-    return backend;
-  }
-  return "internal";
-}
-
-function normalizeKanbanSyncPolicy(value) {
-  const policy = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (policy === "internal-primary" || policy === "bidirectional") {
-    return policy;
-  }
-  return "internal-primary";
-}
-
-function normalizeExecutorMode(value) {
-  const mode = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (["vk", "internal", "hybrid", "disabled", "none", "monitor-only"].includes(mode)) {
-    return mode;
-  }
-  return "internal";
-}
-
-function normalizePlannerMode(value) {
-  const mode = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (["codex-sdk", "kanban", "disabled"].includes(mode)) {
-    return mode;
-  }
-  return "codex-sdk";
-}
-
-function normalizeProjectRequirementsProfile(value) {
-  const profile = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (["simple-feature", "feature", "large-feature", "system", "multi-system"].includes(profile)) {
-    return profile;
-  }
-  return "feature";
-}
-
-function parseExecutorsFromEnv(rawValue) {
-  const raw = String(rawValue || "").trim();
-  if (!raw) return null;
-  const entries = raw.split(",").map((e) => e.trim()).filter(Boolean);
-  if (!entries.length) return null;
-  const roles = ["primary", "backup", "tertiary"];
-  const executors = [];
-  for (let i = 0; i < entries.length; i++) {
-    const parts = entries[i].split(":").map((p) => p.trim()).filter(Boolean);
-    if (parts.length < 2) {
-      return { error: `Invalid executor entry: "${entries[i]}"` };
-    }
-    const weight = parts[2] ? Number(parts[2]) : Math.floor(100 / entries.length);
-    if (!Number.isFinite(weight) || weight <= 0) {
-      return { error: `Invalid executor weight for "${entries[i]}"` };
-    }
-    executors.push({
-      name: `${parts[0].toLowerCase()}-${parts[1].toLowerCase()}`,
-      executor: parts[0].toUpperCase(),
-      variant: parts[1],
-      weight,
-      role: roles[i] || `executor-${i + 1}`,
-      enabled: true,
-    });
-  }
-  return { executors };
-}
-
-function setNestedValue(target, path, value) {
-  if (!target || !Array.isArray(path) || path.length === 0) return;
-  let current = target;
-  for (let i = 0; i < path.length - 1; i++) {
-    const key = path[i];
-    if (!current[key] || typeof current[key] !== "object") {
-      current[key] = {};
-    }
-    current = current[key];
-  }
-  current[path[path.length - 1]] = value;
-}
-
-function loadConfigJson(configPath) {
-  try {
-    if (existsSync(configPath)) {
-      return JSON.parse(readFileSync(configPath, "utf8"));
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function resolveConfigFallback(configDir) {
-  const examplePath = resolve(__dirname, "codex-monitor.config.example.json");
-  if (existsSync(examplePath)) {
-    try {
-      const raw = JSON.parse(readFileSync(examplePath, "utf8"));
-      return { ...raw, $schema: "./codex-monitor.schema.json" };
-    } catch {
-      // fall through
-    }
-  }
-  return { $schema: "./codex-monitor.schema.json" };
-}
-
-function updateConfigFileFromSettings(changes, paths) {
-  const { configDir, configPath } = paths;
-  const handlers = {
-    PROJECT_NAME: (config, value) =>
-      setNestedValue(config, ["projectName"], String(value || "").trim()),
-    PRIMARY_AGENT: (config, value) =>
-      setNestedValue(config, ["primaryAgent"], normalizePrimaryAgent(value)),
-    EXECUTOR_MODE: (config, value) =>
-      setNestedValue(config, ["internalExecutor", "mode"], normalizeExecutorMode(value)),
-    INTERNAL_EXECUTOR_PARALLEL: (config, value) =>
-      setNestedValue(config, ["internalExecutor", "maxParallel"], Number(value)),
-    INTERNAL_EXECUTOR_TIMEOUT_MS: (config, value) =>
-      setNestedValue(config, ["internalExecutor", "timeoutMs"], Number(value)),
-    INTERNAL_EXECUTOR_MAX_RETRIES: (config, value) =>
-      setNestedValue(config, ["internalExecutor", "maxRetries"], Number(value)),
-    INTERNAL_EXECUTOR_POLL_MS: (config, value) =>
-      setNestedValue(config, ["internalExecutor", "pollIntervalMs"], Number(value)),
-    INTERNAL_EXECUTOR_REVIEW_AGENT_ENABLED: (config, value) =>
-      setNestedValue(
-        config,
-        ["internalExecutor", "reviewAgentEnabled"],
-        String(value).trim().toLowerCase() === "true",
-      ),
-    INTERNAL_EXECUTOR_REPLENISH_ENABLED: (config, value) =>
-      setNestedValue(
-        config,
-        ["internalExecutor", "backlogReplenishment", "enabled"],
-        String(value).trim().toLowerCase() === "true",
-      ),
-    KANBAN_BACKEND: (config, value) =>
-      setNestedValue(config, ["kanban", "backend"], normalizeKanbanBackend(value)),
-    KANBAN_SYNC_POLICY: (config, value) =>
-      setNestedValue(config, ["kanban", "syncPolicy"], normalizeKanbanSyncPolicy(value)),
-    TASK_PLANNER_MODE: (config, value) =>
-      setNestedValue(config, ["plannerMode"], normalizePlannerMode(value)),
-    PROJECT_REQUIREMENTS_PROFILE: (config, value) =>
-      setNestedValue(
-        config,
-        ["projectRequirements", "profile"],
-        normalizeProjectRequirementsProfile(value),
-      ),
-    EXECUTOR_DISTRIBUTION: (config, value) =>
-      setNestedValue(
-        config,
-        ["distribution"],
-        String(value || "").trim().toLowerCase(),
-      ),
-    FAILOVER_STRATEGY: (config, value) =>
-      setNestedValue(
-        config,
-        ["failover", "strategy"],
-        String(value || "").trim().toLowerCase(),
-      ),
-    EXECUTORS: (config, value) => {
-      const parsed = parseExecutorsFromEnv(value);
-      if (parsed?.error) return parsed;
-      if (parsed?.executors) {
-        setNestedValue(config, ["executors"], parsed.executors);
-      }
-      return null;
-    },
-    CODEX_MONITOR_HOOK_PROFILE: (config, value) =>
-      setNestedValue(
-        config,
-        ["hookProfiles", "profile"],
-        String(value || "").trim().toLowerCase(),
-      ),
-    CODEX_MONITOR_HOOK_TARGETS: (config, value) => {
-      const targets = String(value || "")
-        .split(",")
-        .map((t) => t.trim().toLowerCase())
-        .filter(Boolean);
-      setNestedValue(config, ["hookProfiles", "targets"], targets);
-    },
-    CODEX_MONITOR_HOOKS_ENABLED: (config, value) =>
-      setNestedValue(
-        config,
-        ["hookProfiles", "enabled"],
-        String(value).trim().toLowerCase() === "true",
-      ),
-    CODEX_MONITOR_HOOKS_OVERWRITE: (config, value) =>
-      setNestedValue(
-        config,
-        ["hookProfiles", "overwriteExisting"],
-        String(value).trim().toLowerCase() === "true",
-      ),
-  };
-
-  const keysToUpdate = Object.keys(changes).filter((k) => handlers[k]);
-  if (keysToUpdate.length === 0) {
-    return { updatedKeys: [], path: configPath };
-  }
-
-  const existing = loadConfigJson(configPath);
-  const config = existing && typeof existing === "object"
-    ? existing
-    : resolveConfigFallback(configDir);
-
-  const updatedKeys = [];
-  for (const key of keysToUpdate) {
-    const handler = handlers[key];
-    if (!handler) continue;
-    const result = handler(config, changes[key]);
-    if (result?.error) {
-      return { error: result.error };
-    }
-    updatedKeys.push(key);
-  }
-
-  try {
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
-    return { updatedKeys, path: configPath };
-  } catch (err) {
-    return { error: err?.message || "Failed to write config file." };
-  }
 }
 
 // ── Simple rate limiter for mutation endpoints ──
@@ -2593,11 +2315,7 @@ async function handleApi(req, res, url) {
         /* best effort */
       }
 
-      let wtName =
-        matchedWorktree?.name ||
-        matchedWorktree?.branch ||
-        matchedWorktree?.taskKey ||
-        "";
+      let wtName = matchedWorktree?.name || "";
       let wtPath = matchedWorktree?.path || "";
 
       if (!wtPath) {
@@ -2861,7 +2579,6 @@ async function handleApi(req, res, url) {
 
   if (path === "/api/settings") {
     try {
-      const { envPath, configPath, configDir } = resolveSettingsPaths();
       const data = {};
       for (const key of SETTINGS_KNOWN_KEYS) {
         const val = process.env[key];
@@ -2871,15 +2588,7 @@ async function handleApi(req, res, url) {
           data[key] = val || "";
         }
       }
-      jsonResponse(res, 200, {
-        ok: true,
-        data,
-        meta: {
-          envPath,
-          configPath,
-          configDir,
-        },
-      });
+      jsonResponse(res, 200, { ok: true, data });
     } catch (err) {
       jsonResponse(res, 500, { ok: false, error: err.message });
     }
@@ -2916,37 +2625,18 @@ async function handleApi(req, res, url) {
           return;
         }
       }
+      // Apply to process.env
       const strChanges = {};
       for (const [key, value] of Object.entries(changes)) {
         const strVal = String(value);
+        process.env[key] = strVal;
         strChanges[key] = strVal;
       }
-
-      const paths = resolveSettingsPaths();
-      const configResult = updateConfigFileFromSettings(strChanges, paths);
-      if (configResult?.error) {
-        jsonResponse(res, 400, { ok: false, error: configResult.error });
-        return;
-      }
-
-      // Apply to process.env
-      for (const [key, value] of Object.entries(strChanges)) {
-        process.env[key] = value;
-      }
-
       // Write to .env file
-      const updated = updateEnvFile(strChanges, paths.envPath);
+      const updated = updateEnvFile(strChanges);
       _settingsLastUpdateTime = now;
-      broadcastUiEvent(["settings", "overview"], "invalidate", {
-        reason: "settings-updated",
-        keys: updated,
-      });
-      jsonResponse(res, 200, {
-        ok: true,
-        updated,
-        configUpdated: configResult?.updatedKeys || [],
-        configPath: configResult?.path || paths.configPath,
-      });
+      broadcastUiEvent(["settings", "overview"], "invalidate", { reason: "settings-updated", keys: updated });
+      jsonResponse(res, 200, { ok: true, updated });
     } catch (err) {
       jsonResponse(res, 500, { ok: false, error: err.message });
     }
