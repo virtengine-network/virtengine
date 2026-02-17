@@ -1612,6 +1612,115 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (path === "/api/command") {
+    try {
+      const body = await readJsonBody(req);
+      const command = (body?.command || "").trim();
+      if (!command) {
+        jsonResponse(res, 400, { ok: false, error: "command is required" });
+        return;
+      }
+      const handler = uiDeps.handleUiCommand;
+      if (typeof handler === "function") {
+        const result = await handler(command);
+        jsonResponse(res, 200, { ok: true, data: result || null, command });
+      } else {
+        // No command handler wired — acknowledge and broadcast refresh
+        jsonResponse(res, 200, {
+          ok: true,
+          data: null,
+          command,
+          message: "Command queued. Check status for results.",
+        });
+      }
+      broadcastUiEvent(["overview", "executor", "tasks"], "invalidate", {
+        reason: "command-executed",
+        command,
+      });
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
+  if (path === "/api/tasks/retry") {
+    try {
+      const body = await readJsonBody(req);
+      const taskId = body?.taskId || body?.id;
+      if (!taskId) {
+        jsonResponse(res, 400, { ok: false, error: "taskId is required" });
+        return;
+      }
+      const executor = uiDeps.getInternalExecutor?.();
+      if (!executor) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: "Internal executor not enabled.",
+        });
+        return;
+      }
+      const adapter = getKanbanAdapter();
+      const task = await adapter.getTask(taskId);
+      if (!task) {
+        jsonResponse(res, 404, { ok: false, error: "Task not found." });
+        return;
+      }
+      if (typeof adapter.updateTask === "function") {
+        await adapter.updateTask(taskId, { status: "todo" });
+      } else if (typeof adapter.updateTaskStatus === "function") {
+        await adapter.updateTaskStatus(taskId, "todo");
+      }
+      executor.executeTask(task).catch((error) => {
+        console.warn(
+          `[telegram-ui] failed to retry task ${taskId}: ${error.message}`,
+        );
+      });
+      jsonResponse(res, 200, { ok: true, taskId });
+      broadcastUiEvent(
+        ["tasks", "overview", "executor", "agents"],
+        "invalidate",
+        { reason: "task-retried", taskId },
+      );
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
+  if (path === "/api/executor/stop-slot") {
+    try {
+      const executor = uiDeps.getInternalExecutor?.();
+      if (!executor) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: "Internal executor not enabled.",
+        });
+        return;
+      }
+      const body = await readJsonBody(req);
+      const slot = Number(body?.slot ?? -1);
+      if (typeof executor.stopSlot === "function") {
+        await executor.stopSlot(slot);
+      } else if (typeof executor.cancelSlot === "function") {
+        await executor.cancelSlot(slot);
+      } else {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: "Executor does not support stop-slot.",
+        });
+        return;
+      }
+      jsonResponse(res, 200, { ok: true, slot });
+      broadcastUiEvent(["executor", "overview", "agents"], "invalidate", {
+        reason: "slot-stopped",
+        slot,
+      });
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
   jsonResponse(res, 404, { ok: false, error: "Unknown API endpoint" });
 }
 

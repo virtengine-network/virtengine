@@ -528,16 +528,22 @@ export function installConsoleInterceptor(opts = {}) {
   // from our own console.warn/error interceptors to avoid duplicates.
   let _inInterceptor = false;
   const _origStderrWrite = process.stderr.write.bind(process.stderr);
+  let _stderrBroken = false;
   const safeStderrWrite = (chunk, ...rest) => {
+    if (_stderrBroken) return false;
     try {
       return _origStderrWrite(chunk, ...rest);
     } catch (err) {
       if (
         err &&
         (err.code === "EPIPE" ||
+          err.code === "EIO" ||
           err.code === "ERR_STREAM_DESTROYED" ||
-          err.code === "ERR_STREAM_WRITE_AFTER_END")
+          err.code === "ERR_STREAM_WRITE_AFTER_END" ||
+          /\bEIO\b/.test(err.message) ||
+          /\bEPIPE\b/.test(err.message))
       ) {
+        _stderrBroken = true;
         return false;
       }
       throw err;

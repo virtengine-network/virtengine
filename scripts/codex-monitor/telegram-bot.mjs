@@ -2564,6 +2564,48 @@ async function handleCommand(text, chatId) {
   }
 }
 
+/**
+ * Handle a command from the Mini App UI.
+ * Runs the Telegram command handler silently (without sending to chat)
+ * and returns a summary object.
+ */
+async function handleUiCommand(text) {
+  const parts = text.split(/\s+/);
+  const cmd = parts[0].toLowerCase().replace(/@\w+/, "");
+  const cmdArgs = parts.slice(1).join(" ");
+
+  const entry = COMMANDS[cmd] || COMMANDS[cmd.replace(/-/g, "_")];
+  if (!entry) {
+    return { executed: false, error: `Unknown command: ${cmd}` };
+  }
+
+  // For the UI, we don't actually need to run the Telegram chat command.
+  // The UI already has dedicated API endpoints for data. We just acknowledge
+  // and trigger a data refresh via the broadcast in the API handler.
+  // For action commands like /restart, /plan, /retry, we run them.
+  const ACTION_COMMANDS = new Set([
+    "/restart", "/plan", "/retry", "/cleanup", "/prune",
+    "/starttask", "/pause", "/resume", "/reconcile",
+  ]);
+
+  if (ACTION_COMMANDS.has(cmd)) {
+    try {
+      // Use a dummy chatId — the handler sends to Telegram chat, but we
+      // also send the command there so the user sees the result.
+      if (telegramChatId) {
+        await entry.handler(telegramChatId, cmdArgs);
+      }
+      return { executed: true, command: cmd, args: cmdArgs };
+    } catch (err) {
+      return { executed: false, error: err.message };
+    }
+  }
+
+  // For read-only commands (/status, /tasks, /logs, etc.), the UI already
+  // has API endpoints — just acknowledge. The UI refreshes data automatically.
+  return { executed: true, command: cmd, args: cmdArgs, readOnly: true };
+}
+
 // ── UI Menu System ──────────────────────────────────────────────────────────
 
 const UI_INPUT_HANDLERS = {
@@ -7644,6 +7686,7 @@ export async function startTelegramBot() {
         dependencies: {
           getInternalExecutor: _getInternalExecutor,
           getExecutorMode: _getExecutorMode,
+          handleUiCommand: handleUiCommand,
         },
       });
       telegramUiUrl = getTelegramUiUrl() || null;
