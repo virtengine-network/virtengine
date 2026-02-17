@@ -62,6 +62,9 @@ import {
   getTelegramUiUrl,
   startTelegramUiServer,
   getLocalLanIp,
+  getFirewallState,
+  openFirewallPort,
+  getSessionToken,
 } from "./ui-server.mjs";
 import {
   loadWorkspaceRegistry,
@@ -715,6 +718,24 @@ const UI_TOKEN_TTL_MS = 30 * 60 * 1000;
 const UI_INPUT_TTL_MS = 15 * 60 * 1000;
 const uiTokenRegistry = new Map();
 const uiInputRequests = new Map();
+
+/**
+ * Get the browser URL with the session token appended for auto-auth.
+ * Falls back to the plain telegramUiUrl if no token is available.
+ */
+function getBrowserUiUrl() {
+  const base = telegramUiUrl;
+  if (!base) return null;
+  const token = getSessionToken();
+  if (!token) return base;
+  try {
+    const u = new URL(base);
+    u.searchParams.set("token", token);
+    return u.toString();
+  } catch {
+    return base;
+  }
+}
 
 // ── Agent session state (for follow-up steering & bottom-pinning) ────────────
 
@@ -1774,6 +1795,33 @@ async function handleCallbackQuery(query) {
     return;
   }
 
+  if (data === "fw:open") {
+    const fwState = getFirewallState();
+    if (!fwState || !fwState.blocked) {
+      await sendReply(chatId, "✅ Port is already open or no firewall detected.");
+      return;
+    }
+    await sendReply(
+      chatId,
+      `🔧 Attempting to open port via \`${fwState.firewall}\`...\n` +
+      `Please enter your admin password on the server if prompted.`,
+      { parseMode: "Markdown" },
+    );
+    const result = openFirewallPort(
+      Number(new URL(getTelegramUiUrl() || "http://localhost:5511").port || 5511),
+    );
+    if (result.success) {
+      await sendReply(chatId, `✅ ${result.message}\nThe Control Center should now be reachable.`);
+    } else {
+      await sendReply(
+        chatId,
+        `⚠️ Auto-fix failed.\n\n${result.message}`,
+        { parseMode: "Markdown" },
+      );
+    }
+    return;
+  }
+
   // Fallback: treat as command text
   await sendReply(chatId, `Unknown button action: ${data}`);
 }
@@ -2824,7 +2872,7 @@ Object.assign(UI_SCREENS, {
           },
         ]);
       } else if (telegramUiUrl) {
-        rows.unshift([{ text: "🌐 Open Control Center", url: telegramUiUrl }]);
+        rows.unshift([{ text: "🌐 Open Control Center", url: getBrowserUiUrl() || telegramUiUrl }]);
       }
       return buildKeyboard(rows);
     },
@@ -3975,7 +4023,7 @@ async function cmdApp(chatId) {
   }
   const webAppUrl = getTelegramWebAppUrl(uiUrl);
 
-  const rows = [[{ text: "🌐 Open in Browser", url: uiUrl }]];
+  const rows = [[{ text: "🌐 Open in Browser", url: getBrowserUiUrl() || uiUrl }]];
   if (webAppUrl) {
     rows.unshift([{ text: "📱 Open Control Center", web_app: { url: webAppUrl } }]);
   }
@@ -7591,6 +7639,29 @@ export async function startTelegramBot() {
         await setWebAppMenuButton(telegramWebAppUrl);
       } else if (reachable) {
         await clearWebAppMenuButton();
+      }
+
+      // Notify about firewall issues if detected
+      if (reachable) {
+        const fwState = getFirewallState();
+        if (fwState && fwState.blocked) {
+          const port = new URL(telegramUiUrl || "http://localhost:5511").port || "5511";
+          await sendDirect(
+            telegramChatId,
+            `🔥 *Firewall Alert*\n\n` +
+            `Port ${port}/tcp appears blocked by \`${fwState.firewall}\`.\n` +
+            `The Control Center may not be reachable from your phone.\n\n` +
+            `To fix, run on the server:\n\`\`\`\n${fwState.allowCmd}\n\`\`\``,
+            {
+              parseMode: "Markdown",
+              reply_markup: {
+                inline_keyboard: [[
+                  { text: "🔓 Open Port (requires admin password on server)", callback_data: "fw:open" },
+                ]],
+              },
+            },
+          );
+        }
       }
     } catch (err) {
       console.warn(`[telegram-bot] UI server start failed: ${err.message}`);

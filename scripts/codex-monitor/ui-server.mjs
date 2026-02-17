@@ -158,6 +158,196 @@ function ensureSelfSignedCert() {
   }
 }
 
+// ── Firewall detection and management ────────────────────────────────
+
+/** Detected firewall state — populated by checkFirewall() */
+let firewallState = null;
+
+/** Return the last firewall check result (or null). */
+export function getFirewallState() {
+  return firewallState;
+}
+
+/**
+ * Detect the active firewall and check if a given TCP port is allowed.
+ * Returns { firewall, blocked, allowCmd, status } or null if no firewall.
+ */
+function checkFirewall(port) {
+  const platform = process.platform;
+  try {
+    if (platform === "linux") {
+      // Check ufw first (most common on Ubuntu/Debian)
+      try {
+        const ufwStatus = execSync("ufw status 2>/dev/null", { encoding: "utf8", timeout: 5000 });
+        if (ufwStatus.includes("Status: active")) {
+          const portAllowed = new RegExp(`^${port}/tcp\\s+ALLOW`, "m").test(ufwStatus) ||
+            new RegExp(`^${port}\\s+ALLOW`, "m").test(ufwStatus);
+          return {
+            firewall: "ufw",
+            blocked: !portAllowed,
+            allowCmd: `sudo ufw allow ${port}/tcp comment "codex-monitor UI"`,
+            status: portAllowed ? "allowed" : "blocked",
+          };
+        }
+      } catch {
+        // ufw not available or not root — try reading status via systemctl
+        try {
+          const active = execSync("systemctl is-active ufw 2>/dev/null", { encoding: "utf8", timeout: 3000 }).trim();
+          if (active === "active") {
+            // ufw is active but we can't read rules without root — assume blocked
+            return {
+              firewall: "ufw",
+              blocked: true,
+              allowCmd: `sudo ufw allow ${port}/tcp comment "codex-monitor UI"`,
+              status: "unknown (need root to check rules)",
+            };
+          }
+        } catch { /* not active */ }
+      }
+
+      // Check firewalld
+      try {
+        const fwActive = execSync("systemctl is-active firewalld 2>/dev/null", { encoding: "utf8", timeout: 3000 }).trim();
+        if (fwActive === "active") {
+          try {
+            const ports = execSync("firewall-cmd --list-ports 2>/dev/null", { encoding: "utf8", timeout: 5000 });
+            const portAllowed = ports.includes(`${port}/tcp`);
+            return {
+              firewall: "firewalld",
+              blocked: !portAllowed,
+              allowCmd: `sudo firewall-cmd --add-port=${port}/tcp --permanent && sudo firewall-cmd --reload`,
+              status: portAllowed ? "allowed" : "blocked",
+            };
+          } catch {
+            return {
+              firewall: "firewalld",
+              blocked: true,
+              allowCmd: `sudo firewall-cmd --add-port=${port}/tcp --permanent && sudo firewall-cmd --reload`,
+              status: "unknown (need root to check rules)",
+            };
+          }
+        }
+      } catch { /* not active */ }
+
+      // Check raw iptables
+      try {
+        const rules = execSync("iptables -L INPUT -n 2>/dev/null", { encoding: "utf8", timeout: 5000 });
+        // If we can read rules and there's a DROP/REJECT default, port might be blocked
+        const hasRules = rules.includes("DROP") || rules.includes("REJECT");
+        if (hasRules) {
+          const portAllowed = rules.includes(`dpt:${port}`);
+          return {
+            firewall: "iptables",
+            blocked: !portAllowed,
+            allowCmd: `sudo iptables -I INPUT -p tcp --dport ${port} -j ACCEPT`,
+            status: portAllowed ? "allowed" : "likely blocked",
+          };
+        }
+      } catch { /* can't read iptables */ }
+
+      return null; // No firewall detected
+    }
+
+    if (platform === "win32") {
+      try {
+        const rules = execSync(
+          `netsh advfirewall firewall show rule name=all dir=in | findstr /C:"${port}"`,
+          { encoding: "utf8", timeout: 10000 },
+        );
+        return {
+          firewall: "windows",
+          blocked: !rules.includes(`${port}`),
+          allowCmd: `netsh advfirewall firewall add rule name="codex-monitor UI" dir=in action=allow protocol=tcp localport=${port}`,
+          status: rules.includes(`${port}`) ? "allowed" : "blocked",
+        };
+      } catch {
+        return {
+          firewall: "windows",
+          blocked: true,
+          allowCmd: `netsh advfirewall firewall add rule name="codex-monitor UI" dir=in action=allow protocol=tcp localport=${port}`,
+          status: "unknown",
+        };
+      }
+    }
+
+    if (platform === "darwin") {
+      // macOS pf — typically not blocking by default
+      try {
+        const pfStatus = execSync("/sbin/pfctl -s info 2>&1", { encoding: "utf8", timeout: 5000 });
+        if (pfStatus.includes("Status: Enabled")) {
+          return {
+            firewall: "pf",
+            blocked: false, // pf usually allows outbound; we'd need deeper parsing
+            allowCmd: `echo 'pass in proto tcp from any to any port ${port}' | sudo pfctl -ef -`,
+            status: "pf active (manual check recommended)",
+          };
+        }
+      } catch { /* pf not available */ }
+      return null;
+    }
+  } catch {
+    // Firewall detection failed entirely
+  }
+  return null;
+}
+
+/**
+ * Attempt to open a firewall port. Uses pkexec for GUI prompt, falls back to sudo.
+ * Returns { success, message }.
+ */
+export function openFirewallPort(port) {
+  const state = firewallState || checkFirewall(port);
+  if (!state || !state.blocked) {
+    return { success: true, message: "Port already allowed or no firewall detected." };
+  }
+
+  const { firewall, allowCmd } = state;
+
+  // Try pkexec first (GUI sudo prompt — works on Linux desktop)
+  if (process.platform === "linux") {
+    // Build the actual command for pkexec (it doesn't support shell pipelines)
+    let pkexecCmd;
+    if (firewall === "ufw") {
+      pkexecCmd = `pkexec ufw allow ${port}/tcp comment "codex-monitor UI"`;
+    } else if (firewall === "firewalld") {
+      pkexecCmd = `pkexec bash -c 'firewall-cmd --add-port=${port}/tcp --permanent && firewall-cmd --reload'`;
+    } else {
+      pkexecCmd = `pkexec iptables -I INPUT -p tcp --dport ${port} -j ACCEPT`;
+    }
+
+    try {
+      execSync(pkexecCmd, { encoding: "utf8", timeout: 60000, stdio: "pipe" });
+      // Re-check after opening
+      firewallState = checkFirewall(port);
+      return { success: true, message: `Firewall rule added via ${firewall}.` };
+    } catch (err) {
+      // pkexec failed (user dismissed, not available, etc.)
+      return {
+        success: false,
+        message: `Could not auto-open port. Run manually:\n\`${allowCmd}\``,
+      };
+    }
+  }
+
+  if (process.platform === "win32") {
+    try {
+      execSync(allowCmd, { encoding: "utf8", timeout: 30000, stdio: "pipe" });
+      firewallState = checkFirewall(port);
+      return { success: true, message: "Windows firewall rule added." };
+    } catch {
+      return {
+        success: false,
+        message: `Could not auto-open port. Run as admin:\n\`${allowCmd}\``,
+      };
+    }
+  }
+
+  return {
+    success: false,
+    message: `Run manually:\n\`${allowCmd}\``,
+  };
+}
+
 export function injectUiDependencies(deps = {}) {
   uiDeps = { ...uiDeps, ...deps };
 }
@@ -1282,6 +1472,22 @@ export async function startTelegramUiServer(options = {}) {
   }
   console.log(`[telegram-ui] LAN access: ${protocol}://${lanIp}:${actualPort}`);
   console.log(`[telegram-ui] Browser access: ${protocol}://${lanIp}:${actualPort}/?token=${sessionToken}`);
+
+  // Check firewall rules for the UI port
+  firewallState = checkFirewall(actualPort);
+  if (firewallState) {
+    if (firewallState.blocked) {
+      console.warn(
+        `[telegram-ui] ⚠️  Port ${actualPort}/tcp appears BLOCKED by ${firewallState.firewall}. ` +
+        `LAN/mobile devices may not be able to connect.`,
+      );
+      console.warn(
+        `[telegram-ui] To fix, run: ${firewallState.allowCmd}`,
+      );
+    } else {
+      console.log(`[telegram-ui] Firewall (${firewallState.firewall}): port ${actualPort}/tcp is allowed`);
+    }
+  }
 
   return uiServer;
 }
