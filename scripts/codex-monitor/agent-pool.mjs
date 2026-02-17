@@ -103,6 +103,45 @@ async function withSanitizedOpenAiEnv(fn) {
   }
 }
 
+/**
+ * Build Codex SDK constructor options with Azure auto-detection.
+ * When OPENAI_BASE_URL points to Azure, configures the SDK with Azure
+ * provider settings via `config` and maps the API key via `env`.
+ * Otherwise strips OPENAI_BASE_URL so the SDK uses its default auth.
+ */
+function buildCodexSdkOptions() {
+  const baseUrl = process.env.OPENAI_BASE_URL || "";
+  const isAzure = baseUrl.includes(".openai.azure.com");
+  const env = { ...process.env };
+  // Always strip OPENAI_BASE_URL — for Azure we use config overrides,
+  // for non-Azure the CLI should use its built-in endpoint.
+  delete env.OPENAI_BASE_URL;
+
+  if (isAzure) {
+    // Map OPENAI_API_KEY → AZURE_OPENAI_API_KEY for Azure auth
+    if (env.OPENAI_API_KEY && !env.AZURE_OPENAI_API_KEY) {
+      env.AZURE_OPENAI_API_KEY = env.OPENAI_API_KEY;
+    }
+    const azureModel = env.CODEX_MODEL || undefined;
+    return {
+      env,
+      config: {
+        model_provider: "azure",
+        model_providers: {
+          azure: {
+            name: "Azure OpenAI",
+            base_url: baseUrl,
+            env_key: "AZURE_OPENAI_API_KEY",
+            wire_api: "responses",
+          },
+        },
+        ...(azureModel ? { model: azureModel } : {}),
+      },
+    };
+  }
+  return { env };
+}
+
 // ---------------------------------------------------------------------------
 // SDK Adapter Registry
 // ---------------------------------------------------------------------------
@@ -394,7 +433,7 @@ async function launchCodexThread(prompt, cwd, timeoutMs, extra = {}) {
   //          "workspace-write" (restricted — breaks with worktrees), "read-only"
   const sandboxPolicy = process.env.CODEX_SANDBOX || "danger-full-access";
 
-  const codex = new CodexClass();
+  const codex = new CodexClass(buildCodexSdkOptions());
   const thread = codex.startThread({
     sandboxMode: sandboxPolicy,
     workingDirectory: cwd,
@@ -1480,7 +1519,7 @@ async function resumeCodexThread(threadId, prompt, cwd, timeoutMs, extra = {}) {
     };
   }
 
-  const codex = new CodexClass();
+  const codex = new CodexClass(buildCodexSdkOptions());
 
   let thread;
   try {
