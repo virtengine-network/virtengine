@@ -9,6 +9,62 @@ import { cloneValue } from "./utils.js";
 import { generateId } from "./utils.js";
 
 /* ═══════════════════════════════════════════════════════════════
+ *  CLOUD STORAGE HELPER — mirrors settings.js pattern
+ * ═══════════════════════════════════════════════════════════════ */
+
+/** @param {string} key @returns {Promise<any>} */
+function _cloudGet(key) {
+  return new Promise((resolve) => {
+    const tg = globalThis.Telegram?.WebApp;
+    if (tg?.CloudStorage) {
+      tg.CloudStorage.getItem(key, (err, val) => {
+        if (err || val == null) resolve(null);
+        else {
+          try { resolve(JSON.parse(val)); }
+          catch { resolve(val); }
+        }
+      });
+    } else {
+      try {
+        const v = localStorage.getItem("ve_settings_" + key);
+        resolve(v != null ? JSON.parse(v) : null);
+      } catch { resolve(null); }
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ *  API RESPONSE CACHE — stale-while-revalidate
+ * ═══════════════════════════════════════════════════════════════ */
+
+const _apiCache = new Map();
+const CACHE_TTL = {
+  status: 5000, executor: 5000, tasks: 10000, agents: 5000,
+  threads: 5000, logs: 15000, worktrees: 30000, workspaces: 30000,
+  presence: 30000, config: 60000, projects: 60000, git: 20000,
+  infra: 30000,
+};
+
+function _cacheKey(url) { return url; }
+function _cacheGet(url) { return _apiCache.get(url) || null; }
+function _cacheSet(url, data) { _apiCache.set(url, { data, fetchedAt: Date.now() }); }
+function _cacheFresh(url, group) {
+  const e = _apiCache.get(url);
+  return e ? (Date.now() - e.fetchedAt) < (CACHE_TTL[group] || 10000) : false;
+}
+function _cacheClearGroup(group) {
+  for (const k of _apiCache.keys()) {
+    if (k.includes(group) || group === '*') _apiCache.delete(k);
+  }
+}
+
+/** Tracks last-fetch timestamps per data group for "Updated Xs ago" UI. */
+export const dataFreshness = signal({});
+function _markFresh(group) {
+  dataFreshness.value = { ...dataFreshness.value, [group]: Date.now() };
+}
+
+/* ═══════════════════════════════════════════════════════════════
  *  SIGNALS — Single source of truth for UI state
  * ═══════════════════════════════════════════════════════════════ */
 
@@ -59,6 +115,111 @@ export const configData = signal(null);
 // ── Toasts
 export const toasts = signal([]);
 
+// ── Notification Preferences (loaded from CloudStorage)
+export const notificationPrefs = signal({
+  notifyUpdates: true,
+  notifyErrors: true,
+  notifyCompletion: true,
+});
+
+/* ═══════════════════════════════════════════════════════════════
+ *  NOTIFICATION PREFERENCES
+ * ═══════════════════════════════════════════════════════════════ */
+
+/** Load notification preferences from CloudStorage into signal */
+export async function loadNotificationPrefs() {
+  const [nu, ne, nc] = await Promise.all([
+    _cloudGet("notifyUpdates"),
+    _cloudGet("notifyErrors"),
+    _cloudGet("notifyCompletion"),
+  ]);
+  notificationPrefs.value = {
+    notifyUpdates: nu != null ? nu : true,
+    notifyErrors: ne != null ? ne : true,
+    notifyCompletion: nc != null ? nc : true,
+  };
+}
+
+/** Critical message patterns that always show regardless of prefs */
+const CRITICAL_PATTERNS = /\b(connection\s*lost|auth\s*(fail|error)|authentication\s*(fail|error)|unauthorized)\b/i;
+
+/**
+ * Determine if a toast should be rendered based on notification prefs.
+ * Filtering happens at render time so toasts are still logged even if hidden.
+ * @param {{ id: string, message: string, type: string }} toast
+ * @returns {boolean}
+ */
+export function shouldShowToast(toast) {
+  if (CRITICAL_PATTERNS.test(toast.message)) return true;
+
+  const prefs = notificationPrefs.value;
+
+  if (!prefs.notifyUpdates && (toast.type === "info" || toast.type === "success")) {
+    return false;
+  }
+  if (!prefs.notifyErrors && toast.type === "error") {
+    return false;
+  }
+  if (!prefs.notifyCompletion && /\b(complete[ds]?|done)\b/i.test(toast.message)) {
+    return false;
+  }
+
+  return true;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ *  EXECUTOR DEFAULTS — apply stored settings on first load
+ * ═══════════════════════════════════════════════════════════════ */
+
+let _defaultsApplied = false;
+
+/**
+ * Read stored executor defaults from CloudStorage and POST them to
+ * the server if they differ from the current config.
+ * Only runs once per app lifecycle (not on tab switches).
+ */
+export async function applyStoredDefaults() {
+  if (_defaultsApplied) return;
+  _defaultsApplied = true;
+
+  const [maxP, sdk, region] = await Promise.all([
+    _cloudGet("defaultMaxParallel"),
+    _cloudGet("defaultSdk"),
+    _cloudGet("defaultRegion"),
+  ]);
+
+  const promises = [];
+
+  if (maxP != null) {
+    const current = executorData.value;
+    if (!current || current.maxParallel !== maxP) {
+      promises.push(
+        apiFetch("/api/executor/maxparallel", {
+          method: "POST",
+          body: JSON.stringify({ maxParallel: maxP }),
+          _silent: true,
+        }).catch(() => {}),
+      );
+    }
+  }
+
+  const configUpdates = {};
+  if (sdk && sdk !== "auto") configUpdates.sdk = sdk;
+  if (region && region !== "auto") configUpdates.region = region;
+
+  if (Object.keys(configUpdates).length) {
+    promises.push(
+      apiFetch("/api/config/update", {
+        method: "POST",
+        body: JSON.stringify(configUpdates),
+        _silent: true,
+      }).catch(() => {}),
+    );
+  }
+
+  if (promises.length) await Promise.all(promises);
+}
+
 /* ═══════════════════════════════════════════════════════════════
  *  TOAST SYSTEM
  * ═══════════════════════════════════════════════════════════════ */
@@ -91,21 +252,106 @@ if (typeof globalThis !== "undefined") {
  *  DATA LOADERS — each calls apiFetch and updates its signal(s)
  * ═══════════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════════
+ *  DASHBOARD HISTORY — localStorage-backed trend tracking
+ * ═══════════════════════════════════════════════════════════════ */
+
+const HISTORY_KEY = "ve-dashboard-history";
+const HISTORY_MAX = 50;
+const HISTORY_MIN_INTERVAL_MS = 30_000;
+
+/** Read stored history from localStorage. */
+export function getDashboardHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Compute trend delta between latest and previous snapshot for a metric.
+ * Returns 0 when insufficient history.
+ * @param {string} metric - one of: total, running, done, errors, successRate
+ * @returns {number}
+ */
+export function getTrend(metric) {
+  const hist = getDashboardHistory();
+  if (hist.length < 2) return 0;
+  const latest = hist[hist.length - 1];
+  const prev = hist[hist.length - 2];
+  return (latest[metric] ?? 0) - (prev[metric] ?? 0);
+}
+
+/** Save a dashboard snapshot after a successful status load. */
+function _saveDashboardSnapshot() {
+  try {
+    const s = statusData.value;
+    if (!s) return;
+    const counts = s.counts || {};
+    const running = Number(counts.running || counts.inprogress || 0);
+    const review = Number(counts.review || counts.inreview || 0);
+    const blocked = Number(counts.error || 0);
+    const done = Number(counts.done || 0);
+    const backlog = Number(s.backlog_remaining || counts.todo || 0);
+    const total = running + review + blocked + backlog + done;
+    const successRate = total > 0 ? +((done / total) * 100).toFixed(1) : 0;
+
+    const snap = { ts: Date.now(), total, running, done, errors: blocked, successRate };
+
+    const hist = getDashboardHistory();
+
+    // Deduplicate: skip if too recent and values unchanged
+    if (hist.length > 0) {
+      const last = hist[hist.length - 1];
+      const elapsed = snap.ts - (last.ts || 0);
+      const same =
+        last.total === snap.total &&
+        last.running === snap.running &&
+        last.done === snap.done &&
+        last.errors === snap.errors;
+      if (elapsed < HISTORY_MIN_INTERVAL_MS && same) return;
+    }
+
+    hist.push(snap);
+    // Trim to max length
+    while (hist.length > HISTORY_MAX) hist.shift();
+
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
+  } catch {
+    /* localStorage may be unavailable */
+  }
+}
+
 /** Load system status → statusData */
 export async function loadStatus() {
-  const res = await apiFetch("/api/status", { _silent: true }).catch(() => ({
+  const url = "/api/status";
+  const cached = _cacheGet(url);
+  if (_cacheFresh(url, "status")) return;
+  if (cached) { statusData.value = cached.data; connected.value = true; }
+  const res = await apiFetch(url, { _silent: true }).catch(() => ({
     data: null,
   }));
   statusData.value = res.data ?? res ?? null;
   connected.value = true;
+  _cacheSet(url, statusData.value);
+  _markFresh("status");
+  _saveDashboardSnapshot();
 }
 
 /** Load executor state → executorData */
 export async function loadExecutor() {
-  const res = await apiFetch("/api/executor", { _silent: true }).catch(() => ({
+  const url = "/api/executor";
+  const cached = _cacheGet(url);
+  if (_cacheFresh(url, "executor")) return;
+  if (cached) executorData.value = cached.data;
+  const res = await apiFetch(url, { _silent: true }).catch(() => ({
     data: null,
   }));
   executorData.value = res ?? null;
+  _cacheSet(url, executorData.value);
+  _markFresh("executor");
 }
 
 /** Load tasks with current filter/page/sort → tasksData + tasksTotalPages */
@@ -133,39 +379,61 @@ export async function loadTasks() {
     res.totalPages ||
     Math.max(1, Math.ceil((res.total || 0) / tasksPageSize.value));
   tasksLoaded.value = true;
+  _cacheSet(`/api/tasks?${params}`, { data: tasksData.value, totalPages: tasksTotalPages.value });
+  _markFresh("tasks");
 }
 
 /** Load active agents → agentsData */
 export async function loadAgents() {
-  const res = await apiFetch("/api/agents", { _silent: true }).catch(() => ({
+  const url = "/api/agents";
+  const cached = _cacheGet(url);
+  if (_cacheFresh(url, "agents")) return;
+  if (cached) agentsData.value = cached.data;
+  const res = await apiFetch(url, { _silent: true }).catch(() => ({
     data: [],
   }));
   agentsData.value = res.data || [];
+  _cacheSet(url, agentsData.value);
+  _markFresh("agents");
 }
 
 /** Load worktrees → worktreeData */
 export async function loadWorktrees() {
-  const res = await apiFetch("/api/worktrees", { _silent: true }).catch(() => ({
+  const url = "/api/worktrees";
+  const cached = _cacheGet(url);
+  if (_cacheFresh(url, "worktrees")) return;
+  if (cached) worktreeData.value = cached.data;
+  const res = await apiFetch(url, { _silent: true }).catch(() => ({
     data: [],
     stats: null,
   }));
   worktreeData.value = res.data || [];
+  _cacheSet(url, worktreeData.value);
+  _markFresh("worktrees");
 }
 
 /** Load infrastructure overview → infraData */
 export async function loadInfra() {
-  const res = await apiFetch("/api/infra", { _silent: true }).catch(() => ({
+  const url = "/api/infra";
+  const cached = _cacheGet(url);
+  if (_cacheFresh(url, "infra")) return;
+  if (cached) infraData.value = cached.data;
+  const res = await apiFetch(url, { _silent: true }).catch(() => ({
     data: null,
   }));
   infraData.value = res.data ?? res ?? null;
+  _cacheSet(url, infraData.value);
+  _markFresh("infra");
 }
 
 /** Load system logs → logsData */
 export async function loadLogs() {
-  const res = await apiFetch(`/api/logs?lines=${logsLines.value}`, {
-    _silent: true,
-  }).catch(() => ({ data: null }));
+  const url = `/api/logs?lines=${logsLines.value}`;
+  if (_cacheFresh(url, "logs")) return;
+  const res = await apiFetch(url, { _silent: true }).catch(() => ({ data: null }));
   logsData.value = res.data ?? res ?? null;
+  _cacheSet(url, logsData.value);
+  _markFresh("logs");
 }
 
 /** Load git branches + diff → gitBranches, gitDiff */
@@ -227,40 +495,56 @@ export async function loadAgentContextData(query) {
 
 /** Load shared workspaces → sharedWorkspaces */
 export async function loadSharedWorkspaces() {
-  const res = await apiFetch("/api/shared-workspaces", { _silent: true }).catch(
+  const url = "/api/shared-workspaces";
+  if (_cacheFresh(url, "workspaces")) return;
+  const res = await apiFetch(url, { _silent: true }).catch(
     () => ({
       data: [],
     }),
   );
   sharedWorkspaces.value = res.data || res.workspaces || [];
+  _cacheSet(url, sharedWorkspaces.value);
+  _markFresh("workspaces");
 }
 
 /** Load presence / coordinator → presenceInstances, coordinatorInfo */
 export async function loadPresence() {
-  const res = await apiFetch("/api/presence", { _silent: true }).catch(() => ({
+  const url = "/api/presence";
+  if (_cacheFresh(url, "presence")) return;
+  const res = await apiFetch(url, { _silent: true }).catch(() => ({
     data: null,
   }));
   const data = res.data || res || {};
   presenceInstances.value = data.instances || [];
   coordinatorInfo.value = data.coordinator || null;
+  _cacheSet(url, data);
+  _markFresh("presence");
 }
 
 /** Load project summary → projectSummary */
 export async function loadProjectSummary() {
-  const res = await apiFetch("/api/project-summary", { _silent: true }).catch(
+  const url = "/api/project-summary";
+  if (_cacheFresh(url, "projects")) return;
+  const res = await apiFetch(url, { _silent: true }).catch(
     () => ({
       data: null,
     }),
   );
   projectSummary.value = res.data ?? res ?? null;
+  _cacheSet(url, projectSummary.value);
+  _markFresh("projects");
 }
 
 /** Load config (routing, regions, etc.) → configData */
 export async function loadConfig() {
-  const res = await apiFetch("/api/config", { _silent: true }).catch(() => ({
+  const url = "/api/config";
+  if (_cacheFresh(url, "config")) return;
+  const res = await apiFetch(url, { _silent: true }).catch(() => ({
     ok: false,
   }));
   configData.value = res?.ok ? res : null;
+  _cacheSet(url, configData.value);
+  _markFresh("config");
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -288,8 +572,10 @@ const TAB_LOADERS = {
 /**
  * Refresh all data for a given tab.
  * @param {string} tabName
+ * @param {{ force?: boolean }} [opts]
  */
-export async function refreshTab(tabName) {
+export async function refreshTab(tabName, opts = {}) {
+  if (opts.force) _apiCache.clear();
   const loader = TAB_LOADERS[tabName];
   if (loader) {
     try {
@@ -366,6 +652,8 @@ export function initWsInvalidationListener() {
   onWsMessage((msg) => {
     if (msg?.type !== "invalidate") return;
     const channels = Array.isArray(msg.channels) ? msg.channels : [];
+    // Clear cache for invalidated channels so next fetch is fresh
+    channels.forEach((ch) => _cacheClearGroup(ch));
 
     // Determine interested channels based on active tab
     import("./router.js")

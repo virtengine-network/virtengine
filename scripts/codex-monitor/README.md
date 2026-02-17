@@ -34,7 +34,10 @@ Requires:
 
 - Node.js 18+
 - git
-- PowerShell (`pwsh`) on Windows (optional on Linux/macOS unless using `.ps1` scripts)
+- Linux, macOS, and Windows are fully supported
+- Shell runtime for your selected orchestrator wrapper:
+  - Bash for `.sh` wrappers
+  - PowerShell (`pwsh`) for `.ps1` wrappers
 - GitHub CLI (`gh`) recommended
 
 ---
@@ -64,6 +67,7 @@ The setup wizard now starts with two modes:
   - prompts only for important decisions (project identity, executor preset/model profile, AI provider, Telegram, board/execution mode)
   - keeps advanced knobs on proven defaults
   - writes a standardized `.env` based on `.env.example` so all options remain documented
+  - auto-generates repository `.vscode/settings.json` with Copilot agent/subagent/MCP/autonomous defaults
 
 - **Advanced**
   - full control over repository layout, failover/distribution, hook targets/overrides, orchestrator path, VK wiring details, and optional channels
@@ -126,7 +130,25 @@ Task board backend (`KANBAN_BACKEND`):
 - `internal` - local task-store source of truth (default)
 - `vk` - Vibe-Kanban adapter
 - `github` - GitHub Issues with shared state persistence
-- `jira` (scaffolded, not yet implemented)
+- `jira` - Jira Issues with status/shared-state parity
+
+Sync policy (`KANBAN_SYNC_POLICY`):
+
+- `internal-primary` - internal task-store remains source of truth (default)
+- `bidirectional` - external status changes may update internal tasks
+
+Autonomous runtime defaults:
+
+- Copilot shell runs with experimental mode + allow-all + no-ask-user by default
+- Codex config enforces critical feature flags (`child_agents_md`, `memory_tool`, collaboration)
+- Setup configures common MCP servers automatically (`context7`, `sequential-thinking`, `playwright`, `microsoft-docs`)
+
+Experimental autonomous backlog replenishment:
+
+- `INTERNAL_EXECUTOR_REPLENISH_ENABLED=true|false`
+- `INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS=1|2`
+- `INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS=1..3`
+- `PROJECT_REQUIREMENTS_PROFILE=simple-feature|feature|large-feature|system|multi-system`
 
 **GitHub adapter enhancements:**
 The GitHub Issues adapter now supports multi-agent coordination via structured state persistence:
@@ -138,14 +160,71 @@ The GitHub Issues adapter now supports multi-agent coordination via structured s
 
 See [KANBAN_GITHUB_ENHANCEMENT.md](./KANBAN_GITHUB_ENHANCEMENT.md) for details.
 
-**Jira adapter (future):**
-The Jira adapter is scaffolded with detailed JSDoc and implementation guidance:
+### GitHub Projects v2 backend (Phase 1 + 2)
 
-- Method stubs: `persistSharedStateToIssue()`, `readSharedStateFromIssue()`, `markTaskIgnored()`
-- Planned approach using Jira custom fields, labels, or structured comments
-- Compatible API surface with GitHub adapter for drop-in replacement
+`codex-monitor` now supports GitHub Projects v2 as a first-class kanban source and sync target:
 
-See [JIRA_INTEGRATION.md](./JIRA_INTEGRATION.md) for implementation guide.
+- Phase 1 (read): read tasks directly from a Projects v2 board (`GITHUB_PROJECT_MODE=kanban`)
+- Phase 2 (write): sync task status updates back to the board `Status` field
+- Bidirectional mapping between codex statuses and project status options
+- Safe fallback to issues mode when project metadata is missing or unavailable
+
+Enable with env config:
+
+```env
+KANBAN_BACKEND=github
+GITHUB_PROJECT_MODE=kanban
+GITHUB_PROJECT_OWNER=your-org-or-user
+GITHUB_PROJECT_NUMBER=3
+GITHUB_PROJECT_AUTO_SYNC=true
+```
+
+Status mapping overrides (optional):
+
+```env
+GITHUB_PROJECT_STATUS_TODO=Todo
+GITHUB_PROJECT_STATUS_INPROGRESS=In Progress
+GITHUB_PROJECT_STATUS_INREVIEW=In Review
+GITHUB_PROJECT_STATUS_DONE=Done
+GITHUB_PROJECT_STATUS_CANCELLED=Cancelled
+```
+
+Projects v2 docs:
+
+- [GITHUB_PROJECTS_V2_QUICKSTART.md](./GITHUB_PROJECTS_V2_QUICKSTART.md)
+- [GITHUB_PROJECTS_V2_API.md](./GITHUB_PROJECTS_V2_API.md)
+- [GITHUB_PROJECTS_V2_MONITORING.md](./GITHUB_PROJECTS_V2_MONITORING.md)
+- [GITHUB_PROJECTS_V2_IMPLEMENTATION_CHECKLIST.md](./GITHUB_PROJECTS_V2_IMPLEMENTATION_CHECKLIST.md)
+
+**Jira adapter parity config:**
+Jira supports the same codex-monitor status vocabulary and shared-state fields,
+with explicit mapping via env vars:
+
+```env
+KANBAN_BACKEND=jira
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_EMAIL=you@example.com
+JIRA_API_TOKEN=***
+
+JIRA_STATUS_TODO=To Do
+JIRA_STATUS_INPROGRESS=In Progress
+JIRA_STATUS_INREVIEW=In Review
+JIRA_STATUS_DONE=Done
+JIRA_STATUS_CANCELLED=Cancelled
+
+JIRA_CUSTOM_FIELD_OWNER_ID=customfield_10042
+JIRA_CUSTOM_FIELD_ATTEMPT_TOKEN=customfield_10043
+JIRA_CUSTOM_FIELD_ATTEMPT_STARTED=customfield_10044
+JIRA_CUSTOM_FIELD_HEARTBEAT=customfield_10045
+JIRA_CUSTOM_FIELD_RETRY_COUNT=customfield_10046
+JIRA_CUSTOM_FIELD_IGNORE_REASON=customfield_10047
+```
+
+Setup wizard note: running `codex-monitor --setup` and selecting Jira will
+open the Atlassian API token page (opt-in), list projects, and guide you
+through project/issue type selection interactively.
+
+See [JIRA_INTEGRATION.md](./JIRA_INTEGRATION.md) for full configuration and examples.
 
 ---
 
@@ -340,7 +419,10 @@ EXECUTORS=COPILOT:CLAUDE_OPUS_4_6:50,CODEX:DEFAULT:50
 PROJECT_NAME=my-project
 GITHUB_REPO=myorg/myrepo
 KANBAN_BACKEND=internal
+KANBAN_SYNC_POLICY=internal-primary
 EXECUTOR_MODE=internal
+INTERNAL_EXECUTOR_REPLENISH_ENABLED=false
+PROJECT_REQUIREMENTS_PROFILE=feature
 VK_BASE_URL=http://127.0.0.1:54089
 VK_RECOVERY_PORT=54089
 MAX_PARALLEL=6
@@ -365,7 +447,7 @@ codex-monitor --no-telegram-bot
 codex-monitor --telegram-commands
 codex-monitor --no-vk-spawn
 codex-monitor --vk-ensure-interval 60000
-codex-monitor --script ./my-orchestrator.ps1
+codex-monitor --script ./my-orchestrator.sh
 codex-monitor --args "-MaxParallel 6"
 ```
 

@@ -234,6 +234,69 @@ export function runConfigDoctor(options = {}) {
     });
   }
 
+  const syncPolicy = String(
+    effective.KANBAN_SYNC_POLICY || "internal-primary",
+  ).toLowerCase();
+  if (!["internal-primary", "bidirectional"].includes(syncPolicy)) {
+    issues.errors.push({
+      code: "KANBAN_SYNC_POLICY",
+      message: `Invalid KANBAN_SYNC_POLICY: ${effective.KANBAN_SYNC_POLICY}`,
+      fix: "Use one of: internal-primary, bidirectional",
+    });
+  }
+
+  const requirementsProfile = String(
+    effective.PROJECT_REQUIREMENTS_PROFILE || "feature",
+  ).toLowerCase();
+  if (
+    ![
+      "simple-feature",
+      "feature",
+      "large-feature",
+      "system",
+      "multi-system",
+    ].includes(requirementsProfile)
+  ) {
+    issues.errors.push({
+      code: "PROJECT_REQUIREMENTS_PROFILE",
+      message: `Invalid PROJECT_REQUIREMENTS_PROFILE: ${effective.PROJECT_REQUIREMENTS_PROFILE}`,
+      fix: "Use one of: simple-feature, feature, large-feature, system, multi-system",
+    });
+  }
+
+  const replenishMin = Number(
+    effective.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS || "1",
+  );
+  const replenishMax = Number(
+    effective.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS || "2",
+  );
+  if (!Number.isFinite(replenishMin) || replenishMin < 1 || replenishMin > 2) {
+    issues.errors.push({
+      code: "INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS",
+      message: `Invalid INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS: ${effective.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS}`,
+      fix: "Use an integer between 1 and 2",
+    });
+  }
+  if (!Number.isFinite(replenishMax) || replenishMax < 1 || replenishMax > 3) {
+    issues.errors.push({
+      code: "INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS",
+      message: `Invalid INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS: ${effective.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS}`,
+      fix: "Use an integer between 1 and 3",
+    });
+  }
+  if (
+    Number.isFinite(replenishMin) &&
+    Number.isFinite(replenishMax) &&
+    replenishMax < replenishMin
+  ) {
+    issues.errors.push({
+      code: "INTERNAL_EXECUTOR_REPLENISH_RANGE",
+      message:
+        "INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS cannot be lower than INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS.",
+      fix: "Set max >= min",
+    });
+  }
+
   const mode = String(effective.EXECUTOR_MODE || "internal").toLowerCase();
   if (!["internal", "vk", "hybrid"].includes(mode)) {
     issues.errors.push({
@@ -351,6 +414,41 @@ export function runConfigDoctor(options = {}) {
       message: "No .env file found in config directory or repo root.",
       fix: "Run codex-monitor --setup to generate .env",
     });
+  }
+
+  const vscodeSettingsPath = resolve(repoRoot, ".vscode", "settings.json");
+  if (!existsSync(vscodeSettingsPath)) {
+    issues.warnings.push({
+      code: "VSCODE_SETTINGS_MISSING",
+      message:
+        "No .vscode/settings.json found — Copilot autonomous/subagent defaults may be missing.",
+      fix: "Run codex-monitor --setup to generate recommended workspace settings.",
+    });
+  } else {
+    try {
+      const settings = JSON.parse(readFileSync(vscodeSettingsPath, "utf8"));
+      const requiredKeys = [
+        "github.copilot.chat.searchSubagent.enabled",
+        "github.copilot.chat.switchAgent.enabled",
+        "github.copilot.chat.cli.customAgents.enabled",
+        "github.copilot.chat.cli.mcp.enabled",
+      ];
+      const missing = requiredKeys.filter((key) => settings[key] !== true);
+      if (missing.length > 0) {
+        issues.warnings.push({
+          code: "VSCODE_SETTINGS_PARTIAL",
+          message:
+            "Workspace Copilot settings are missing recommended autonomous/subagent flags.",
+          fix: "Run codex-monitor --setup to merge the recommended .vscode/settings.json defaults.",
+        });
+      }
+    } catch {
+      issues.warnings.push({
+        code: "VSCODE_SETTINGS_INVALID",
+        message: ".vscode/settings.json is not valid JSON.",
+        fix: "Fix JSON syntax or rerun codex-monitor --setup to regenerate it.",
+      });
+    }
   }
 
   // ── Codex config.toml feature flag / sub-agent checks ──────────────────────

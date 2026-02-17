@@ -1,6 +1,6 @@
 import { execSync, spawn } from "node:child_process";
-import { createHmac, randomBytes, X509Certificate } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, chmodSync, createWriteStream, writeFileSync } from "node:fs";
+import { createHmac, randomBytes, timingSafeEqual, X509Certificate } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, chmodSync, createWriteStream, writeFileSync, watchFile, unwatchFile } from "node:fs";
 import { open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { get as httpsGet } from "node:https";
@@ -57,9 +57,10 @@ import {
   getCompactDiffSummary,
   getRecentCommits,
 } from "./diff-stats.mjs";
+import { resolveRepoRoot } from "./repo-root.mjs";
 
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
-const repoRoot = resolve(__dirname, "..", "..");
+const repoRoot = resolveRepoRoot();
 const uiRoot = resolve(__dirname, "ui");
 const statusPath = resolve(repoRoot, ".cache", "ve-orchestrator-status.json");
 const logsDir = resolve(__dirname, "logs");
@@ -97,7 +98,133 @@ let uiServerUrl = null;
 let uiServerTls = false;
 let wsServer = null;
 const wsClients = new Set();
+/** @type {ReturnType<typeof setInterval>|null} */
+let wsHeartbeatTimer = null;
+
+/* ─── Log Streaming State ─── */
+/** Map<string, { sockets: Set<WebSocket>, offset: number, pollTimer }> keyed by filePath */
+const logStreamers = new Map();
 let uiDeps = {};
+const projectSyncWebhookMetrics = {
+  received: 0,
+  processed: 0,
+  ignored: 0,
+  failed: 0,
+  invalidSignature: 0,
+  syncTriggered: 0,
+  syncSuccess: 0,
+  syncFailure: 0,
+  rateLimitObserved: 0,
+  alertsTriggered: 0,
+  consecutiveFailures: 0,
+  lastEventAt: null,
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastError: null,
+};
+
+// ── Settings API: Known env keys from settings schema ──
+const SETTINGS_KNOWN_KEYS = [
+  "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_ALLOWED_CHAT_IDS",
+  "TELEGRAM_INTERVAL_MIN", "TELEGRAM_COMMAND_POLL_TIMEOUT_SEC", "TELEGRAM_AGENT_TIMEOUT_MIN",
+  "TELEGRAM_COMMAND_CONCURRENCY", "TELEGRAM_VERBOSITY", "TELEGRAM_BATCH_NOTIFICATIONS",
+  "TELEGRAM_BATCH_INTERVAL_SEC", "TELEGRAM_BATCH_MAX_SIZE", "TELEGRAM_IMMEDIATE_PRIORITY",
+  "TELEGRAM_API_BASE_URL", "TELEGRAM_HTTP_TIMEOUT_MS", "TELEGRAM_RETRY_ATTEMPTS",
+  "PROJECT_NAME", "TELEGRAM_MINIAPP_ENABLED", "TELEGRAM_UI_PORT", "TELEGRAM_UI_HOST",
+  "TELEGRAM_UI_PUBLIC_HOST", "TELEGRAM_UI_BASE_URL", "TELEGRAM_UI_ALLOW_UNSAFE",
+  "TELEGRAM_UI_AUTH_MAX_AGE_SEC", "TELEGRAM_UI_TUNNEL",
+  "EXECUTOR_MODE", "INTERNAL_EXECUTOR_PARALLEL", "INTERNAL_EXECUTOR_SDK",
+  "INTERNAL_EXECUTOR_TIMEOUT_MS", "INTERNAL_EXECUTOR_MAX_RETRIES", "INTERNAL_EXECUTOR_POLL_MS",
+  "INTERNAL_EXECUTOR_REVIEW_AGENT_ENABLED", "INTERNAL_EXECUTOR_REPLENISH_ENABLED",
+  "PRIMARY_AGENT", "EXECUTORS", "EXECUTOR_DISTRIBUTION", "FAILOVER_STRATEGY",
+  "COMPLEXITY_ROUTING_ENABLED", "PROJECT_REQUIREMENTS_PROFILE",
+  "OPENAI_API_KEY", "CODEX_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_MODEL",
+  "COPILOT_MODEL", "COPILOT_CLI_TOKEN",
+  "KANBAN_BACKEND", "KANBAN_SYNC_POLICY", "CODEX_MONITOR_TASK_LABEL",
+  "CODEX_MONITOR_ENFORCE_TASK_LABEL", "STALE_TASK_AGE_HOURS",
+  "TASK_PLANNER_MODE", "TASK_PLANNER_DEDUP_HOURS",
+  "GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_PROJECT_MODE",
+  "GITHUB_PROJECT_NUMBER", "GITHUB_DEFAULT_ASSIGNEE", "GITHUB_AUTO_ASSIGN_CREATOR",
+  "VK_TARGET_BRANCH", "CODEX_ANALYZE_MERGE_STRATEGY", "DEPENDABOT_AUTO_MERGE",
+  "GH_RECONCILE_ENABLED",
+  "CLOUDFLARE_TUNNEL_NAME", "CLOUDFLARE_TUNNEL_CREDENTIALS",
+  "TELEGRAM_PRESENCE_INTERVAL_SEC", "TELEGRAM_PRESENCE_DISABLED",
+  "VE_INSTANCE_LABEL", "VE_COORDINATOR_ELIGIBLE", "VE_COORDINATOR_PRIORITY",
+  "CODEX_SANDBOX", "CONTAINER_ENABLED", "CONTAINER_RUNTIME", "CONTAINER_IMAGE",
+  "CONTAINER_TIMEOUT_MS", "MAX_CONCURRENT_CONTAINERS", "CONTAINER_MEMORY_LIMIT", "CONTAINER_CPU_LIMIT",
+  "CODEX_MONITOR_SENTINEL_AUTO_START", "SENTINEL_AUTO_RESTART_MONITOR",
+  "SENTINEL_CRASH_LOOP_THRESHOLD", "SENTINEL_CRASH_LOOP_WINDOW_MIN",
+  "SENTINEL_REPAIR_AGENT_ENABLED", "SENTINEL_REPAIR_TIMEOUT_MIN",
+  "CODEX_MONITOR_HOOK_PROFILE", "CODEX_MONITOR_HOOK_TARGETS",
+  "CODEX_MONITOR_HOOKS_ENABLED", "CODEX_MONITOR_HOOKS_OVERWRITE",
+  "CODEX_MONITOR_HOOKS_BUILTINS_MODE",
+  "AGENT_WORK_LOGGING_ENABLED", "AGENT_WORK_ANALYZER_ENABLED",
+  "AGENT_SESSION_LOG_RETENTION", "AGENT_ERROR_LOOP_THRESHOLD",
+  "AGENT_STUCK_THRESHOLD_MS", "LOG_MAX_SIZE_MB",
+  "DEVMODE", "SELF_RESTART_WATCH_ENABLED", "MAX_PARALLEL",
+  "RESTART_DELAY_MS", "SHARED_STATE_ENABLED", "SHARED_STATE_STALE_THRESHOLD_MS",
+  "VE_CI_SWEEP_EVERY",
+];
+
+const SETTINGS_SENSITIVE_KEYS = new Set([
+  "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN",
+  "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "COPILOT_CLI_TOKEN",
+  "CLOUDFLARE_TUNNEL_CREDENTIALS",
+]);
+
+const SETTINGS_KNOWN_SET = new Set(SETTINGS_KNOWN_KEYS);
+let _settingsLastUpdateTime = 0;
+
+function updateEnvFile(changes) {
+  const envPath = resolve(__dirname, '.env');
+  let content = '';
+  try { content = readFileSync(envPath, 'utf8'); } catch { content = ''; }
+
+  const lines = content.split('\n');
+  const updated = new Set();
+
+  for (const [key, value] of Object.entries(changes)) {
+    const pattern = new RegExp(`^(#\\s*)?${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`);
+    let found = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (pattern.test(lines[i])) {
+        lines[i] = `${key}=${value}`;
+        found = true;
+        updated.add(key);
+        break;
+      }
+    }
+    if (!found) {
+      lines.push(`${key}=${value}`);
+      updated.add(key);
+    }
+  }
+
+  writeFileSync(envPath, lines.join('\n'), 'utf8');
+  return Array.from(updated);
+}
+
+// ── Simple rate limiter for mutation endpoints ──
+const _rateLimitMap = new Map();
+function checkRateLimit(req, maxPerMin = 30) {
+  const key = req.headers["x-telegram-initdata"] || req.socket?.remoteAddress || "unknown";
+  const now = Date.now();
+  let bucket = _rateLimitMap.get(key);
+  if (!bucket || now - bucket.windowStart > 60000) {
+    bucket = { windowStart: now, count: 0 };
+    _rateLimitMap.set(key, bucket);
+  }
+  bucket.count++;
+  if (bucket.count > maxPerMin) return false;
+  return true;
+}
+// Cleanup stale entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _rateLimitMap) {
+    if (now - v.windowStart > 120000) _rateLimitMap.delete(k);
+  }
+}, 300000).unref();
 
 // ── Session token (auto-generated per startup for browser access) ────
 let sessionToken = "";
@@ -785,11 +912,20 @@ function checkSessionToken(req) {
   if (!sessionToken) return false;
   // Bearer header
   const authHeader = req.headers.authorization || "";
-  if (authHeader.startsWith("Bearer ") && authHeader.slice(7) === sessionToken) {
-    return true;
+  if (authHeader.startsWith("Bearer ")) {
+    const provided = Buffer.from(authHeader.slice(7));
+    const expected = Buffer.from(sessionToken);
+    if (provided.length === expected.length && timingSafeEqual(provided, expected)) {
+      return true;
+    }
   }
   // Cookie
-  if (parseCookie(req, "ve_session") === sessionToken) return true;
+  const cookieVal = parseCookie(req, "ve_session");
+  if (cookieVal) {
+    const provided = Buffer.from(cookieVal);
+    const expected = Buffer.from(sessionToken);
+    if (provided.length === expected.length && timingSafeEqual(provided, expected)) return true;
+  }
   return false;
 }
 
@@ -814,7 +950,14 @@ function requireWsAuth(req, url) {
   if (isAllowUnsafe()) return true;
   // Session token (query param or cookie)
   if (checkSessionToken(req)) return true;
-  if (sessionToken && url.searchParams.get("token") === sessionToken) return true;
+  if (sessionToken) {
+    const qTokenVal = url.searchParams.get("token") || "";
+    if (qTokenVal) {
+      const provided = Buffer.from(qTokenVal);
+      const expected = Buffer.from(sessionToken);
+      if (provided.length === expected.length && timingSafeEqual(provided, expected)) return true;
+    }
+  }
   // Telegram initData HMAC
   const initData =
     req.headers["x-telegram-initdata"] ||
@@ -853,6 +996,437 @@ function broadcastUiEvent(channels, type, payload = {}) {
     if (shouldSend) {
       sendWsMessage(socket, message);
     }
+  }
+}
+
+/* ─── Log Streaming Helpers ─── */
+
+/**
+ * Resolve the log file path for a given logType and optional query.
+ * Returns null if no matching file found.
+ */
+async function resolveLogPath(logType, query) {
+  if (logType === "system") {
+    const files = await readdir(logsDir).catch(() => []);
+    const logFile = files.filter((f) => f.endsWith(".log")).sort().pop();
+    return logFile ? resolve(logsDir, logFile) : null;
+  }
+  if (logType === "agent") {
+    const files = await readdir(agentLogsDir).catch(() => []);
+    let candidates = files.filter((f) => f.endsWith(".log")).sort().reverse();
+    if (query) {
+      const q = query.toLowerCase();
+      const filtered = candidates.filter((f) => f.toLowerCase().includes(q));
+      if (filtered.length) candidates = filtered;
+    }
+    return candidates.length ? resolve(agentLogsDir, candidates[0]) : null;
+  }
+  return null;
+}
+
+/**
+ * Start streaming a log file to a socket. Uses polling (every 2s) to detect
+ * new content. Handles file rotation and missing files gracefully.
+ */
+function startLogStream(socket, logType, query) {
+  // Clean up any previous stream for this socket
+  stopLogStream(socket);
+
+  const streamState = { logType, query, filePath: null, offset: 0, pollTimer: null, active: true };
+  socket.__logStream = streamState;
+
+  async function poll() {
+    if (!streamState.active) return;
+    try {
+      const filePath = await resolveLogPath(logType, query);
+      if (!filePath || !existsSync(filePath)) return;
+
+      // Detect file rotation (path changed or file shrank)
+      const info = await stat(filePath).catch(() => null);
+      if (!info) return;
+      const size = info.size || 0;
+
+      if (filePath !== streamState.filePath) {
+        // New file or first poll — start from end to avoid dumping history
+        streamState.filePath = filePath;
+        streamState.offset = size;
+        return;
+      }
+
+      if (size < streamState.offset) {
+        // File was truncated/rotated — reset
+        streamState.offset = 0;
+      }
+
+      if (size <= streamState.offset) return;
+
+      // Read only new bytes
+      const readLen = Math.min(size - streamState.offset, 512_000);
+      const handle = await open(filePath, "r");
+      try {
+        const buffer = Buffer.alloc(readLen);
+        await handle.read(buffer, 0, readLen, streamState.offset);
+        streamState.offset += readLen;
+        const text = buffer.toString("utf8");
+        const lines = text.split("\n").filter(Boolean);
+        if (lines.length > 0) {
+          sendWsMessage(socket, { type: "log-lines", lines });
+        }
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      // Ignore transient errors — next poll will retry
+    }
+  }
+
+  // First poll immediately, then every 2 seconds
+  poll();
+  streamState.pollTimer = setInterval(poll, 2000);
+}
+
+/**
+ * Stop streaming logs for a given socket.
+ */
+function stopLogStream(socket) {
+  const stream = socket.__logStream;
+  if (stream) {
+    stream.active = false;
+    if (stream.pollTimer) clearInterval(stream.pollTimer);
+    socket.__logStream = null;
+  }
+}
+
+/* ─── Server-side Heartbeat ─── */
+
+function startWsHeartbeat() {
+  if (wsHeartbeatTimer) clearInterval(wsHeartbeatTimer);
+  wsHeartbeatTimer = setInterval(() => {
+    const now = Date.now();
+    for (const socket of wsClients) {
+      // Check for missed pongs (2 consecutive pings = 60s)
+      if (socket.__lastPing && !socket.__lastPong) {
+        socket.__missedPongs = (socket.__missedPongs || 0) + 1;
+      } else if (socket.__lastPing && socket.__lastPong && socket.__lastPong < socket.__lastPing) {
+        socket.__missedPongs = (socket.__missedPongs || 0) + 1;
+      } else {
+        socket.__missedPongs = 0;
+      }
+
+      if ((socket.__missedPongs || 0) >= 2) {
+        try { socket.close(); } catch { /* noop */ }
+        wsClients.delete(socket);
+        stopLogStream(socket);
+        continue;
+      }
+
+      // Send ping
+      socket.__lastPing = now;
+      sendWsMessage(socket, { type: "ping", ts: now });
+    }
+  }, 30_000);
+}
+
+function stopWsHeartbeat() {
+  if (wsHeartbeatTimer) {
+    clearInterval(wsHeartbeatTimer);
+    wsHeartbeatTimer = null;
+  }
+}
+
+function parseBooleanEnv(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const raw = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return fallback;
+}
+
+function getGitHubWebhookPath() {
+  return (
+    process.env.GITHUB_PROJECT_WEBHOOK_PATH ||
+    "/api/webhooks/github/project-sync"
+  );
+}
+
+function getGitHubWebhookSecret() {
+  return (
+    process.env.GITHUB_PROJECT_WEBHOOK_SECRET ||
+    process.env.GITHUB_WEBHOOK_SECRET ||
+    ""
+  );
+}
+
+function shouldRequireGitHubWebhookSignature() {
+  const secret = getGitHubWebhookSecret();
+  return parseBooleanEnv(
+    process.env.GITHUB_PROJECT_WEBHOOK_REQUIRE_SIGNATURE,
+    Boolean(secret),
+  );
+}
+
+function getWebhookFailureAlertThreshold() {
+  return Math.max(
+    1,
+    Number(process.env.GITHUB_PROJECT_SYNC_ALERT_FAILURE_THRESHOLD || 3),
+  );
+}
+
+async function emitProjectSyncAlert(message, context = {}) {
+  projectSyncWebhookMetrics.alertsTriggered++;
+  console.warn(
+    `[project-sync-webhook] alert: ${message} ${JSON.stringify(context)}`,
+  );
+  if (typeof uiDeps.onProjectSyncAlert === "function") {
+    try {
+      await uiDeps.onProjectSyncAlert({
+        message,
+        context,
+        timestamp: new Date().toISOString(),
+      });
+    } catch {
+      // best effort
+    }
+  }
+}
+
+function verifyGitHubWebhookSignature(rawBody, signatureHeader, secret) {
+  if (!secret) return false;
+  const expectedDigest = createHmac("sha256", secret)
+    .update(rawBody)
+    .digest("hex");
+  const providedRaw = String(signatureHeader || "");
+  if (!providedRaw.startsWith("sha256=")) return false;
+  const providedDigest = providedRaw.slice("sha256=".length).trim();
+  if (!providedDigest || providedDigest.length !== expectedDigest.length) {
+    return false;
+  }
+  const expected = Buffer.from(expectedDigest, "utf8");
+  const provided = Buffer.from(providedDigest, "utf8");
+  return timingSafeEqual(expected, provided);
+}
+
+function extractIssueNumberFromWebhook(payload) {
+  const item = payload?.projects_v2_item || {};
+  const content = item.content || payload?.content || {};
+  const candidates = [
+    item.content_number,
+    item.issue_number,
+    content.number,
+    content.issue?.number,
+    payload?.issue?.number,
+  ];
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isInteger(numeric) && numeric > 0) {
+      return String(numeric);
+    }
+  }
+  const urlCandidates = [
+    item.content_url,
+    item.url,
+    content.url,
+    payload?.issue?.html_url,
+    payload?.issue?.url,
+  ];
+  for (const value of urlCandidates) {
+    const match = String(value || "").match(/\/issues\/(\d+)(?:$|[/?#])/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+export function getProjectSyncWebhookMetrics() {
+  return { ...projectSyncWebhookMetrics };
+}
+
+export function resetProjectSyncWebhookMetrics() {
+  for (const key of Object.keys(projectSyncWebhookMetrics)) {
+    if (
+      key === "lastEventAt" ||
+      key === "lastSuccessAt" ||
+      key === "lastFailureAt" ||
+      key === "lastError"
+    ) {
+      projectSyncWebhookMetrics[key] = null;
+      continue;
+    }
+    projectSyncWebhookMetrics[key] = 0;
+  }
+}
+
+async function readRawBody(req) {
+  return new Promise((resolveBody, rejectBody) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(buf);
+      size += buf.length;
+      if (size > 1_000_000) {
+        rejectBody(new Error("payload too large"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      resolveBody(Buffer.concat(chunks).toString("utf8"));
+    });
+    req.on("error", rejectBody);
+  });
+}
+
+async function handleGitHubProjectWebhook(req, res) {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST,OPTIONS",
+      "Access-Control-Allow-Headers":
+        "Content-Type,X-GitHub-Event,X-Hub-Signature-256,X-GitHub-Delivery",
+    });
+    res.end();
+    return;
+  }
+  if (req.method !== "POST") {
+    jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
+    return;
+  }
+
+  projectSyncWebhookMetrics.received++;
+  projectSyncWebhookMetrics.lastEventAt = new Date().toISOString();
+
+  const deliveryId = String(req.headers["x-github-delivery"] || "");
+  const eventType = String(req.headers["x-github-event"] || "").toLowerCase();
+  const secret = getGitHubWebhookSecret();
+  const requireSignature = shouldRequireGitHubWebhookSignature();
+
+  try {
+    const rawBody = await readRawBody(req);
+    if (requireSignature) {
+      const signature = req.headers["x-hub-signature-256"];
+      if (
+        !verifyGitHubWebhookSignature(rawBody, signature, secret)
+      ) {
+        projectSyncWebhookMetrics.invalidSignature++;
+        projectSyncWebhookMetrics.failed++;
+        projectSyncWebhookMetrics.consecutiveFailures++;
+        projectSyncWebhookMetrics.lastFailureAt = new Date().toISOString();
+        projectSyncWebhookMetrics.lastError = "invalid webhook signature";
+        const threshold = getWebhookFailureAlertThreshold();
+        if (
+          projectSyncWebhookMetrics.consecutiveFailures % threshold ===
+          0
+        ) {
+          await emitProjectSyncAlert(
+            `GitHub project webhook signature failures: ${projectSyncWebhookMetrics.consecutiveFailures}`,
+            { deliveryId, eventType },
+          );
+        }
+        jsonResponse(res, 401, { ok: false, error: "Invalid webhook signature" });
+        return;
+      }
+    }
+
+    let payload = {};
+    try {
+      payload = rawBody ? JSON.parse(rawBody) : {};
+    } catch {
+      projectSyncWebhookMetrics.failed++;
+      projectSyncWebhookMetrics.consecutiveFailures++;
+      projectSyncWebhookMetrics.lastFailureAt = new Date().toISOString();
+      projectSyncWebhookMetrics.lastError = "invalid JSON payload";
+      jsonResponse(res, 400, { ok: false, error: "Invalid JSON payload" });
+      return;
+    }
+
+    if (eventType !== "projects_v2_item") {
+      projectSyncWebhookMetrics.ignored++;
+      projectSyncWebhookMetrics.processed++;
+      jsonResponse(res, 202, {
+        ok: true,
+        ignored: true,
+        reason: `Unsupported event: ${eventType || "unknown"}`,
+      });
+      return;
+    }
+
+    const syncEngine = uiDeps.getSyncEngine?.() || null;
+    if (!syncEngine) {
+      projectSyncWebhookMetrics.failed++;
+      projectSyncWebhookMetrics.consecutiveFailures++;
+      projectSyncWebhookMetrics.lastFailureAt = new Date().toISOString();
+      projectSyncWebhookMetrics.lastError = "sync engine unavailable";
+      const threshold = getWebhookFailureAlertThreshold();
+      if (
+        projectSyncWebhookMetrics.consecutiveFailures % threshold ===
+        0
+      ) {
+        await emitProjectSyncAlert(
+          `GitHub project webhook sync failures: ${projectSyncWebhookMetrics.consecutiveFailures}`,
+          { deliveryId, reason: "sync engine unavailable" },
+        );
+      }
+      jsonResponse(res, 503, { ok: false, error: "Sync engine unavailable" });
+      return;
+    }
+
+    const beforeRateLimitEvents =
+      Number(syncEngine.getStatus?.()?.metrics?.rateLimitEvents || 0);
+    const issueNumber = extractIssueNumberFromWebhook(payload);
+    const action = String(payload?.action || "");
+
+    projectSyncWebhookMetrics.syncTriggered++;
+    if (issueNumber && typeof syncEngine.syncTask === "function") {
+      await syncEngine.syncTask(issueNumber);
+      console.log(
+        `[project-sync-webhook] delivery=${deliveryId} action=${action} task=${issueNumber} synced`,
+      );
+    } else if (typeof syncEngine.fullSync === "function") {
+      await syncEngine.fullSync();
+      console.log(
+        `[project-sync-webhook] delivery=${deliveryId} action=${action} full-sync triggered`,
+      );
+    } else {
+      throw new Error("sync engine does not expose syncTask/fullSync");
+    }
+
+    const afterRateLimitEvents =
+      Number(syncEngine.getStatus?.()?.metrics?.rateLimitEvents || 0);
+    if (afterRateLimitEvents > beforeRateLimitEvents) {
+      projectSyncWebhookMetrics.rateLimitObserved +=
+        afterRateLimitEvents - beforeRateLimitEvents;
+    }
+    projectSyncWebhookMetrics.processed++;
+    projectSyncWebhookMetrics.syncSuccess++;
+    projectSyncWebhookMetrics.consecutiveFailures = 0;
+    projectSyncWebhookMetrics.lastSuccessAt = new Date().toISOString();
+    projectSyncWebhookMetrics.lastError = null;
+    jsonResponse(res, 202, {
+      ok: true,
+      deliveryId,
+      eventType,
+      action,
+      issueNumber,
+      synced: true,
+    });
+  } catch (err) {
+    projectSyncWebhookMetrics.failed++;
+    projectSyncWebhookMetrics.syncFailure++;
+    projectSyncWebhookMetrics.consecutiveFailures++;
+    projectSyncWebhookMetrics.lastFailureAt = new Date().toISOString();
+    projectSyncWebhookMetrics.lastError = err.message;
+    const threshold = getWebhookFailureAlertThreshold();
+    if (
+      projectSyncWebhookMetrics.consecutiveFailures % threshold === 0
+    ) {
+      await emitProjectSyncAlert(
+        `GitHub project webhook sync failures: ${projectSyncWebhookMetrics.consecutiveFailures}`,
+        { deliveryId, eventType, error: err.message },
+      );
+    }
+    console.warn(
+      `[project-sync-webhook] delivery=${deliveryId} failed: ${err.message}`,
+    );
+    jsonResponse(res, 500, { ok: false, error: err.message });
   }
 }
 
@@ -984,6 +1558,11 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (req.method === "POST" && !checkRateLimit(req, 30)) {
+    jsonResponse(res, 429, { ok: false, error: "Rate limit exceeded. Try again later." });
+    return;
+  }
+
   const path = url.pathname;
   if (path === "/api/status") {
     const data = await readStatusSnapshot();
@@ -1111,9 +1690,16 @@ async function handleApi(req, res, url) {
         activeProject,
         status ? { status } : {},
       );
-      const total = tasks.length;
+      const search = (url.searchParams.get("search") || "").trim().toLowerCase();
+      const filtered = search
+        ? tasks.filter((t) => {
+            const hay = `${t.title || ""} ${t.description || ""} ${t.id || ""}`.toLowerCase();
+            return hay.includes(search);
+          })
+        : tasks;
+      const total = filtered.length;
       const start = page * pageSize;
-      const slice = tasks.slice(start, start + pageSize);
+      const slice = filtered.slice(start, start + pageSize);
       jsonResponse(res, 200, {
         ok: true,
         data: slice,
@@ -1693,17 +2279,20 @@ async function handleApi(req, res, url) {
       }
       const wtName = matches[0];
       const wtPath = resolve(worktreeDir, wtName);
-      let gitLog = "";
-      try {
-        gitLog = execSync("git log --oneline -10", {
-          cwd: wtPath,
-          encoding: "utf8",
-          timeout: 5000,
-        }).trim();
-      } catch { /* ignore */ }
+      const runWtGit = (args) => {
+        try {
+          return execSync(`git ${args}`, { cwd: wtPath, encoding: "utf8", timeout: 5000 }).trim();
+        } catch { return ""; }
+      };
+      const gitLog = runWtGit("log --oneline -10");
+      const gitLogDetailed = runWtGit("log --format=%h||%s||%cr -10");
+      const gitStatus = runWtGit("status --porcelain");
+      const gitBranch = runWtGit("rev-parse --abbrev-ref HEAD");
+      const gitDiffStat = runWtGit("diff --stat");
+      const gitAheadBehind = runWtGit("rev-list --left-right --count HEAD...@{upstream} 2>/dev/null");
       jsonResponse(res, 200, {
         ok: true,
-        data: { matches, context: { name: wtName, path: wtPath, gitLog } },
+        data: { matches, context: { name: wtName, path: wtPath, gitLog, gitLogDetailed, gitStatus, gitBranch, gitDiffStat, gitAheadBehind } },
       });
     } catch (err) {
       jsonResponse(res, 200, { ok: true, data: null });
@@ -1794,6 +2383,72 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (path === "/api/settings") {
+    try {
+      const data = {};
+      for (const key of SETTINGS_KNOWN_KEYS) {
+        const val = process.env[key];
+        if (SETTINGS_SENSITIVE_KEYS.has(key)) {
+          data[key] = val ? "••••••" : "";
+        } else {
+          data[key] = val || "";
+        }
+      }
+      jsonResponse(res, 200, { ok: true, data });
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
+  if (path === "/api/settings/update") {
+    try {
+      const body = await readJsonBody(req);
+      const changes = body?.changes;
+      if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
+        jsonResponse(res, 400, { ok: false, error: "changes object is required" });
+        return;
+      }
+      // Rate limit: 2 seconds between settings updates
+      const now = Date.now();
+      if (now - _settingsLastUpdateTime < 2000) {
+        jsonResponse(res, 429, { ok: false, error: "Settings update rate limited. Wait 2 seconds." });
+        return;
+      }
+      const unknownKeys = Object.keys(changes).filter(k => !SETTINGS_KNOWN_SET.has(k));
+      if (unknownKeys.length > 0) {
+        jsonResponse(res, 400, { ok: false, error: `Unknown keys: ${unknownKeys.join(", ")}` });
+        return;
+      }
+      for (const [key, value] of Object.entries(changes)) {
+        const strVal = String(value);
+        if (strVal.length > 2000) {
+          jsonResponse(res, 400, { ok: false, error: `Value for ${key} exceeds 2000 chars` });
+          return;
+        }
+        if (strVal.includes('\0') || strVal.includes('\n') || strVal.includes('\r')) {
+          jsonResponse(res, 400, { ok: false, error: `Value for ${key} contains illegal characters (null bytes or newlines)` });
+          return;
+        }
+      }
+      // Apply to process.env
+      const strChanges = {};
+      for (const [key, value] of Object.entries(changes)) {
+        const strVal = String(value);
+        process.env[key] = strVal;
+        strChanges[key] = strVal;
+      }
+      // Write to .env file
+      const updated = updateEnvFile(strChanges);
+      _settingsLastUpdateTime = now;
+      broadcastUiEvent(["settings", "overview"], "invalidate", { reason: "settings-updated", keys: updated });
+      jsonResponse(res, 200, { ok: true, updated });
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
   if (path === "/api/project-summary") {
     try {
       const adapter = getKanbanAdapter();
@@ -1823,12 +2478,34 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (path === "/api/project-sync/metrics") {
+    try {
+      const syncEngine = uiDeps.getSyncEngine?.() || null;
+      jsonResponse(res, 200, {
+        ok: true,
+        data: {
+          webhook: getProjectSyncWebhookMetrics(),
+          syncEngine: syncEngine?.getStatus?.()?.metrics || null,
+        },
+      });
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
   if (path === "/api/command") {
     try {
       const body = await readJsonBody(req);
       const command = (body?.command || "").trim();
       if (!command) {
         jsonResponse(res, 400, { ok: false, error: "command is required" });
+        return;
+      }
+      const ALLOWED_CMD_PREFIXES = ["/status", "/start", "/stop", "/pause", "/resume", "/sdk", "/kanban", "/region", "/deploy", "/help", "/starttask", "/stoptask", "/retrytask", "/parallelism", "/sentinel", "/hooks", "/version"];
+      const cmdBase = command.split(/\s/)[0].toLowerCase();
+      if (!ALLOWED_CMD_PREFIXES.some(p => cmdBase === p || cmdBase.startsWith(p + " "))) {
+        jsonResponse(res, 400, { ok: false, error: `Command not allowed: ${cmdBase}` });
         return;
       }
       const handler = uiDeps.handleUiCommand;
@@ -2200,16 +2877,26 @@ export async function startTelegramUiServer(options = {}) {
       req.url || "/",
       `http://${req.headers.host || "localhost"}`,
     );
+    const webhookPath = getGitHubWebhookPath();
 
     // Token exchange: ?token=<hex> → set session cookie and redirect to clean URL
     const qToken = url.searchParams.get("token");
-    if (qToken && sessionToken && qToken === sessionToken) {
-      const secure = uiServerTls ? "; Secure" : "";
-      res.writeHead(302, {
-        "Set-Cookie": `ve_session=${sessionToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400${secure}`,
-        Location: url.pathname || "/",
-      });
-      res.end();
+    if (qToken && sessionToken) {
+      const provided = Buffer.from(qToken);
+      const expected = Buffer.from(sessionToken);
+      if (provided.length === expected.length && timingSafeEqual(provided, expected)) {
+        const secure = uiServerTls ? "; Secure" : "";
+        res.writeHead(302, {
+          "Set-Cookie": `ve_session=${sessionToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400${secure}`,
+          Location: url.pathname || "/",
+        });
+        res.end();
+        return;
+      }
+    }
+
+    if (url.pathname === webhookPath) {
+      await handleGitHubProjectWebhook(req, res);
       return;
     }
 
@@ -2231,6 +2918,9 @@ export async function startTelegramUiServer(options = {}) {
   wsServer = new WebSocketServer({ noServer: true });
   wsServer.on("connection", (socket) => {
     socket.__channels = new Set(["*"]);
+    socket.__lastPong = Date.now();
+    socket.__lastPing = null;
+    socket.__missedPongs = 0;
     wsClients.add(socket);
     sendWsMessage(socket, {
       type: "hello",
@@ -2253,6 +2943,19 @@ export async function startTelegramUiServer(options = {}) {
             payload: { ok: true },
             ts: Date.now(),
           });
+        } else if (message?.type === "ping" && typeof message.ts === "number") {
+          // Client ping → echo back as pong
+          sendWsMessage(socket, { type: "pong", ts: message.ts });
+        } else if (message?.type === "pong" && typeof message.ts === "number") {
+          // Client pong in response to server ping
+          socket.__lastPong = Date.now();
+          socket.__missedPongs = 0;
+        } else if (message?.type === "subscribe-logs") {
+          const logType = message.logType === "agent" ? "agent" : "system";
+          const query = typeof message.query === "string" ? message.query : "";
+          startLogStream(socket, logType, query);
+        } else if (message?.type === "unsubscribe-logs") {
+          stopLogStream(socket);
         }
       } catch {
         // Ignore malformed websocket payloads
@@ -2260,13 +2963,17 @@ export async function startTelegramUiServer(options = {}) {
     });
 
     socket.on("close", () => {
+      stopLogStream(socket);
       wsClients.delete(socket);
     });
 
     socket.on("error", () => {
+      stopLogStream(socket);
       wsClients.delete(socket);
     });
   });
+
+  startWsHeartbeat();
 
   uiServer.on("upgrade", (req, socket, head) => {
     const url = new URL(
@@ -2356,14 +3063,21 @@ export async function startTelegramUiServer(options = {}) {
 export function stopTelegramUiServer() {
   if (!uiServer) return;
   stopTunnel();
+  stopWsHeartbeat();
   for (const socket of wsClients) {
     try {
+      stopLogStream(socket);
       socket.close();
     } catch {
       // best effort
     }
   }
   wsClients.clear();
+  // Clean up any remaining log stream poll timers
+  for (const [, streamer] of logStreamers) {
+    if (streamer.pollTimer) clearInterval(streamer.pollTimer);
+  }
+  logStreamers.clear();
   if (wsServer) {
     try {
       wsServer.close();
@@ -2380,6 +3094,7 @@ export function stopTelegramUiServer() {
   uiServer = null;
   uiServerTls = false;
   sessionToken = "";
+  resetProjectSyncWebhookMetrics();
 }
 
 export { getLocalLanIp };
