@@ -23,7 +23,7 @@ export const projectSummary = signal(null);
 // ── Tasks
 export const tasksLoaded = signal(false);
 export const tasksData = signal([]);
-export const tasksPage = signal(1);
+export const tasksPage = signal(0);
 export const tasksPageSize = signal(20);
 export const tasksFilter = signal("all");
 export const tasksPriority = signal("all");
@@ -52,6 +52,9 @@ export const agentLogTail = signal(null);
 export const agentLogLines = signal(200);
 export const agentLogQuery = signal("");
 export const agentContext = signal(null);
+
+// ── Config (routing, regions, etc.)
+export const configData = signal(null);
 
 // ── Toasts
 export const toasts = signal([]);
@@ -112,7 +115,7 @@ export async function loadTasks() {
     pageSize: String(tasksPageSize.value),
   });
   if (tasksFilter.value && tasksFilter.value !== "all")
-    params.set("filter", tasksFilter.value);
+    params.set("status", tasksFilter.value);
   if (tasksPriority.value && tasksPriority.value !== "all")
     params.set("priority", tasksPriority.value);
   if (tasksSearch.value) params.set("search", tasksSearch.value);
@@ -252,6 +255,14 @@ export async function loadProjectSummary() {
   projectSummary.value = res.data ?? res ?? null;
 }
 
+/** Load config (routing, regions, etc.) → configData */
+export async function loadConfig() {
+  const res = await apiFetch("/api/config", { _silent: true }).catch(() => ({
+    ok: false,
+  }));
+  configData.value = res?.ok ? res : null;
+}
+
 /* ═══════════════════════════════════════════════════════════════
  *  TAB REFRESH — map tab names to their required loaders
  * ═══════════════════════════════════════════════════════════════ */
@@ -260,7 +271,7 @@ const TAB_LOADERS = {
   dashboard: () =>
     Promise.all([loadStatus(), loadExecutor(), loadProjectSummary()]),
   tasks: () => loadTasks(),
-  agents: () => loadAgents(),
+  agents: () => Promise.all([loadAgents(), loadExecutor()]),
   infra: () =>
     Promise.all([
       loadWorktrees(),
@@ -268,10 +279,10 @@ const TAB_LOADERS = {
       loadSharedWorkspaces(),
       loadPresence(),
     ]),
-  control: () => loadExecutor(),
+  control: () => Promise.all([loadExecutor(), loadConfig()]),
   logs: () =>
     Promise.all([loadLogs(), loadAgentLogFileList(), loadAgentLogTailData()]),
-  settings: () => loadStatus(),
+  settings: () => Promise.all([loadStatus(), loadConfig()]),
 };
 
 /**

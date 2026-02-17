@@ -1570,6 +1570,8 @@ async function handleApi(req, res, url) {
   }
 
   if (path === "/api/config") {
+    const regionEnv = (process.env.EXECUTOR_REGIONS || "").trim();
+    const regions = regionEnv ? regionEnv.split(",").map((r) => r.trim()).filter(Boolean) : ["auto"];
     jsonResponse(res, 200, {
       ok: true,
       miniAppEnabled:
@@ -1579,7 +1581,39 @@ async function handleApi(req, res, url) {
       lanIp: getLocalLanIp(),
       wsEnabled: true,
       authRequired: !isAllowUnsafe(),
+      sdk: process.env.EXECUTOR_SDK || "auto",
+      kanbanBackend: process.env.KANBAN_BACKEND || "github",
+      regions,
     });
+    return;
+  }
+
+  if (path === "/api/config/update") {
+    try {
+      const body = await readJsonBody(req);
+      const { key, value } = body || {};
+      if (!key || !value) {
+        jsonResponse(res, 400, { ok: false, error: "key and value are required" });
+        return;
+      }
+      const envMap = { sdk: "EXECUTOR_SDK", kanban: "KANBAN_BACKEND", region: "EXECUTOR_REGIONS" };
+      const envKey = envMap[key];
+      if (!envKey) {
+        jsonResponse(res, 400, { ok: false, error: `Unknown config key: ${key}` });
+        return;
+      }
+      process.env[envKey] = value;
+      // Also send chat command for backward compat
+      const cmdMap = { sdk: `/sdk ${value}`, kanban: `/kanban ${value}`, region: `/region ${value}` };
+      const handler = uiDeps.handleUiCommand;
+      if (typeof handler === "function") {
+        try { await handler(cmdMap[key]); } catch { /* best-effort */ }
+      }
+      broadcastUiEvent(["executor", "overview"], "invalidate", { reason: "config-updated", key, value });
+      jsonResponse(res, 200, { ok: true, key, value });
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
     return;
   }
 
@@ -1680,6 +1714,79 @@ async function handleApi(req, res, url) {
         ["tasks", "overview", "executor", "agents"],
         "invalidate",
         { reason: "task-retried", taskId },
+      );
+    } catch (err) {
+      jsonResponse(res, 500, { ok: false, error: err.message });
+    }
+    return;
+  }
+
+  if (path === "/api/executor/dispatch") {
+    try {
+      const executor = uiDeps.getInternalExecutor?.();
+      if (!executor) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: "Internal executor not enabled.",
+        });
+        return;
+      }
+      const body = await readJsonBody(req);
+      const taskId = (body?.taskId || "").trim();
+      const prompt = (body?.prompt || "").trim();
+      if (!taskId && !prompt) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: "taskId or prompt is required",
+        });
+        return;
+      }
+      const status = executor.getStatus?.() || {};
+      const freeSlots =
+        (status.maxParallel || 0) - (status.activeSlots || 0);
+      if (freeSlots <= 0) {
+        jsonResponse(res, 409, { ok: false, error: "No free slots" });
+        return;
+      }
+      if (taskId) {
+        const adapter = getKanbanAdapter();
+        const task = await adapter.getTask(taskId);
+        if (!task) {
+          jsonResponse(res, 404, { ok: false, error: "Task not found." });
+          return;
+        }
+        executor.executeTask(task).catch((error) => {
+          console.warn(
+            `[telegram-ui] dispatch failed for ${taskId}: ${error.message}`,
+          );
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          slotIndex: status.activeSlots || 0,
+          taskId,
+        });
+      } else {
+        // Ad-hoc prompt dispatch via command handler
+        const handler = uiDeps.handleUiCommand;
+        if (typeof handler === "function") {
+          const result = await handler(`/prompt ${prompt}`);
+          jsonResponse(res, 200, {
+            ok: true,
+            slotIndex: status.activeSlots || 0,
+            data: result || null,
+          });
+        } else {
+          jsonResponse(res, 400, {
+            ok: false,
+            error: "Prompt dispatch not available — no command handler.",
+          });
+          return;
+        }
+      }
+      broadcastUiEvent(
+        ["executor", "overview", "agents", "tasks"],
+        "invalidate",
+        { reason: "task-dispatched", taskId: taskId || "(ad-hoc)" },
       );
     } catch (err) {
       jsonResponse(res, 500, { ok: false, error: err.message });

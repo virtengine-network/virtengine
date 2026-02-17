@@ -18,6 +18,7 @@ import {
   connected,
   statusData,
   executorData,
+  configData,
   showToast,
 } from "../modules/state.js";
 import { Card, Badge, ListItem } from "../components/shared.js";
@@ -366,15 +367,20 @@ export function SettingsTab() {
         />
 
         <div class="card-subtitle mt-md mb-sm">Default Region</div>
-        <${SegmentedControl}
-          options=${[
-            { value: "us", label: "US" },
-            { value: "sweden", label: "Sweden" },
-            { value: "auto", label: "Auto" },
-          ]}
-          value=${defaultRegion}
-          onChange=${handleDefaultRegion}
-        />
+        ${(() => {
+          const regions = configData.value?.regions || ["auto"];
+          const regionOptions = regions.map((r) => ({
+            value: r,
+            label: r.charAt(0).toUpperCase() + r.slice(1),
+          }));
+          return regions.length > 1
+            ? html`<${SegmentedControl}
+                options=${regionOptions}
+                value=${defaultRegion}
+                onChange=${handleDefaultRegion}
+              />`
+            : html`<div class="meta-text">Region: ${regions[0]}</div>`;
+        })()}
       <//>
     <//>
 

@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
- *  Tab: Control — executor, commands, routing, shell/git
+ *  Tab: Control — executor, commands, routing, quick commands
  * ────────────────────────────────────────────────────────────── */
 import { h } from "preact";
 import { useState, useCallback } from "preact/hooks";
@@ -11,6 +11,8 @@ import { haptic, showConfirm } from "../modules/telegram.js";
 import { apiFetch, sendCommandToChat } from "../modules/api.js";
 import {
   executorData,
+  configData,
+  loadConfig,
   showToast,
   refreshTab,
   runOptimistic,
@@ -29,6 +31,7 @@ export function ControlTab() {
   const executor = executorData.value;
   const execData = executor?.data;
   const mode = executor?.mode || "vk";
+  const config = configData.value;
 
   /* Form inputs */
   const [commandInput, setCommandInput] = useState("");
@@ -36,8 +39,9 @@ export function ControlTab() {
   const [retryInput, setRetryInput] = useState("");
   const [askInput, setAskInput] = useState("");
   const [steerInput, setSteerInput] = useState("");
-  const [shellInput, setShellInput] = useState("");
-  const [gitInput, setGitInput] = useState("");
+  const [quickCmdInput, setQuickCmdInput] = useState("");
+  const [quickCmdPrefix, setQuickCmdPrefix] = useState("shell");
+  const [quickCmdFeedback, setQuickCmdFeedback] = useState("");
   const [maxParallel, setMaxParallel] = useState(execData?.maxParallel ?? 0);
   const [cmdHistory, setCmdHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -60,6 +64,24 @@ export function ControlTab() {
       pushHistory(cmd.trim());
     },
     [pushHistory],
+  );
+
+  /* ── Config update helper ── */
+  const updateConfig = useCallback(
+    async (key, value) => {
+      haptic();
+      try {
+        await apiFetch("/api/config/update", {
+          method: "POST",
+          body: JSON.stringify({ key, value }),
+        });
+        await loadConfig();
+        showToast(`${key} → ${value}`, "success");
+      } catch {
+        showToast(`Failed to update ${key}`, "error");
+      }
+    },
+    [],
   );
 
   /* ── Executor controls ── */
@@ -119,6 +141,24 @@ export function ControlTab() {
     ).catch(() => {});
     scheduleRefresh(120);
   };
+
+  /* ── Region options from config ── */
+  const regions = config?.regions || ["auto"];
+  const regionOptions = regions.map((r) => ({
+    value: r,
+    label: r.charAt(0).toUpperCase() + r.slice(1),
+  }));
+
+  /* ── Quick command submit ── */
+  const handleQuickCmd = useCallback(() => {
+    const input = quickCmdInput.trim();
+    if (!input) return;
+    const cmd = `/${quickCmdPrefix} ${input}`;
+    sendCmd(cmd);
+    setQuickCmdInput("");
+    setQuickCmdFeedback("✓ Command sent to monitor");
+    setTimeout(() => setQuickCmdFeedback(""), 4000);
+  }, [quickCmdInput, quickCmdPrefix, sendCmd]);
 
   return html`
     <!-- ── Executor Controls ── -->
@@ -332,8 +372,8 @@ export function ControlTab() {
           { value: "claude", label: "Claude" },
           { value: "auto", label: "Auto" },
         ]}
-        value=""
-        onChange=${(v) => sendCmd(`/sdk ${v}`)}
+        value=${config?.sdk || "auto"}
+        onChange=${(v) => updateConfig("sdk", v)}
       />
       <div class="card-subtitle mt-sm">Kanban</div>
       <${SegmentedControl}
@@ -342,58 +382,60 @@ export function ControlTab() {
           { value: "github", label: "GitHub" },
           { value: "jira", label: "Jira" },
         ]}
-        value=""
-        onChange=${(v) => sendCmd(`/kanban ${v}`)}
+        value=${config?.kanbanBackend || "github"}
+        onChange=${(v) => updateConfig("kanban", v)}
       />
-      <div class="card-subtitle mt-sm">Region</div>
-      <${SegmentedControl}
-        options=${[
-          { value: "us", label: "US" },
-          { value: "sweden", label: "Sweden" },
-          { value: "auto", label: "Auto" },
-        ]}
-        value=""
-        onChange=${(v) => sendCmd(`/region ${v}`)}
-      />
+      ${regions.length > 1 && html`
+        <div class="card-subtitle mt-sm">Region</div>
+        <${SegmentedControl}
+          options=${regionOptions}
+          value=${regions[0]}
+          onChange=${(v) => updateConfig("region", v)}
+        />
+      `}
     <//>
 
-    <!-- ── Shell / Git ── -->
-    <${Card} title="Shell / Git">
+    <!-- ── Quick Commands ── -->
+    <${Card} title="Quick Commands">
       <div class="input-row mb-sm">
+        <select
+          class="input"
+          style="flex:0 0 auto;width:80px"
+          value=${quickCmdPrefix}
+          onChange=${(e) => setQuickCmdPrefix(e.target.value)}
+        >
+          <option value="shell">Shell</option>
+          <option value="git">Git</option>
+        </select>
         <input
           class="input"
-          placeholder="ls -la"
-          value=${shellInput}
-          onInput=${(e) => setShellInput(e.target.value)}
+          placeholder=${quickCmdPrefix === "shell" ? "ls -la" : "status --short"}
+          value=${quickCmdInput}
+          onInput=${(e) => setQuickCmdInput(e.target.value)}
           onKeyDown=${(e) => {
-            if (e.key === "Enter" && shellInput.trim())
-              sendCmd(`/shell ${shellInput.trim()}`);
+            if (e.key === "Enter") handleQuickCmd();
           }}
+          style="flex:1"
         />
-        <button
-          class="btn btn-secondary btn-sm"
-          onClick=${() => sendCmd(`/shell ${shellInput.trim()}`.trim())}
-        >
-          🖥 Shell
+        <button class="btn btn-secondary btn-sm" onClick=${handleQuickCmd}>
+          ▶ Run
         </button>
       </div>
-      <div class="input-row">
-        <input
-          class="input"
-          placeholder="status --short"
-          value=${gitInput}
-          onInput=${(e) => setGitInput(e.target.value)}
-          onKeyDown=${(e) => {
-            if (e.key === "Enter" && gitInput.trim())
-              sendCmd(`/git ${gitInput.trim()}`);
+      ${quickCmdFeedback && html`
+        <div class="meta-text mb-sm" style="color:var(--tg-theme-link-color,#4ea8d6)">
+          ${quickCmdFeedback}
+        </div>
+      `}
+      <div class="meta-text">
+        Output appears in agent logs. ${""}
+        <a
+          href="#"
+          style="color:var(--tg-theme-link-color,#4ea8d6);text-decoration:underline;cursor:pointer"
+          onClick=${(e) => {
+            e.preventDefault();
+            import("../modules/router.js").then(({ navigateTo }) => navigateTo("logs"));
           }}
-        />
-        <button
-          class="btn btn-secondary btn-sm"
-          onClick=${() => sendCmd(`/git ${gitInput.trim()}`.trim())}
-        >
-          🔀 Git
-        </button>
+        >Open Logs tab →</a>
       </div>
     <//>
   `;
