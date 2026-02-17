@@ -342,6 +342,10 @@ async function ensureClientStarted() {
   const token = detectGitHubToken();
   const transport = resolveCopilotTransport();
 
+  // Session mode: "local" (default) uses stdio for full model access + MCP + sub-agents.
+  // "auto" lets the SDK decide. "url" connects to remote server (potentially limited).
+  const sessionMode = (process.env.COPILOT_SESSION_MODE || "local").trim().toLowerCase();
+
   // Build cliArgs for experimental features, permissions, and autonomy
   const cliArgs = buildCliArgs();
 
@@ -349,23 +353,35 @@ async function ensureClientStarted() {
   if (transport === "url") {
     if (!cliUrl) {
       console.warn(
-        "[copilot-shell] COPILOT_TRANSPORT=url requested but COPILOT_CLI_URL is unset; falling back to auto",
+        "[copilot-shell] COPILOT_TRANSPORT=url requested but COPILOT_CLI_URL is unset; falling back to local",
       );
-      clientOptions = cliPath || token ? { cliPath, token, cliArgs } : { cliArgs };
+      clientOptions = { cliPath, token, cliArgs, useStdio: true, cwd: REPO_ROOT };
     } else {
       clientOptions = { cliUrl };
     }
   } else if (transport === "cli") {
-    clientOptions = { cliPath: cliPath || "copilot", token, cliArgs };
+    clientOptions = { cliPath: cliPath || "copilot", token, cliArgs, useStdio: true, cwd: REPO_ROOT };
   } else if (transport === "sdk") {
-    clientOptions = token ? { token, cliArgs } : { cliArgs };
+    clientOptions = token
+      ? { token, cliArgs, useStdio: true, cwd: REPO_ROOT }
+      : { cliArgs, useStdio: true, cwd: REPO_ROOT };
   } else {
-    clientOptions = cliUrl
-      ? { cliUrl }
-      : cliPath || token
-        ? { cliPath, token, cliArgs }
-        : { cliArgs };
+    // "auto" transport — use cliUrl if provided, otherwise local stdio
+    if (cliUrl && sessionMode !== "local") {
+      clientOptions = { cliUrl };
+    } else {
+      clientOptions = {
+        cliPath,
+        token,
+        cliArgs,
+        useStdio: true,
+        cwd: REPO_ROOT,
+      };
+    }
   }
+
+  const modeLabel = clientOptions.cliUrl ? "remote" : "local (stdio)";
+  console.log(`[copilot-shell] starting client in ${modeLabel} mode`);
 
   await withSanitizedOpenAiEnv(async () => {
     copilotClient = new Cls(clientOptions);

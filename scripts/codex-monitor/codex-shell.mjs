@@ -233,14 +233,9 @@ const THREAD_OPTIONS = {
   skipGitRepoCheck: true,
   webSearchMode: "live",
   approvalPolicy: "never",
-  // Enable sub-agent spawning and collaboration features
-  features: {
-    child_agents_md: true,
-    collab: true,
-    memory_tool: true,
-    undo: true,
-    steer: true,
-  },
+  // Note: sub-agent features (child_agents_md, collab, memory_tool, etc.)
+  // are configured via ~/.codex/config.toml [features] section, not SDK ThreadOptions.
+  // codex-config.mjs ensureFeatureFlags() handles this during setup.
 };
 
 /**
@@ -254,7 +249,19 @@ async function getThread() {
   if (!codexInstance) {
     const Cls = await loadCodexSdk();
     if (!Cls) throw new Error("Codex SDK not available");
-    codexInstance = new Cls();
+    // Pass feature overrides via --config so they apply even if config.toml
+    // hasn't been patched by codex-config.mjs yet.
+    codexInstance = new Cls({
+      config: {
+        features: {
+          child_agents_md: true,
+          collab: true,
+          memory_tool: true,
+          undo: true,
+          steer: true,
+        },
+      },
+    });
   }
 
   const transport = resolveCodexTransport();
@@ -743,8 +750,18 @@ export async function initCodexShell() {
   // Pre-load SDK
   const Cls = await loadCodexSdk();
   if (Cls) {
-    codexInstance = new Cls();
-    console.log("[codex-shell] initialised with Codex SDK");
+    codexInstance = new Cls({
+      config: {
+        features: {
+          child_agents_md: true,
+          collab: true,
+          memory_tool: true,
+          undo: true,
+          steer: true,
+        },
+      },
+    });
+    console.log("[codex-shell] initialised with Codex SDK (sub-agent features enabled)");
   } else {
     console.warn(
       "[codex-shell] initialised WITHOUT Codex SDK — agent will not work",

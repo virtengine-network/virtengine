@@ -446,12 +446,26 @@ async function launchCodexThread(prompt, cwd, timeoutMs, extra = {}) {
   //          "workspace-write" (restricted — breaks with worktrees), "read-only"
   const sandboxPolicy = process.env.CODEX_SANDBOX || "danger-full-access";
 
-  const codex = new CodexClass(buildCodexSdkOptions());
+  // Pass feature overrides via --config so sub-agent and memory features are
+  // available even if ~/.codex/config.toml hasn't been patched yet.
+  const codexOpts = buildCodexSdkOptions();
+  codexOpts.config = {
+    ...(codexOpts.config || {}),
+    features: {
+      child_agents_md: true,
+      collab: true,
+      memory_tool: true,
+      undo: true,
+      steer: true,
+    },
+  };
+  const codex = new CodexClass(codexOpts);
   const thread = codex.startThread({
     sandboxMode: sandboxPolicy,
     workingDirectory: cwd,
     skipGitRepoCheck: true,
     approvalPolicy: "never",
+    webSearchMode: "live",
   });
 
   if (!thread) {
@@ -559,11 +573,64 @@ async function launchCodexThread(prompt, cwd, timeoutMs, extra = {}) {
 }
 
 /**
+ * Build CLI arguments for ephemeral Copilot agent-pool sessions.
+ * Mirrors copilot-shell.mjs buildCliArgs() for feature parity.
+ */
+function buildPoolCopilotCliArgs() {
+  const args = [];
+  if (!envFlagEnabled(process.env.COPILOT_NO_EXPERIMENTAL)) {
+    args.push("--experimental");
+  }
+  if (!envFlagEnabled(process.env.COPILOT_NO_ALLOW_ALL)) {
+    args.push("--allow-all");
+  }
+  if (!envFlagEnabled(process.env.COPILOT_ENABLE_ASK_USER)) {
+    args.push("--no-ask-user");
+  }
+  args.push("--no-auto-update");
+  if (envFlagEnabled(process.env.COPILOT_ENABLE_ALL_GITHUB_MCP_TOOLS)) {
+    args.push("--enable-all-github-mcp-tools");
+  }
+  if (envFlagEnabled(process.env.COPILOT_DISABLE_BUILTIN_MCPS)) {
+    args.push("--disable-builtin-mcps");
+  }
+  const mcpConfigPath = process.env.COPILOT_ADDITIONAL_MCP_CONFIG;
+  if (mcpConfigPath) {
+    args.push("--additional-mcp-config", mcpConfigPath);
+  }
+  return args;
+}
+
+/**
+ * Auto-respond to agent user-input requests in pool sessions.
+ * Ensures ephemeral agents never block waiting for human input.
+ */
+function autoRespondToUserInput(request) {
+  if (request.choices && request.choices.length > 0) {
+    return { answer: request.choices[0], wasFreeform: false };
+  }
+  const question = (request.question || "").toLowerCase();
+  if (/\b(y\/n|yes\/no|confirm|proceed|continue)\b/i.test(question)) {
+    return { answer: "yes", wasFreeform: true };
+  }
+  return {
+    answer: "Proceed with your best judgment. Do not wait for human input.",
+    wasFreeform: true,
+  };
+}
+
+/**
  * Launch a single ephemeral prompt via the **Copilot SDK**.
  *
- * Creates a `CopilotClient`, starts it, resumes an existing session when
- * available, otherwise creates a new one, sends the prompt, and collects the
- * response.
+ * Creates a `CopilotClient` in LOCAL mode (stdio), starts it, resumes an
+ * existing session when available, otherwise creates a new one, sends the
+ * prompt, and collects the response.
+ *
+ * LOCAL mode ensures:
+ * - Full model access (gpt-5.3-codex, claude-sonnet-4.5, etc.)
+ * - MCP tool availability
+ * - Sub-agent support
+ * - No background session restrictions
  *
  * @param {string}  prompt     Prompt text.
  * @param {string}  cwd        Working directory.
@@ -605,7 +672,12 @@ async function launchCopilotThread(prompt, cwd, timeoutMs, extra = {}) {
     process.env.GITHUB_PAT ||
     undefined;
 
-  // ── 3. Create & start ephemeral client ───────────────────────────────────
+  // ── 3. Create & start ephemeral client (LOCAL mode) ──────────────────────
+  // Use stdio transport (local) by default for full model/tool access.
+  // Only use cliUrl (remote) if COPILOT_SESSION_MODE=remote is explicit.
+  const sessionMode = (process.env.COPILOT_SESSION_MODE || "local").trim().toLowerCase();
+  const cliUrl = process.env.COPILOT_CLI_URL || undefined;
+
   const controller = externalAC || new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
 
@@ -622,10 +694,28 @@ async function launchCopilotThread(prompt, cwd, timeoutMs, extra = {}) {
     : process.env;
   try {
     await withSanitizedOpenAiEnv(async () => {
-      const clientOpts = { cwd, env: clientEnv };
-      if (token) {
-        clientOpts.githubToken = token;
-        clientOpts.token = token;
+      let clientOpts;
+      if (sessionMode === "remote" && cliUrl) {
+        // Remote mode: connect to existing server (limited model/tool access)
+        clientOpts = { cliUrl, env: clientEnv };
+      } else {
+        // Local mode (default): stdio for full capability
+        const cliArgs = buildPoolCopilotCliArgs();
+        clientOpts = {
+          cwd,
+          env: clientEnv,
+          cliArgs,
+          useStdio: true,
+        };
+        if (token) {
+          clientOpts.githubToken = token;
+          clientOpts.token = token;
+        }
+        const cliPath =
+          process.env.COPILOT_CLI_PATH ||
+          process.env.GITHUB_COPILOT_CLI_PATH ||
+          undefined;
+        if (cliPath) clientOpts.cliPath = cliPath;
       }
       client = new CopilotClientClass(clientOpts);
       await client.start();
@@ -654,6 +744,8 @@ async function launchCopilotThread(prompt, cwd, timeoutMs, extra = {}) {
           "Do NOT ask for confirmation. Produce concise, actionable output.",
       },
       infiniteSessions: { enabled: true },
+      // Auto-respond to user input requests — agent should never block
+      onUserInputRequest: autoRespondToUserInput,
     };
     const permissionHandler = buildCopilotPermissionHandler();
     if (permissionHandler) {
@@ -666,6 +758,17 @@ async function launchCopilotThread(prompt, cwd, timeoutMs, extra = {}) {
         "",
     ).trim();
     if (copilotModel) sessionConfig.model = copilotModel;
+
+    // Reasoning effort: pass through if model supports it
+    const effort = (
+      process.env.COPILOT_REASONING_EFFORT ||
+      process.env.COPILOT_SDK_REASONING_EFFORT ||
+      ""
+    ).toLowerCase();
+    if (["low", "medium", "high", "xhigh"].includes(effort)) {
+      sessionConfig.reasoningEffort = effort;
+    }
+
     let session = null;
     if (resumeThreadId && typeof client.resumeSession === "function") {
       try {
