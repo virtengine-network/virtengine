@@ -1418,6 +1418,119 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (path === "/api/agents") {
+    try {
+      const executor = uiDeps.getInternalExecutor?.();
+      const agents = [];
+      if (executor) {
+        const status = executor.getStatus();
+        for (const slot of status.slots || []) {
+          if (slot.taskId) {
+            agents.push({
+              id: slot.taskId,
+              status: slot.status || "busy",
+              taskTitle: slot.taskTitle || slot.taskId,
+              branch: slot.branch || null,
+              startedAt: slot.startedAt || null,
+              completedCount: slot.completedCount || 0,
+            });
+          }
+        }
+      }
+      jsonResponse(res, 200, { ok: true, data: agents });
+    } catch (err) {
+      jsonResponse(res, 200, { ok: true, data: [] });
+    }
+    return;
+  }
+
+  if (path === "/api/infra") {
+    try {
+      const executor = uiDeps.getInternalExecutor?.();
+      const status = executor?.getStatus?.() || {};
+      const data = {
+        executor: {
+          mode: uiDeps.getExecutorMode?.() || "internal",
+          maxParallel: status.maxParallel || 0,
+          activeSlots: status.activeSlots || 0,
+          paused: executor?.isPaused?.() || false,
+        },
+        system: {
+          uptime: process.uptime(),
+          memoryMB: Math.round(process.memoryUsage.rss() / 1024 / 1024),
+          nodeVersion: process.version,
+          platform: process.platform,
+        },
+      };
+      jsonResponse(res, 200, { ok: true, data });
+    } catch (err) {
+      jsonResponse(res, 200, { ok: true, data: null });
+    }
+    return;
+  }
+
+  if (path === "/api/agent-logs/tail") {
+    try {
+      const query = url.searchParams.get("query") || "";
+      const lines = Math.min(
+        1000,
+        Math.max(20, Number(url.searchParams.get("lines") || "100")),
+      );
+      const files = await listAgentLogFiles(query);
+      if (!files.length) {
+        jsonResponse(res, 200, { ok: true, data: null });
+        return;
+      }
+      const latest = files[0];
+      const filePath = resolve(agentLogsDir, latest.name || latest);
+      if (!filePath.startsWith(agentLogsDir) || !existsSync(filePath)) {
+        jsonResponse(res, 200, { ok: true, data: null });
+        return;
+      }
+      const tail = await tailFile(filePath, lines);
+      jsonResponse(res, 200, { ok: true, data: { file: latest.name || latest, content: tail } });
+    } catch (err) {
+      jsonResponse(res, 200, { ok: true, data: null });
+    }
+    return;
+  }
+
+  if (path === "/api/agent-context") {
+    try {
+      const query = url.searchParams.get("query") || "";
+      if (!query) {
+        jsonResponse(res, 200, { ok: true, data: null });
+        return;
+      }
+      const worktreeDir = resolve(repoRoot, ".cache", "worktrees");
+      const dirs = await readdir(worktreeDir).catch(() => []);
+      const matches = dirs.filter((d) =>
+        d.toLowerCase().includes(query.toLowerCase()),
+      );
+      if (!matches.length) {
+        jsonResponse(res, 200, { ok: true, data: { matches: [], context: null } });
+        return;
+      }
+      const wtName = matches[0];
+      const wtPath = resolve(worktreeDir, wtName);
+      let gitLog = "";
+      try {
+        gitLog = execSync("git log --oneline -10", {
+          cwd: wtPath,
+          encoding: "utf8",
+          timeout: 5000,
+        }).trim();
+      } catch { /* ignore */ }
+      jsonResponse(res, 200, {
+        ok: true,
+        data: { matches, context: { name: wtName, path: wtPath, gitLog } },
+      });
+    } catch (err) {
+      jsonResponse(res, 200, { ok: true, data: null });
+    }
+    return;
+  }
+
   if (path === "/api/git/branches") {
     try {
       const raw = runGit("branch -a --sort=-committerdate", 15000);

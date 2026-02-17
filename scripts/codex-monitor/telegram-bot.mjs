@@ -2446,15 +2446,18 @@ async function setWebAppMenuButton(url) {
   const webAppUrl = getTelegramWebAppUrl(url);
   if (!webAppUrl) return;
   try {
+    const payload = {
+      menu_button: {
+        type: "web_app",
+        text: "Control Center",
+        web_app: { url: webAppUrl },
+      },
+    };
+    // Set for the specific chat so it takes effect immediately
+    if (telegramChatId) payload.chat_id = telegramChatId;
     const res = await telegramApiFetch("setChatMenuButton", {
       method: "POST",
-      payload: {
-        menu_button: {
-          type: "web_app",
-          text: "Control Center",
-          web_app: { url: webAppUrl },
-        },
-      },
+      payload,
       operation: "setChatMenuButton",
     });
     if (!res || typeof res.ok === "undefined") {
@@ -2476,9 +2479,11 @@ async function setWebAppMenuButton(url) {
 async function clearWebAppMenuButton() {
   if (!telegramToken) return;
   try {
+    const payload = { menu_button: { type: "default" } };
+    if (telegramChatId) payload.chat_id = telegramChatId;
     await telegramApiFetch("setChatMenuButton", {
       method: "POST",
-      payload: { menu_button: { type: "default" } },
+      payload,
       operation: "clearChatMenuButton",
     });
   } catch {

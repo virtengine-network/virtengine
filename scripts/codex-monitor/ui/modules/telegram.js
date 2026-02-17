@@ -46,11 +46,15 @@ export function initTelegramApp() {
   tg.ready();
   tg.expand();
 
-  // Bot API 8.0+ fullscreen
-  try {
-    tg.requestFullscreen?.();
-  } catch {
-    /* not supported */
+  // Bot API 8.0+ fullscreen — only on mobile (desktop Telegram doesn't need it)
+  const platform = (tg.platform || "").toLowerCase();
+  const isMobile = platform === "ios" || platform === "android" || platform === "android_x";
+  if (isMobile) {
+    try {
+      tg.requestFullscreen?.();
+    } catch {
+      /* not supported */
+    }
   }
 
   // Bot API 7.7+ disable vertical swipes for custom scroll

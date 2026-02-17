@@ -11156,6 +11156,9 @@ if (isExecutorDisabled()) {
   startProcess();
 } else {
   console.log("[monitor] VK orchestrator skipped (executor mode = internal)");
+  if (!isVkRuntimeRequired()) {
+    console.log("[monitor] VK runtime not required — all VK notifications suppressed");
+  }
 }
 if (telegramCommandEnabled) {
   startTelegramCommandListener();
