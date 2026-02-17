@@ -1644,8 +1644,7 @@ export async function startTelegramUiServer(options = {}) {
   if (firewallState) {
     if (firewallState.blocked) {
       console.warn(
-        `[telegram-ui] ⚠️  Port ${actualPort}/tcp appears BLOCKED by ${firewallState.firewall}. ` +
-        `LAN/mobile devices may not be able to connect.`,
+        `[telegram-ui] ⚠️  Port ${actualPort}/tcp appears BLOCKED by ${firewallState.firewall} for LAN access.`,
       );
       console.warn(
         `[telegram-ui] To fix, run: ${firewallState.allowCmd}`,
@@ -1660,6 +1659,12 @@ export async function startTelegramUiServer(options = {}) {
     const tUrl = await startTunnel(actualPort);
     if (tUrl) {
       console.log(`[telegram-ui] Telegram Mini App URL: ${tUrl}`);
+      if (firewallState?.blocked) {
+        console.log(
+          `[telegram-ui] ℹ️  Tunnel active — Telegram Mini App works regardless of firewall. ` +
+          `LAN browser access still requires port ${actualPort}/tcp to be open.`,
+        );
+      }
     }
   }
 

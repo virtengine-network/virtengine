@@ -7649,9 +7649,14 @@ export async function startTelegramBot() {
       }
 
       // Notify about firewall issues if detected (24h cooldown)
+      // Skip the alarm if the cloudflared tunnel is active — Telegram Mini App
+      // traffic goes through the tunnel (internet → Cloudflare → localhost),
+      // so the LAN firewall doesn't matter for Telegram. Only direct LAN
+      // browser access is affected.
       if (reachable) {
         const fwState = getFirewallState();
-        if (fwState && fwState.blocked) {
+        const tUrl = getTunnelUrl();
+        if (fwState && fwState.blocked && !tUrl) {
           let skipCooldown = false;
           try {
             if (existsSync(fwCooldownPath)) {
@@ -7667,7 +7672,7 @@ export async function startTelegramBot() {
               telegramChatId,
               `🔥 *Firewall Alert*\n\n` +
               `Port ${port}/tcp appears blocked by \`${fwState.firewall}\`.\n` +
-              `The Control Center may not be reachable from your phone.\n\n` +
+              `The Control Center may not be reachable from your phone or LAN browser.\n\n` +
               `To fix, run on the server:\n\`\`\`\n${fwState.allowCmd}\n\`\`\``,
               {
                 parseMode: "Markdown",
@@ -7683,6 +7688,10 @@ export async function startTelegramBot() {
               writeFileSync(fwCooldownPath, JSON.stringify({ lastNotified: Date.now() }));
             } catch { /* best effort */ }
           }
+        } else if (fwState && fwState.blocked && tUrl) {
+          console.log(
+            `[telegram-bot] firewall blocks port but tunnel active — suppressing Telegram firewall alert`,
+          );
         }
       }
     } catch (err) {
