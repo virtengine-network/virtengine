@@ -12,7 +12,7 @@
  * thread_id so we can resume the same conversation across restarts.
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAgentSdkConfig } from "./agent-sdk.mjs";
@@ -24,6 +24,8 @@ const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
 
 const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000; // 60 min for agentic tasks (matches Azure stream timeout)
 const STATE_FILE = resolve(__dirname, "logs", "codex-shell-state.json");
+const SESSIONS_DIR = resolve(__dirname, "logs", "sessions");
+const MAX_PERSISTENT_TURNS = 50;
 const REPO_ROOT = resolveRepoRoot();
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -34,6 +36,7 @@ let activeThread = null; // Current persistent Thread
 let activeThreadId = null; // Thread ID for resume
 let activeTurn = null; // Whether a turn is in-flight
 let turnCount = 0; // Number of turns in this thread
+let currentSessionId = null; // Active session identifier
 let codexRuntimeCaps = {
   hasSteeringApi: false,
   steeringMethod: null,
@@ -95,12 +98,14 @@ async function loadState() {
     const data = JSON.parse(raw);
     activeThreadId = data.threadId || null;
     turnCount = data.turnCount || 0;
+    currentSessionId = data.currentSessionId || null;
     console.log(
-      `[codex-shell] loaded state: threadId=${activeThreadId}, turns=${turnCount}`,
+      `[codex-shell] loaded state: threadId=${activeThreadId}, turns=${turnCount}, session=${currentSessionId}`,
     );
   } catch {
     activeThreadId = null;
     turnCount = 0;
+    currentSessionId = null;
   }
 }
 
@@ -113,6 +118,7 @@ async function saveState() {
         {
           threadId: activeThreadId,
           turnCount,
+          currentSessionId,
           updatedAt: timestamp(),
         },
         null,
@@ -123,6 +129,60 @@ async function saveState() {
   } catch (err) {
     console.warn(`[codex-shell] failed to save state: ${err.message}`);
   }
+}
+
+// ── Session Persistence ──────────────────────────────────────────────────────
+
+function sessionFilePath(sessionId) {
+  return resolve(SESSIONS_DIR, `${sessionId}.json`);
+}
+
+async function loadSessionData(sessionId) {
+  try {
+    const raw = await readFile(sessionFilePath(sessionId), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function saveSessionData(sessionId, data) {
+  try {
+    await mkdir(SESSIONS_DIR, { recursive: true });
+    await writeFile(sessionFilePath(sessionId), JSON.stringify(data, null, 2), "utf8");
+  } catch (err) {
+    console.warn(`[codex-shell] failed to save session ${sessionId}: ${err.message}`);
+  }
+}
+
+async function saveCurrentSession() {
+  if (!currentSessionId) return;
+  await saveSessionData(currentSessionId, {
+    threadId: activeThreadId,
+    turnCount,
+    createdAt: (await loadSessionData(currentSessionId))?.createdAt || timestamp(),
+    lastActiveAt: timestamp(),
+  });
+}
+
+async function loadSession(sessionId) {
+  // Save current session before switching
+  await saveCurrentSession();
+  const data = await loadSessionData(sessionId);
+  if (data) {
+    activeThreadId = data.threadId || null;
+    turnCount = data.turnCount || 0;
+    activeThread = null; // will be re-created/resumed via getThread()
+    currentSessionId = sessionId;
+    console.log(`[codex-shell] loaded session ${sessionId}: threadId=${activeThreadId}, turns=${turnCount}`);
+  } else {
+    activeThread = null;
+    activeThreadId = null;
+    turnCount = 0;
+    currentSessionId = sessionId;
+    console.log(`[codex-shell] created new session ${sessionId}`);
+  }
+  await saveState();
 }
 
 // ── Thread Management ────────────────────────────────────────────────────────
@@ -396,6 +456,8 @@ export async function execCodexPrompt(userMessage, options = {}) {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     sendRawEvents = false,
     abortController = null,
+    persistent = false,
+    sessionId = null,
   } = options;
 
   agentSdk = resolveAgentSdkConfig({ reload: true });
@@ -419,9 +481,23 @@ export async function execCodexPrompt(userMessage, options = {}) {
   activeTurn = true;
 
   try {
-    // Always start a fresh thread for each task to prevent token overflow
-    // from accumulated context across multiple tasks.
-    activeThread = null;
+    if (!persistent) {
+      // Task executor path — keep existing fresh-thread behavior
+      activeThread = null;
+    } else if (sessionId && sessionId !== currentSessionId) {
+      // Switching to a different persistent session
+      await loadSession(sessionId);
+    } else if (!currentSessionId) {
+      // First persistent call — initialise the default "primary" session
+      await loadSession(sessionId || "primary");
+    } else if (turnCount >= MAX_PERSISTENT_TURNS) {
+      // Thread is too long — start fresh within the same session
+      console.log(`[codex-shell] session ${currentSessionId} hit ${MAX_PERSISTENT_TURNS} turns — rotating thread`);
+      activeThread = null;
+      activeThreadId = null;
+      turnCount = 0;
+    }
+    // else: persistent && same session && under limit → reuse activeThread
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const thread = await getThread();
@@ -487,6 +563,9 @@ export async function execCodexPrompt(userMessage, options = {}) {
           if (event.type === "turn.completed") {
             turnCount++;
             await saveState();
+            if (persistent && currentSessionId) {
+              await saveCurrentSession();
+            }
           }
         }
 
@@ -578,6 +657,7 @@ export function getThreadInfo() {
     turnCount,
     isActive: !!activeThread,
     isBusy: !!activeTurn,
+    sessionId: currentSessionId,
   };
 }
 
@@ -589,8 +669,59 @@ export async function resetThread() {
   activeThreadId = null;
   turnCount = 0;
   activeTurn = null;
+  currentSessionId = null;
   await saveState();
   console.log("[codex-shell] thread reset");
+}
+
+// ── Session Exports ──────────────────────────────────────────────────────────
+
+/**
+ * Get the currently active session ID.
+ */
+export function getActiveSessionId() {
+  return currentSessionId;
+}
+
+/**
+ * List all saved sessions from logs/sessions/.
+ */
+export async function listSessions() {
+  try {
+    await mkdir(SESSIONS_DIR, { recursive: true });
+    const files = await readdir(SESSIONS_DIR);
+    const sessions = [];
+    for (const f of files) {
+      if (!f.endsWith(".json")) continue;
+      const id = f.replace(/\.json$/, "");
+      const data = await loadSessionData(id);
+      if (data) sessions.push({ id, ...data });
+    }
+    return sessions;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Switch to a different session (saves current, loads target).
+ */
+export async function switchSession(id) {
+  await loadSession(id);
+}
+
+/**
+ * Create a new named session (does not switch to it).
+ */
+export async function createSession(id) {
+  const data = {
+    threadId: null,
+    turnCount: 0,
+    createdAt: timestamp(),
+    lastActiveAt: timestamp(),
+  };
+  await saveSessionData(id, data);
+  return data;
 }
 
 // ── Initialisation ──────────────────────────────────────────────────────────

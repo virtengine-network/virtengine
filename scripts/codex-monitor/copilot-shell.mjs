@@ -562,6 +562,7 @@ export async function execCopilotPrompt(userMessage, options = {}) {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     sendRawEvents = false,
     abortController = null,
+    persistent = false,
   } = options;
 
   if (activeTurn) {
@@ -574,6 +575,11 @@ export async function execCopilotPrompt(userMessage, options = {}) {
   }
 
   activeTurn = true;
+
+  if (!persistent) {
+    // Task executor path — fresh session each call
+    activeSession = null;
+  }
 
   let unsubscribe = null;
   const session = await getSession();

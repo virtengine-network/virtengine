@@ -12,6 +12,10 @@ import {
   getThreadInfo,
   resetThread,
   initCodexShell,
+  getActiveSessionId as getCodexSessionId,
+  listSessions as listCodexSessions,
+  switchSession as switchCodexSession,
+  createSession as createCodexSession,
 } from "./codex-shell.mjs";
 import {
   execCopilotPrompt,
@@ -34,23 +38,27 @@ const ADAPTERS = {
   "codex-sdk": {
     name: "codex-sdk",
     provider: "CODEX",
-    exec: execCodexPrompt,
+    exec: (msg, opts) => execCodexPrompt(msg, { persistent: true, ...opts }),
     steer: steerCodexPrompt,
     isBusy: isCodexBusy,
     getInfo: () => {
       const info = getThreadInfo();
-      return { ...info, sessionId: info.threadId };
+      return { ...info, sessionId: info.sessionId || info.threadId };
     },
     reset: resetThread,
     init: async () => {
       await initCodexShell();
       return true;
     },
+    getSessionId: getCodexSessionId,
+    listSessions: listCodexSessions,
+    switchSession: switchCodexSession,
+    createSession: createCodexSession,
   },
   "copilot-sdk": {
     name: "copilot-sdk",
     provider: "COPILOT",
-    exec: execCopilotPrompt,
+    exec: (msg, opts) => execCopilotPrompt(msg, { persistent: true, ...opts }),
     steer: steerCopilotPrompt,
     isBusy: isCopilotBusy,
     getInfo: () => getCopilotSessionInfo(),
@@ -237,4 +245,20 @@ export async function resetPrimaryAgent() {
   if (activeAdapter.reset) {
     await activeAdapter.reset();
   }
+}
+
+export function getPrimarySessionId() {
+  return activeAdapter.getSessionId ? activeAdapter.getSessionId() : null;
+}
+
+export async function listPrimarySessions() {
+  return activeAdapter.listSessions ? activeAdapter.listSessions() : [];
+}
+
+export async function switchPrimarySession(id) {
+  return activeAdapter.switchSession ? activeAdapter.switchSession(id) : undefined;
+}
+
+export async function createPrimarySession(id) {
+  return activeAdapter.createSession ? activeAdapter.createSession(id) : undefined;
 }
