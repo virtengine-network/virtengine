@@ -743,6 +743,16 @@ function getBrowserUiUrl() {
   }
 }
 
+function syncUiUrlsFromServer() {
+  const currentUiUrl = getTelegramUiUrl?.() || null;
+  telegramUiUrl = currentUiUrl;
+  telegramWebAppUrl = getTelegramWebAppUrl(currentUiUrl);
+  return {
+    uiUrl: telegramUiUrl,
+    webAppUrl: telegramWebAppUrl,
+  };
+}
+
 // ── Agent session state (for follow-up steering & bottom-pinning) ────────────
 
 let activeAgentSession = null; // { chatId, messageId, taskPreview, abortController, followUpQueue, ... }
@@ -2444,9 +2454,9 @@ async function registerBotCommands() {
 }
 
 async function setWebAppMenuButton(url) {
-  if (!telegramToken || !url) return;
+  if (!telegramToken || !url) return false;
   const webAppUrl = getTelegramWebAppUrl(url);
-  if (!webAppUrl) return;
+  if (!webAppUrl) return false;
   try {
     const payload = {
       menu_button: {
@@ -2471,10 +2481,12 @@ async function setWebAppMenuButton(url) {
       throw new Error(details.trim());
     }
     console.log(`[telegram-bot] chat menu button set to ${webAppUrl}`);
+    return true;
   } catch (err) {
     if (telegramApiReachable !== false) {
       console.warn(`[telegram-bot] setChatMenuButton error: ${err.message}`);
     }
+    return false;
   }
 }
 
@@ -2496,14 +2508,19 @@ async function clearWebAppMenuButton() {
 const MENU_BUTTON_REFRESH_MS = 5 * 60 * 1000; // 5 minutes
 
 async function refreshMenuButton() {
-  const currentUiUrl = getTelegramUiUrl() || null;
-  const currentUrl = getTelegramWebAppUrl(currentUiUrl);
+  const { uiUrl: currentUiUrl, webAppUrl: currentUrl } = syncUiUrlsFromServer();
   if (currentUrl && currentUrl !== lastMenuButtonUrl) {
-    await setWebAppMenuButton(currentUrl);
-    telegramUiUrl = currentUiUrl;
-    telegramWebAppUrl = currentUrl;
-    lastMenuButtonUrl = currentUrl;
-    console.log(`[telegram-bot] menu button URL refreshed: ${currentUrl}`);
+    const updated = await setWebAppMenuButton(currentUrl);
+    if (updated) {
+      lastMenuButtonUrl = currentUrl;
+      console.log(`[telegram-bot] menu button URL refreshed: ${currentUrl}`);
+    }
+  } else if (!currentUrl && lastMenuButtonUrl) {
+    await clearWebAppMenuButton();
+    lastMenuButtonUrl = null;
+    if (currentUiUrl !== telegramUiUrl) {
+      telegramUiUrl = currentUiUrl;
+    }
   }
 }
 
@@ -2914,6 +2931,7 @@ Object.assign(UI_SCREENS, {
       ].join("\n");
     },
     keyboard: () => {
+      syncUiUrlsFromServer();
       const rows = [
         [
           uiButton("📊 Overview", uiGoAction("overview")),
@@ -4084,7 +4102,7 @@ async function loadWorkspaceStatusData(workspacePath) {
 }
 
 async function cmdApp(chatId) {
-  const uiUrl = getTelegramUiUrl?.() || null;
+  const { uiUrl, webAppUrl } = syncUiUrlsFromServer();
   if (!uiUrl) {
     await sendReply(
       chatId,
@@ -4092,8 +4110,6 @@ async function cmdApp(chatId) {
     );
     return;
   }
-  const webAppUrl = getTelegramWebAppUrl(uiUrl);
-
   const rows = [[{ text: "🌐 Open in Browser", url: getBrowserUiUrl() || uiUrl }]];
   if (webAppUrl) {
     rows.unshift([{ text: "📱 Open Control Center", web_app: { url: webAppUrl } }]);
@@ -4111,6 +4127,10 @@ async function cmdApp(chatId) {
 }
 
 async function cmdMenu(chatId) {
+  syncUiUrlsFromServer();
+  if (telegramApiReachable !== false) {
+    void refreshMenuButton();
+  }
   clearPendingUiInput(chatId);
   await showUiScreen(chatId, null, "home");
 }
@@ -7705,13 +7725,15 @@ export async function startTelegramBot() {
           handleUiCommand: handleUiCommand,
         },
       });
-      telegramUiUrl = getTelegramUiUrl() || null;
-      telegramWebAppUrl = getTelegramWebAppUrl(telegramUiUrl);
+      syncUiUrlsFromServer();
       if (reachable && telegramWebAppUrl) {
-        await setWebAppMenuButton(telegramWebAppUrl);
-        lastMenuButtonUrl = telegramWebAppUrl;
+        const updated = await setWebAppMenuButton(telegramWebAppUrl);
+        if (updated) {
+          lastMenuButtonUrl = telegramWebAppUrl;
+        }
       } else if (reachable) {
         await clearWebAppMenuButton();
+        lastMenuButtonUrl = null;
       }
 
       // Periodically refresh the menu button URL in case the tunnel changes

@@ -50,6 +50,75 @@ const MAX_OUTPUT_BYTES = 64 * 1024;
 /** Whether we're running on Windows */
 const IS_WINDOWS = process.platform === "win32";
 
+/** Default max retries for retryable hooks */
+const DEFAULT_MAX_RETRIES = 2;
+
+/** Base delay between retries in ms (doubles each attempt) */
+const RETRY_BASE_DELAY_MS = 500;
+
+/** Transient exit codes that suggest retry may help */
+const TRANSIENT_EXIT_CODES = new Set([124, 125, 126, 127, 128, 137, 143]);
+
+// ── Hook Metrics ────────────────────────────────────────────────────────────
+
+/**
+ * @typedef {Object} HookMetricEntry
+ * @property {number} totalRuns   - Total executions
+ * @property {number} successes   - Successful executions
+ * @property {number} failures    - Failed executions
+ * @property {number} retries     - Total retry attempts
+ * @property {number} totalDurMs  - Cumulative duration in ms
+ * @property {number} lastRunMs   - Timestamp of last run
+ */
+
+/** @type {Map<string, HookMetricEntry>} */
+const _metrics = new Map();
+
+function _recordMetric(hookId, success, durationMs, retried = false) {
+  if (!_metrics.has(hookId)) {
+    _metrics.set(hookId, {
+      totalRuns: 0,
+      successes: 0,
+      failures: 0,
+      retries: 0,
+      totalDurMs: 0,
+      lastRunMs: 0,
+    });
+  }
+  const m = _metrics.get(hookId);
+  m.totalRuns++;
+  if (success) m.successes++;
+  else m.failures++;
+  if (retried) m.retries++;
+  m.totalDurMs += durationMs;
+  m.lastRunMs = Date.now();
+}
+
+/**
+ * Get hook execution metrics. Useful for monitoring reliability improvements.
+ *
+ * @returns {Record<string, HookMetricEntry & { avgDurMs: number, failureRate: number }>}
+ */
+export function getHookMetrics() {
+  const result = {};
+  for (const [id, m] of _metrics.entries()) {
+    result[id] = {
+      ...m,
+      avgDurMs: m.totalRuns > 0 ? Math.round(m.totalDurMs / m.totalRuns) : 0,
+      failureRate:
+        m.totalRuns > 0 ? Math.round((m.failures / m.totalRuns) * 10000) / 100 : 0,
+    };
+  }
+  return result;
+}
+
+/**
+ * Reset hook metrics. Useful for testing.
+ */
+export function resetHookMetrics() {
+  _metrics.clear();
+}
+
 /**
  * Valid hook event names matching VS Code / Claude Code naming conventions.
  * @type {readonly string[]}
@@ -103,6 +172,8 @@ function envFlag(name, defaultValue = false) {
  * @property {string[]} [sdks]      - SDK filter: ["codex"], ["copilot","claude"], or ["*"] (default: ["*"])
  * @property {Record<string,string>} [env] - Additional environment variables
  * @property {boolean}  [builtin]   - Whether this is a built-in hook (not from config)
+ * @property {boolean}  [retryable] - If true, retry on transient failures (default: false)
+ * @property {number}   [maxRetries] - Max retry attempts (default: 2)
  */
 
 /**
@@ -162,6 +233,7 @@ function _initRegistry() {
 export function resetHooks() {
   _registry.clear();
   _initRegistry();
+  _metrics.clear();
 }
 
 // Ensure the registry is initialised on module load.
@@ -604,6 +676,47 @@ export function registerBuiltinHooks(options = {}) {
     console.log(`${TAG} skipped built-in TaskComplete hook (mode=${mode})`);
   }
 
+  // ── SessionStart: worktree health check ──
+  // Verifies the worktree directory exists, is a valid git repo,
+  // and the expected branch is checked out. Retryable for transient git issues.
+  const skipHealthCheck = envFlag("CODEX_MONITOR_HOOKS_DISABLE_HEALTH_CHECK", false);
+  if (!skipHealthCheck) {
+    const healthCmd = IS_WINDOWS
+      ? 'powershell -NoProfile -Command "if (-not (Test-Path .git)) { if (-not (git rev-parse --git-dir 2>$null)) { Write-Error \'Not a git repository\'; exit 1 } }; git status --porcelain 2>&1 | Out-Null; if ($LASTEXITCODE -ne 0) { Write-Error \'git status failed\'; exit 1 }; Write-Host \'OK: worktree healthy\'"'
+      : "bash -c 'if ! git rev-parse --git-dir >/dev/null 2>&1; then echo \"Not a git repository\" >&2; exit 1; fi; git status --porcelain >/dev/null 2>&1; echo \"OK: worktree healthy\"'";
+
+    registerHook("SessionStart", {
+      id: "builtin-session-health-check",
+      command: healthCmd,
+      description: "Verify worktree is a healthy git repository at session start",
+      timeout: 15_000,
+      blocking: false,
+      sdks: [SDK_WILDCARD],
+      builtin: true,
+      retryable: true,
+      maxRetries: 2,
+    });
+  }
+
+  // ── PrePush: verify branch not stale (retryable) ──
+  if (!skipPrePush) {
+    const fetchCmd = IS_WINDOWS
+      ? 'powershell -NoProfile -Command "git fetch origin --quiet 2>&1 | Out-Null; Write-Host \'OK: fetch completed\'"'
+      : "bash -c 'git fetch origin --quiet 2>/dev/null; echo \"OK: fetch completed\"'";
+
+    registerHook("PrePush", {
+      id: "builtin-prepush-fetch",
+      command: fetchCmd,
+      description: "Fetch latest from origin before push to reduce rejections",
+      timeout: 60_000,
+      blocking: false,
+      sdks: [SDK_WILDCARD],
+      builtin: true,
+      retryable: true,
+      maxRetries: 2,
+    });
+  }
+
   console.log(`${TAG} built-in hooks registered`);
 }
 
@@ -713,7 +826,31 @@ function _buildEnv(ctx) {
 // ── Internal: Synchronous Hook Execution ────────────────────────────────────
 
 /**
+ * Determine if a hook result represents a transient failure worth retrying.
+ */
+function _isTransientFailure(result) {
+  if (result.success) return false;
+  if (result.error && /timed out/i.test(result.error)) return false; // don't retry timeouts
+  if (result.error && /spawn/i.test(result.error)) return true; // ETXTBSY, etc.
+  if (TRANSIENT_EXIT_CODES.has(result.exitCode)) return true;
+  // Signal-killed processes are often transient (OOM, etc.)
+  if (result.exitCode > 128 && result.exitCode <= 159) return true;
+  return false;
+}
+
+/**
+ * Sleep helper for retry backoff.
+ */
+function _sleepSync(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    // busy-wait (only used for short retry backoffs in sync context)
+  }
+}
+
+/**
  * Execute a hook synchronously using `spawnSync`. Used for blocking hooks.
+ * Supports configurable retry with exponential backoff for retryable hooks.
  *
  * @param {HookDefinition} hook
  * @param {HookContext} ctx
@@ -721,79 +858,102 @@ function _buildEnv(ctx) {
  * @returns {HookResult}
  */
 function _executeHookSync(hook, ctx, env) {
-  const start = Date.now();
-  const timeout = hook.timeout ?? DEFAULT_TIMEOUT_MS;
-  const cwd = ctx.worktreePath || ctx.repoRoot || REPO_ROOT;
+  const maxAttempts = hook.retryable ? (hook.maxRetries ?? DEFAULT_MAX_RETRIES) + 1 : 1;
+  let lastResult = null;
+  let retried = false;
 
-  const hookEnv = {
-    ...env,
-    VE_HOOK_BLOCKING: "true",
-  };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const start = Date.now();
+    const timeout = hook.timeout ?? DEFAULT_TIMEOUT_MS;
+    const cwd = ctx.worktreePath || ctx.repoRoot || REPO_ROOT;
 
-  try {
-    const result = spawnSync(hook.command, {
-      cwd,
-      env: hookEnv,
-      encoding: "utf8",
-      timeout,
-      shell: true,
-      windowsHide: true,
-      maxBuffer: MAX_OUTPUT_BYTES,
-    });
+    const hookEnv = {
+      ...env,
+      VE_HOOK_BLOCKING: "true",
+      VE_HOOK_ATTEMPT: String(attempt),
+    };
 
-    const durationMs = Date.now() - start;
-    const exitCode = result.status ?? -1;
+    try {
+      const result = spawnSync(hook.command, {
+        cwd,
+        env: hookEnv,
+        encoding: "utf8",
+        timeout,
+        shell: true,
+        windowsHide: true,
+        maxBuffer: MAX_OUTPUT_BYTES,
+      });
 
-    // Handle timeout (spawnSync sets signal to SIGTERM on timeout)
-    if (result.signal === "SIGTERM" || result.error?.code === "ETIMEDOUT") {
-      return {
+      const durationMs = Date.now() - start;
+      const exitCode = result.status ?? -1;
+
+      if (result.signal === "SIGTERM" || result.error?.code === "ETIMEDOUT") {
+        lastResult = {
+          id: hook.id,
+          command: hook.command,
+          success: false,
+          exitCode: -1,
+          stdout: _truncate(result.stdout ?? "", MAX_OUTPUT_BYTES),
+          stderr: _truncate(result.stderr ?? "", MAX_OUTPUT_BYTES),
+          durationMs,
+          error: `Hook timed out after ${timeout}ms`,
+        };
+      } else {
+        lastResult = {
+          id: hook.id,
+          command: hook.command,
+          success: exitCode === 0,
+          exitCode,
+          stdout: _truncate(result.stdout ?? "", MAX_OUTPUT_BYTES),
+          stderr: _truncate(result.stderr ?? "", MAX_OUTPUT_BYTES),
+          durationMs,
+          error: result.error ? result.error.message : undefined,
+        };
+      }
+    } catch (err) {
+      lastResult = {
         id: hook.id,
         command: hook.command,
         success: false,
         exitCode: -1,
-        stdout: _truncate(result.stdout ?? "", MAX_OUTPUT_BYTES),
-        stderr: _truncate(result.stderr ?? "", MAX_OUTPUT_BYTES),
-        durationMs,
-        error: `Hook timed out after ${timeout}ms`,
+        stdout: "",
+        stderr: "",
+        durationMs: Date.now() - start,
+        error: `Failed to spawn hook: ${err.message}`,
       };
     }
 
-    return {
-      id: hook.id,
-      command: hook.command,
-      success: exitCode === 0,
-      exitCode,
-      stdout: _truncate(result.stdout ?? "", MAX_OUTPUT_BYTES),
-      stderr: _truncate(result.stderr ?? "", MAX_OUTPUT_BYTES),
-      durationMs,
-      error: result.error ? result.error.message : undefined,
-    };
-  } catch (err) {
-    return {
-      id: hook.id,
-      command: hook.command,
-      success: false,
-      exitCode: -1,
-      stdout: "",
-      stderr: "",
-      durationMs: Date.now() - start,
-      error: `Failed to spawn hook: ${err.message}`,
-    };
+    // Success or no more retries
+    if (lastResult.success || attempt >= maxAttempts) {
+      _recordMetric(hook.id, lastResult.success, lastResult.durationMs, retried);
+      return lastResult;
+    }
+
+    // Only retry transient failures
+    if (!_isTransientFailure(lastResult)) {
+      _recordMetric(hook.id, false, lastResult.durationMs, retried);
+      return lastResult;
+    }
+
+    retried = true;
+    const backoff = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+    console.warn(
+      `${TAG} hook "${hook.id}" failed (attempt ${attempt}/${maxAttempts}), retrying in ${backoff}ms`,
+    );
+    _sleepSync(backoff);
   }
+
+  _recordMetric(hook.id, false, lastResult?.durationMs ?? 0, retried);
+  return lastResult;
 }
 
 // ── Internal: Asynchronous Hook Execution ───────────────────────────────────
 
 /**
- * Execute a hook asynchronously using `spawn`. Used for non-blocking hooks.
- * Returns a Promise that resolves when the process exits or times out.
- *
- * @param {HookDefinition} hook
- * @param {HookContext} ctx
- * @param {Record<string, string>} env
+ * Execute a single async attempt of a hook using `spawn`.
  * @returns {Promise<HookResult>}
  */
-function _executeHookAsync(hook, ctx, env) {
+function _executeHookAsyncOnce(hook, ctx, env, attempt) {
   return new Promise((resolvePromise) => {
     const start = Date.now();
     const timeout = hook.timeout ?? DEFAULT_TIMEOUT_MS;
@@ -802,6 +962,7 @@ function _executeHookAsync(hook, ctx, env) {
     const hookEnv = {
       ...env,
       VE_HOOK_BLOCKING: "false",
+      VE_HOOK_ATTEMPT: String(attempt),
     };
 
     /** @type {string[]} */
@@ -841,7 +1002,6 @@ function _executeHookAsync(hook, ctx, env) {
       return;
     }
 
-    // Capture stdout
     child.stdout?.on("data", (chunk) => {
       if (totalBytes < MAX_OUTPUT_BYTES) {
         stdoutChunks.push(chunk.toString("utf8"));
@@ -849,7 +1009,6 @@ function _executeHookAsync(hook, ctx, env) {
       }
     });
 
-    // Capture stderr
     child.stderr?.on("data", (chunk) => {
       if (totalBytes < MAX_OUTPUT_BYTES) {
         stderrChunks.push(chunk.toString("utf8"));
@@ -857,7 +1016,6 @@ function _executeHookAsync(hook, ctx, env) {
       }
     });
 
-    // Timeout handler
     const timer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
@@ -905,6 +1063,44 @@ function _executeHookAsync(hook, ctx, env) {
   });
 }
 
+/**
+ * Execute a hook asynchronously with retry support. Used for non-blocking hooks.
+ *
+ * @param {HookDefinition} hook
+ * @param {HookContext} ctx
+ * @param {Record<string, string>} env
+ * @returns {Promise<HookResult>}
+ */
+async function _executeHookAsync(hook, ctx, env) {
+  const maxAttempts = hook.retryable ? (hook.maxRetries ?? DEFAULT_MAX_RETRIES) + 1 : 1;
+  let lastResult = null;
+  let retried = false;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    lastResult = await _executeHookAsyncOnce(hook, ctx, env, attempt);
+
+    if (lastResult.success || attempt >= maxAttempts) {
+      _recordMetric(hook.id, lastResult.success, lastResult.durationMs, retried);
+      return lastResult;
+    }
+
+    if (!_isTransientFailure(lastResult)) {
+      _recordMetric(hook.id, false, lastResult.durationMs, retried);
+      return lastResult;
+    }
+
+    retried = true;
+    const backoff = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+    console.warn(
+      `${TAG} async hook "${hook.id}" failed (attempt ${attempt}/${maxAttempts}), retrying in ${backoff}ms`,
+    );
+    await new Promise((r) => setTimeout(r, backoff));
+  }
+
+  _recordMetric(hook.id, false, lastResult?.durationMs ?? 0, retried);
+  return lastResult;
+}
+
 // ── Internal: Normalisation Helpers ─────────────────────────────────────────
 
 /**
@@ -929,6 +1125,11 @@ function _normalizeHookDef(def) {
     sdks,
     env: def.env && typeof def.env === "object" ? { ...def.env } : {},
     builtin: Boolean(def.builtin),
+    retryable: Boolean(def.retryable),
+    maxRetries:
+      typeof def.maxRetries === "number" && def.maxRetries >= 0
+        ? def.maxRetries
+        : DEFAULT_MAX_RETRIES,
   };
 }
 

@@ -1,13 +1,13 @@
 import { execSync, spawn } from "node:child_process";
 import { createHmac, randomBytes, X509Certificate } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, chmodSync, createWriteStream } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, chmodSync, createWriteStream, writeFileSync } from "node:fs";
 import { open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { get as httpsGet } from "node:https";
 import { createServer as createHttpsServer } from "node:https";
 import { networkInterfaces } from "node:os";
 import { connect as netConnect } from "node:net";
-import { resolve, extname } from "node:path";
+import { resolve, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arch as osArch, platform as osPlatform } from "node:os";
 
@@ -365,7 +365,7 @@ function getCloudflaredDownloadUrl() {
 
 /**
  * Download a file from URL, following redirects (GitHub releases use 302).
- * Returns a promise that resolves when the file is written.
+ * Returns a promise that resolves when the file is fully written and closed.
  */
 function downloadFile(url, destPath, maxRedirects = 5) {
   return new Promise((res, rej) => {
@@ -381,8 +381,12 @@ function downloadFile(url, destPath, maxRedirects = 5) {
       }
       const stream = createWriteStream(destPath);
       response.pipe(stream);
-      stream.on("finish", () => { stream.close(); res(); });
-      stream.on("error", rej);
+      // Wait for 'close' not 'finish' — ensures file descriptor is fully released
+      stream.on("close", () => res());
+      stream.on("error", (err) => {
+        stream.close();
+        rej(err);
+      });
     }).on("error", rej);
   });
 }
@@ -419,6 +423,8 @@ async function findCloudflared() {
     await downloadFile(dlUrl, CF_CACHED_PATH);
     if (osPlatform() !== "win32") {
       chmodSync(CF_CACHED_PATH, 0o755);
+      // Small delay to ensure OS fully releases file locks after chmod
+      await new Promise((r) => setTimeout(r, 100));
     }
     console.log(`[telegram-ui] cloudflared downloaded to ${CF_CACHED_PATH}`);
     return CF_CACHED_PATH;
@@ -429,9 +435,21 @@ async function findCloudflared() {
 }
 
 /**
- * Start a cloudflared quick tunnel for the given local URL.
- * Quick tunnels are free, require no account, and provide a random
- * *.trycloudflare.com domain with a valid TLS cert.
+ * Start a cloudflared tunnel for the given local URL.
+ *
+ * Two modes:
+ * 1. **Quick tunnel** (default): Free, no account, random *.trycloudflare.com domain.
+ *    Pros: Zero setup. Cons: URL changes on each restart.
+ * 2. **Named tunnel**: Persistent custom domain (e.g., myapp.example.com).
+ *    Pros: Stable URL, custom domain. Cons: Requires cloudflare account + tunnel setup.
+ *
+ * Named tunnel setup:
+ *   1. Create a tunnel: `cloudflared tunnel create <name>`
+ *   2. Create DNS record: `cloudflared tunnel route dns <name> <subdomain.yourdomain.com>`
+ *   3. Set env vars:
+ *      - CLOUDFLARE_TUNNEL_NAME=<name>
+ *      - CLOUDFLARE_TUNNEL_CREDENTIALS=/path/to/<tunnel-id>.json
+ *
  * Returns the assigned public URL or null on failure.
  */
 async function startTunnel(localPort) {
@@ -453,15 +471,166 @@ async function startTunnel(localPort) {
     return null;
   }
 
+  // Check for named tunnel configuration (persistent URL)
+  const namedTunnel = process.env.CLOUDFLARE_TUNNEL_NAME || process.env.CF_TUNNEL_NAME;
+  const tunnelCreds = process.env.CLOUDFLARE_TUNNEL_CREDENTIALS || process.env.CF_TUNNEL_CREDENTIALS;
+
+  if (namedTunnel && tunnelCreds) {
+    return startNamedTunnel(cfBin, namedTunnel, tunnelCreds, localPort);
+  }
+
+  // Fall back to quick tunnel (random URL, no persistence)
+  return startQuickTunnel(cfBin, localPort);
+}
+
+/**
+ * Spawn cloudflared with ETXTBSY retry (race condition after fresh download).
+ * Returns the child process or throws after max retries.
+ */
+function spawnCloudflared(cfBin, args, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return spawn(cfBin, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: false,
+      });
+    } catch (err) {
+      if (err.code === "ETXTBSY" && attempt < maxRetries) {
+        // File still locked from download — wait and retry
+        const delayMs = attempt * 100;
+        console.warn(`[telegram-ui] spawn ETXTBSY (attempt ${attempt}/${maxRetries}) — retrying in ${delayMs}ms`);
+        // Sync sleep (rare case, acceptable here)
+        execSync(`sleep 0.${delayMs / 100}`, { stdio: "ignore" });
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("spawn failed after retries");
+}
+
+/**
+ * Start a cloudflared **named tunnel** with persistent URL.
+ * Requires: cloudflared tunnel create + DNS setup.
+ */
+async function startNamedTunnel(cfBin, tunnelName, credentialsPath, localPort) {
+  if (!existsSync(credentialsPath)) {
+    console.warn(`[telegram-ui] named tunnel credentials not found: ${credentialsPath}`);
+    console.warn("[telegram-ui] falling back to quick tunnel (random URL)");
+    return startQuickTunnel(cfBin, localPort);
+  }
+
+  // Named tunnels require config file with ingress rules.
+  // We'll create a temporary config on the fly.
+  const configPath = resolve(__dirname, ".cache", "cloudflared-config.yml");
+  mkdirSync(dirname(configPath), { recursive: true });
+
+  const configYaml = `
+tunnel: ${tunnelName}
+credentials-file: ${credentialsPath}
+
+ingress:
+  - hostname: "*"
+    service: https://localhost:${localPort}
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404
+`.trim();
+
+  writeFileSync(configPath, configYaml, "utf8");
+
+  // Read the tunnel ID from credentials to construct the public URL
+  let publicUrl = null;
+  try {
+    const creds = JSON.parse(readFileSync(credentialsPath, "utf8"));
+    const tunnelId = creds.TunnelID || creds.tunnel_id;
+    if (tunnelId) {
+      publicUrl = `https://${tunnelId}.cfargotunnel.com`;
+    }
+  } catch (err) {
+    console.warn(`[telegram-ui] failed to parse tunnel credentials: ${err.message}`);
+  }
+
+  return new Promise((resolvePromise) => {
+    const args = ["tunnel", "--config", configPath, "run"];
+    console.log(`[telegram-ui] starting named tunnel: ${tunnelName} → https://localhost:${localPort}`);
+
+    let child;
+    try {
+      child = spawnCloudflared(cfBin, args);
+    } catch (err) {
+      console.warn(`[telegram-ui] named tunnel spawn failed: ${err.message}`);
+      return resolvePromise(null);
+    }
+
+    let resolved = false;
+    let output = "";
+    // Named tunnels emit "Connection <UUID> registered" when ready
+    const readyPattern = /Connection [a-f0-9-]+ registered/;
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.warn("[telegram-ui] named tunnel timed out after 60s");
+        resolvePromise(null);
+      }
+    }, 60_000);
+
+    function parseOutput(chunk) {
+      output += chunk;
+      if (readyPattern.test(output) && !resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        tunnelUrl = publicUrl;
+        tunnelProcess = child;
+        console.log(`[telegram-ui] named tunnel active: ${publicUrl || tunnelName}`);
+        resolvePromise(publicUrl);
+      }
+    }
+
+    child.stdout.on("data", (d) => parseOutput(d.toString()));
+    child.stderr.on("data", (d) => parseOutput(d.toString()));
+
+    child.on("error", (err) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        console.warn(`[telegram-ui] named tunnel failed: ${err.message}`);
+        resolvePromise(null);
+      }
+    });
+
+    child.on("exit", (code) => {
+      tunnelProcess = null;
+      tunnelUrl = null;
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        console.warn(`[telegram-ui] named tunnel exited with code ${code}`);
+        resolvePromise(null);
+      } else if (code !== 0 && code !== null) {
+        console.warn(`[telegram-ui] named tunnel exited (code ${code})`);
+      }
+    });
+  });
+}
+
+/**
+ * Start a cloudflared **quick tunnel** (random *.trycloudflare.com URL).
+ * Quick tunnels are free, require no account, but the URL changes on each restart.
+ */
+async function startQuickTunnel(cfBin, localPort) {
   return new Promise((resolvePromise) => {
     const localUrl = `https://localhost:${localPort}`;
     const args = ["tunnel", "--url", localUrl, "--no-autoupdate", "--no-tls-verify"];
-    console.log(`[telegram-ui] starting cloudflared tunnel → ${localUrl}`);
+    console.log(`[telegram-ui] starting quick tunnel → ${localUrl}`);
 
-    const child = spawn(cfBin, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: false,
-    });
+    let child;
+    try {
+      child = spawnCloudflared(cfBin, args);
+    } catch (err) {
+      console.warn(`[telegram-ui] quick tunnel spawn failed: ${err.message}`);
+      return resolvePromise(null);
+    }
 
     let resolved = false;
     let output = "";
@@ -469,7 +638,7 @@ async function startTunnel(localPort) {
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        console.warn("[telegram-ui] cloudflared tunnel timed out after 30s");
+        console.warn("[telegram-ui] quick tunnel timed out after 30s");
         resolvePromise(null);
       }
     }, 30_000);
@@ -482,7 +651,7 @@ async function startTunnel(localPort) {
         clearTimeout(timeout);
         tunnelUrl = match[0];
         tunnelProcess = child;
-        console.log(`[telegram-ui] tunnel active: ${tunnelUrl}`);
+        console.log(`[telegram-ui] quick tunnel active: ${tunnelUrl}`);
         resolvePromise(tunnelUrl);
       }
     }
@@ -494,7 +663,7 @@ async function startTunnel(localPort) {
       if (!resolved) {
         resolved = true;
         clearTimeout(timeout);
-        console.warn(`[telegram-ui] cloudflared failed: ${err.message}`);
+        console.warn(`[telegram-ui] quick tunnel failed: ${err.message}`);
         resolvePromise(null);
       }
     });
@@ -505,10 +674,10 @@ async function startTunnel(localPort) {
       if (!resolved) {
         resolved = true;
         clearTimeout(timeout);
-        console.warn(`[telegram-ui] cloudflared exited with code ${code}`);
+        console.warn(`[telegram-ui] quick tunnel exited with code ${code}`);
         resolvePromise(null);
       } else if (code !== 0 && code !== null) {
-        console.warn(`[telegram-ui] cloudflared tunnel exited (code ${code})`);
+        console.warn(`[telegram-ui] quick tunnel exited (code ${code})`);
       }
     });
   });

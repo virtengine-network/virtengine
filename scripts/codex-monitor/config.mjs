@@ -381,10 +381,43 @@ function normalizeKanbanBackend(value) {
   const backend = String(value || "")
     .trim()
     .toLowerCase();
-  if (backend === "github" || backend === "jira" || backend === "vk") {
+  if (
+    backend === "internal" ||
+    backend === "github" ||
+    backend === "jira" ||
+    backend === "vk"
+  ) {
     return backend;
   }
-  return "vk";
+  return "internal";
+}
+
+function normalizeKanbanSyncPolicy(value) {
+  const policy = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (policy === "internal-primary" || policy === "bidirectional") {
+    return policy;
+  }
+  return "internal-primary";
+}
+
+function normalizeProjectRequirementsProfile(value) {
+  const profile = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (
+    [
+      "simple-feature",
+      "feature",
+      "large-feature",
+      "system",
+      "multi-system",
+    ].includes(profile)
+  ) {
+    return profile;
+  }
+  return "feature";
 }
 
 function loadExecutorConfig(configDir, configData) {
@@ -958,15 +991,33 @@ export function loadConfig(argv = process.argv, options = {}) {
   // Allows the monitor to run tasks via agent-pool directly instead of
   // (or alongside) the VK executor. Modes: "internal" (default), "vk", "hybrid".
   const kanbanBackend = normalizeKanbanBackend(
-    process.env.KANBAN_BACKEND || configData.kanban?.backend || "github",
+    process.env.KANBAN_BACKEND || configData.kanban?.backend || "internal",
+  );
+  const kanbanSyncPolicy = normalizeKanbanSyncPolicy(
+    process.env.KANBAN_SYNC_POLICY || configData.kanban?.syncPolicy,
   );
   const kanban = Object.freeze({
     backend: kanbanBackend,
     projectId:
       process.env.KANBAN_PROJECT_ID || configData.kanban?.projectId || null,
+    syncPolicy: kanbanSyncPolicy,
   });
 
   const internalExecutorConfig = configData.internalExecutor || {};
+  const projectRequirements = {
+    profile: normalizeProjectRequirementsProfile(
+      process.env.PROJECT_REQUIREMENTS_PROFILE ||
+        configData.projectRequirements?.profile ||
+        internalExecutorConfig.projectRequirements?.profile ||
+        "feature",
+    ),
+    notes: String(
+      process.env.PROJECT_REQUIREMENTS_NOTES ||
+        configData.projectRequirements?.notes ||
+        internalExecutorConfig.projectRequirements?.notes ||
+        "",
+    ).trim(),
+  };
   const executorMode = (
     process.env.EXECUTOR_MODE ||
     internalExecutorConfig.mode ||
@@ -1031,6 +1082,39 @@ export function loadConfig(argv = process.argv, options = {}) {
         internalExecutorConfig.taskClaimRenewIntervalMs ||
         5 * 60 * 1000,
     ),
+    backlogReplenishment: {
+      enabled: isEnvEnabled(
+        process.env.INTERNAL_EXECUTOR_REPLENISH_ENABLED,
+        internalExecutorConfig.backlogReplenishment?.enabled === true,
+      ),
+      minNewTasks: Math.max(
+        1,
+        Math.min(
+          2,
+          Number(
+            process.env.INTERNAL_EXECUTOR_REPLENISH_MIN_NEW_TASKS ||
+              internalExecutorConfig.backlogReplenishment?.minNewTasks ||
+              1,
+          ),
+        ),
+      ),
+      maxNewTasks: Math.max(
+        1,
+        Math.min(
+          3,
+          Number(
+            process.env.INTERNAL_EXECUTOR_REPLENISH_MAX_NEW_TASKS ||
+              internalExecutorConfig.backlogReplenishment?.maxNewTasks ||
+              2,
+          ),
+        ),
+      ),
+      requirePriority: isEnvEnabled(
+        process.env.INTERNAL_EXECUTOR_REPLENISH_REQUIRE_PRIORITY,
+        internalExecutorConfig.backlogReplenishment?.requirePriority !== false,
+      ),
+    },
+    projectRequirements,
   };
 
   // ── Vibe-Kanban ──────────────────────────────────────────

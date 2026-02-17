@@ -640,6 +640,11 @@ async function main() {
     process.env.CODEX_MONITOR_SKIP_AUTO_UPDATE = "1";
   }
 
+  // Mark all child processes as codex-monitor managed.
+  // The agent-hook-bridge checks this to avoid firing hooks for standalone
+  // agent sessions that happen to have hook config files in their tree.
+  process.env.VE_MANAGED = "1";
+
   // Handle --setup
   if (args.includes("--setup") || args.includes("setup")) {
     const { runSetup } = await import("./setup.mjs");

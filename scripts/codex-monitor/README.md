@@ -123,7 +123,8 @@ Configured by `EXECUTOR_MODE`:
 
 Task board backend (`KANBAN_BACKEND`):
 
-- `vk` - Vibe-Kanban (default)
+- `internal` - local task-store source of truth (default)
+- `vk` - Vibe-Kanban adapter
 - `github` - GitHub Issues with shared state persistence
 - `jira` (scaffolded, not yet implemented)
 
@@ -338,7 +339,7 @@ EXECUTORS=COPILOT:CLAUDE_OPUS_4_6:50,CODEX:DEFAULT:50
 ```env
 PROJECT_NAME=my-project
 GITHUB_REPO=myorg/myrepo
-KANBAN_BACKEND=vk
+KANBAN_BACKEND=internal
 EXECUTOR_MODE=internal
 VK_BASE_URL=http://127.0.0.1:54089
 VK_RECOVERY_PORT=54089

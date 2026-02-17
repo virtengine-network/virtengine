@@ -13,6 +13,16 @@ vi.mock("../config.mjs", () => ({
 
 const { getKanbanAdapter, setKanbanBackend, getKanbanBackendName } =
   await import("../kanban-adapter.mjs");
+const {
+  configureTaskStore,
+  loadStore,
+  addTask,
+  removeTask,
+  getTask,
+} = await import("../task-store.mjs");
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 
 function mockGh(stdout, stderr = "") {
   execFileMock.mockImplementationOnce((_cmd, _args, _opts, cb) => {
@@ -268,5 +278,62 @@ describe("kanban-adapter vk backend fallback fetch", () => {
       status: "todo",
       backend: "vk",
     });
+  });
+});
+
+describe("kanban-adapter internal backend", () => {
+  const originalKanbanBackend = process.env.KANBAN_BACKEND;
+  let tempDir = "";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tempDir = mkdtempSync(resolve(tmpdir(), "codex-monitor-internal-kanban-"));
+    configureTaskStore({ baseDir: tempDir });
+    loadStore();
+    process.env.KANBAN_BACKEND = "internal";
+    loadConfigMock.mockReturnValue({
+      kanban: { backend: "internal" },
+    });
+    setKanbanBackend("internal");
+  });
+
+  afterEach(() => {
+    if (originalKanbanBackend === undefined) {
+      delete process.env.KANBAN_BACKEND;
+    } else {
+      process.env.KANBAN_BACKEND = originalKanbanBackend;
+    }
+  });
+
+  it("uses internal backend by default when configured", () => {
+    expect(getKanbanBackendName()).toBe("internal");
+  });
+
+  it("creates, lists, updates, comments, and deletes internal tasks", async () => {
+    const adapter = getKanbanAdapter();
+
+    const created = await adapter.createTask("internal", {
+      title: "Internal task",
+      description: "Local source-of-truth task",
+      status: "todo",
+    });
+    expect(created.backend).toBe("internal");
+    expect(created.id).toBeTruthy();
+
+    const listed = await adapter.listTasks("internal", { status: "todo" });
+    expect(listed.some((task) => task.id === created.id)).toBe(true);
+
+    const updated = await adapter.updateTaskStatus(created.id, "inprogress");
+    expect(updated.status).toBe("inprogress");
+
+    const commented = await adapter.addComment(created.id, "review me");
+    expect(commented).toBe(true);
+    const fromStore = getTask(created.id);
+    expect(Array.isArray(fromStore?.meta?.comments)).toBe(true);
+    expect(fromStore.meta.comments.length).toBeGreaterThan(0);
+
+    const deleted = await adapter.deleteTask(created.id);
+    expect(deleted).toBe(true);
+    expect(removeTask(created.id)).toBe(false);
   });
 });

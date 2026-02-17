@@ -385,7 +385,7 @@ let {
 let watchPath = resolve(configWatchPath);
 let codexEnabled = config.codexEnabled;
 let plannerMode = configPlannerMode; // "codex-sdk" | "kanban" | "disabled"
-let kanbanBackend = String(kanbanConfig?.backend || "github").toLowerCase();
+let kanbanBackend = String(kanbanConfig?.backend || "internal").toLowerCase();
 let executorMode = configExecutorMode || getExecutorMode();
 let githubReconcile = githubReconcileConfig || {
   enabled: false,
@@ -409,11 +409,11 @@ try {
 
 function getActiveKanbanBackend() {
   try {
-    return String(getKanbanBackendName() || kanbanBackend || "github")
+    return String(getKanbanBackendName() || kanbanBackend || "internal")
       .trim()
       .toLowerCase();
   } catch {
-    return String(kanbanBackend || "github")
+    return String(kanbanBackend || "internal")
       .trim()
       .toLowerCase();
   }
@@ -481,6 +481,14 @@ function isMonitorMonitorEnabled() {
   }
   // Default ON in devmode unless explicitly disabled.
   return true;
+}
+
+function isSelfRestartWatcherEnabled() {
+  const explicit = process.env.SELF_RESTART_WATCH_ENABLED;
+  if (explicit !== undefined && String(explicit).trim() !== "") {
+    return !isFalsyFlag(explicit);
+  }
+  return isDevMode();
 }
 
 const MONITOR_MONITOR_DEFAULT_TIMEOUT_MS = 6 * 60 * 60 * 1000;
@@ -749,6 +757,7 @@ let pendingSelfRestart = null; // filename that triggered a deferred restart
 let selfRestartDeferCount = 0;
 let deferredMonitorRestartTimer = null;
 let pendingMonitorRestartReason = "";
+let selfRestartWatcherEnabled = isSelfRestartWatcherEnabled();
 
 // ── Self-restart marker: detect if this process was spawned by a code-change restart
 const selfRestartMarkerPath = resolve(
@@ -10145,6 +10154,7 @@ function applyConfig(nextConfig, options = {}) {
   const prevTelegramCommandEnabled = telegramCommandEnabled;
   const prevTelegramBotEnabled = telegramBotEnabled;
   const prevPreflightEnabled = preflightEnabled;
+  const prevSelfRestartWatcherEnabled = selfRestartWatcherEnabled;
   const prevVkRuntimeRequired = isVkRuntimeRequired();
 
   config = nextConfig;
@@ -10206,6 +10216,7 @@ function applyConfig(nextConfig, options = {}) {
   executorScheduler = nextConfig.scheduler;
   agentSdk = nextConfig.agentSdk;
   envPaths = nextConfig.envPaths;
+  selfRestartWatcherEnabled = isSelfRestartWatcherEnabled();
   const nextVkRuntimeRequired = isVkRuntimeRequired();
 
   if (prevVkRuntimeRequired && !nextVkRuntimeRequired) {
@@ -10259,6 +10270,19 @@ function applyConfig(nextConfig, options = {}) {
 
   if (prevWatchPath !== watchPath || watchEnabled === false) {
     void startWatcher(true);
+  }
+  if (prevSelfRestartWatcherEnabled !== selfRestartWatcherEnabled) {
+    if (selfRestartWatcherEnabled) {
+      startSelfWatcher();
+      console.log(
+        "[monitor] self-restart watcher enabled (devmode or SELF_RESTART_WATCH_ENABLED=1)",
+      );
+    } else {
+      stopSelfWatcher();
+      console.log(
+        "[monitor] self-restart watcher disabled (set SELF_RESTART_WATCH_ENABLED=1 to force-enable)",
+      );
+    }
   }
   startEnvWatchers();
 
@@ -10647,7 +10671,13 @@ startAutoUpdateLoop({
 
 startWatcher();
 startEnvWatchers();
-startSelfWatcher();
+if (selfRestartWatcherEnabled) {
+  startSelfWatcher();
+} else {
+  console.log(
+    "[monitor] self-restart watcher disabled (default outside devmode)",
+  );
+}
 startInteractiveShell();
 if (isVkRuntimeRequired()) {
   ensureAnomalyDetector();

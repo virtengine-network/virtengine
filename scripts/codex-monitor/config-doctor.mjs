@@ -225,12 +225,12 @@ export function runConfigDoctor(options = {}) {
     });
   }
 
-  const backend = String(effective.KANBAN_BACKEND || "github").toLowerCase();
-  if (!["vk", "github", "jira"].includes(backend)) {
+  const backend = String(effective.KANBAN_BACKEND || "internal").toLowerCase();
+  if (!["internal", "vk", "github", "jira"].includes(backend)) {
     issues.errors.push({
       code: "KANBAN_BACKEND",
       message: `Invalid KANBAN_BACKEND: ${effective.KANBAN_BACKEND}`,
-      fix: "Use one of: vk, github, jira",
+      fix: "Use one of: internal, vk, github, jira",
     });
   }
 

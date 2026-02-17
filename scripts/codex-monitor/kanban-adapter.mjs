@@ -2,7 +2,8 @@
  * kanban-adapter.mjs — Unified Kanban Board Abstraction
  *
  * Provides a common interface over multiple task-tracking backends:
- *   - Vibe-Kanban (VK)       — default, full-featured
+ *   - Internal Store          — default, source-of-truth local kanban
+ *   - Vibe-Kanban (VK)       — optional external adapter
  *   - GitHub Issues           — native GitHub integration with shared state persistence
  *   - Jira                    — enterprise project management (scaffolded, see JIRA_INTEGRATION.md)
  *
@@ -10,7 +11,7 @@
  * Code execution is handled separately by agent-pool.mjs.
  *
  * Configuration:
- *   - `KANBAN_BACKEND` env var: "vk" | "github" | "jira" (default: "vk")
+ *   - `KANBAN_BACKEND` env var: "internal" | "vk" | "github" | "jira" (default: "internal")
  *   - `codex-monitor.config.json` → `kanban.backend` field
  *
  * EXPORTS:
@@ -52,6 +53,15 @@
 
 import { loadConfig } from "./config.mjs";
 import { fetchWithFallback } from "./fetch-runtime.mjs";
+import {
+  getAllTasks as getInternalTasks,
+  getTask as getInternalTask,
+  addTask as addInternalTask,
+  setTaskStatus as setInternalTaskStatus,
+  removeTask as removeInternalTask,
+  updateTask as patchInternalTask,
+} from "./task-store.mjs";
+import { randomUUID } from "node:crypto";
 
 const TAG = "[kanban]";
 
@@ -133,6 +143,136 @@ function parseBooleanEnv(value, fallback = false) {
   if (["1", "true", "yes", "on"].includes(key)) return true;
   if (["0", "false", "no", "off"].includes(key)) return false;
   return fallback;
+}
+
+class InternalAdapter {
+  constructor() {
+    this.name = "internal";
+  }
+
+  _normalizeTask(task) {
+    if (!task) return null;
+    return {
+      id: String(task.id || ""),
+      title: task.title || "",
+      description: task.description || "",
+      status: normaliseStatus(task.status),
+      assignee: task.assignee || null,
+      priority: task.priority || null,
+      projectId: task.projectId || "internal",
+      branchName: task.branchName || null,
+      prNumber: task.prNumber || null,
+      prUrl: task.prUrl || null,
+      taskUrl: task.taskUrl || null,
+      createdAt: task.createdAt || null,
+      updatedAt: task.updatedAt || null,
+      backend: "internal",
+      meta: task.meta || {},
+    };
+  }
+
+  async listProjects() {
+    return [
+      {
+        id: "internal",
+        name: "Internal Task Store",
+        backend: "internal",
+        meta: {},
+      },
+    ];
+  }
+
+  async listTasks(projectId, filters = {}) {
+    const statusFilter = filters?.status ? normaliseStatus(filters.status) : null;
+    const limit = Number(filters?.limit || 0);
+    const normalizedProjectId = String(projectId || "internal").trim().toLowerCase();
+
+    let tasks = getInternalTasks().map((task) => this._normalizeTask(task));
+    if (normalizedProjectId && normalizedProjectId !== "internal") {
+      tasks = tasks.filter(
+        (task) =>
+          String(task.projectId || "internal").trim().toLowerCase() ===
+          normalizedProjectId,
+      );
+    }
+    if (statusFilter) {
+      tasks = tasks.filter((task) => normaliseStatus(task.status) === statusFilter);
+    }
+    if (Number.isFinite(limit) && limit > 0) {
+      tasks = tasks.slice(0, limit);
+    }
+    return tasks;
+  }
+
+  async getTask(taskId) {
+    return this._normalizeTask(getInternalTask(String(taskId || "")));
+  }
+
+  async updateTaskStatus(taskId, status) {
+    const normalizedId = String(taskId || "").trim();
+    if (!normalizedId) {
+      throw new Error("[kanban] internal updateTaskStatus requires taskId");
+    }
+    const normalizedStatus = normaliseStatus(status);
+    const updated = setInternalTaskStatus(
+      normalizedId,
+      normalizedStatus,
+      "orchestrator",
+    );
+    if (!updated) {
+      throw new Error(`[kanban] internal task not found: ${normalizedId}`);
+    }
+    return this._normalizeTask(updated);
+  }
+
+  async createTask(projectId, taskData = {}) {
+    const id = String(taskData.id || randomUUID());
+    const created = addInternalTask({
+      id,
+      title: taskData.title || "Untitled task",
+      description: taskData.description || "",
+      status: normaliseStatus(taskData.status || "todo"),
+      assignee: taskData.assignee || null,
+      priority: taskData.priority || null,
+      projectId: taskData.projectId || projectId || "internal",
+      meta: taskData.meta || {},
+    });
+    if (!created) {
+      throw new Error("[kanban] internal task creation failed");
+    }
+    return this._normalizeTask(created);
+  }
+
+  async deleteTask(taskId) {
+    return removeInternalTask(String(taskId || ""));
+  }
+
+  async addComment(taskId, body) {
+    const id = String(taskId || "").trim();
+    const comment = String(body || "").trim();
+    if (!id || !comment) return false;
+
+    const current = getInternalTask(id);
+    if (!current) return false;
+
+    const comments = Array.isArray(current?.meta?.comments)
+      ? [...current.meta.comments]
+      : [];
+    comments.push({
+      body: comment,
+      createdAt: new Date().toISOString(),
+      source: "kanban-adapter/internal",
+    });
+
+    const patched = patchInternalTask(id, {
+      meta: {
+        ...(current.meta || {}),
+        comments,
+      },
+    });
+
+    return Boolean(patched);
+  }
 }
 
 function normalizeLabels(raw) {
@@ -2338,6 +2478,7 @@ class JiraAdapter {
 // ---------------------------------------------------------------------------
 
 const ADAPTERS = {
+  internal: () => new InternalAdapter(),
   vk: () => new VKAdapter(),
   github: () => new GitHubIssuesAdapter(),
   jira: () => new JiraAdapter(),
@@ -2355,7 +2496,7 @@ let activeBackendName = null;
  *   1. Runtime override via setKanbanBackend()
  *   2. KANBAN_BACKEND env var
  *   3. codex-monitor.config.json → kanban.backend field
- *   4. Default: "vk"
+ *   4. Default: "internal"
  *
  * @returns {string}
  */
@@ -2376,12 +2517,12 @@ function resolveBackendName() {
   }
 
   // 3. Default
-  return "github";
+  return "internal";
 }
 
 /**
  * Get the active kanban adapter.
- * @returns {VKAdapter|GitHubIssuesAdapter|JiraAdapter} Adapter instance.
+ * @returns {InternalAdapter|VKAdapter|GitHubIssuesAdapter|JiraAdapter} Adapter instance.
  */
 export function getKanbanAdapter() {
   const name = resolveBackendName();
@@ -2396,7 +2537,7 @@ export function getKanbanAdapter() {
 
 /**
  * Switch the kanban backend at runtime.
- * @param {string} name Backend name ("vk", "github", "jira").
+ * @param {string} name Backend name ("internal", "vk", "github", "jira").
  */
 export function setKanbanBackend(name) {
   const normalised = (name || "").trim().toLowerCase();

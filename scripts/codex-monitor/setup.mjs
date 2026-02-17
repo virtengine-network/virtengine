@@ -860,8 +860,8 @@ function normalizeSetupConfiguration({ env, configJson, repoRoot, slug }) {
 
   env.KANBAN_BACKEND = normalizeEnum(
     env.KANBAN_BACKEND,
-    ["vk", "github", "jira"],
-    "vk",
+    ["internal", "vk", "github", "jira"],
+    "internal",
   );
   env.EXECUTOR_MODE = normalizeEnum(
     env.EXECUTOR_MODE,
@@ -1757,16 +1757,21 @@ async function main() {
     // ── Step 7: Kanban + Execution ─────────────────────────
     heading("Step 7 of 9 — Kanban & Execution");
     const backendDefault = String(
-      process.env.KANBAN_BACKEND || configJson.kanban?.backend || "github",
+      process.env.KANBAN_BACKEND || configJson.kanban?.backend || "internal",
     )
       .trim()
       .toLowerCase();
     const backendIdx = await prompt.choose(
       "Select task board backend:",
-      ["Vibe-Kanban (vk)", "GitHub Issues (github)"],
-      backendDefault === "github" ? 1 : 0,
+      [
+        "Internal Store (internal, recommended primary)",
+        "Vibe-Kanban (vk)",
+        "GitHub Issues (github)",
+      ],
+      backendDefault === "vk" ? 1 : backendDefault === "github" ? 2 : 0,
     );
-    const selectedKanbanBackend = backendIdx === 1 ? "github" : "vk";
+    const selectedKanbanBackend =
+      backendIdx === 1 ? "vk" : backendIdx === 2 ? "github" : "internal";
     env.KANBAN_BACKEND = selectedKanbanBackend;
     configJson.kanban = { backend: selectedKanbanBackend };
 
@@ -1782,6 +1787,7 @@ async function main() {
         "VK executor/orchestrator",
         "Hybrid (internal + VK)",
       ],
+      selectedKanbanBackend === "internal" ||
       selectedKanbanBackend === "github"
         ? 0
         : modeDefault === "hybrid"
@@ -2424,7 +2430,7 @@ async function runNonInteractive({
   env.GITHUB_REPO = process.env.GITHUB_REPO || slug || "";
   env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
   env.TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
-  env.KANBAN_BACKEND = process.env.KANBAN_BACKEND || "github";
+  env.KANBAN_BACKEND = process.env.KANBAN_BACKEND || "internal";
   env.EXECUTOR_MODE = process.env.EXECUTOR_MODE || "internal";
   env.VK_BASE_URL = process.env.VK_BASE_URL || "http://127.0.0.1:54089";
   env.VK_RECOVERY_PORT = process.env.VK_RECOVERY_PORT || "54089";
@@ -2477,7 +2483,7 @@ async function runNonInteractive({
   }
 
   configJson.projectName = env.PROJECT_NAME;
-  configJson.kanban = { backend: env.KANBAN_BACKEND || "github" };
+  configJson.kanban = { backend: env.KANBAN_BACKEND || "internal" };
   configJson.internalExecutor = {
     ...(configJson.internalExecutor || {}),
     mode: env.EXECUTOR_MODE || "internal",
@@ -2591,7 +2597,7 @@ async function writeConfigFiles({ env, configJson, repoRoot, configDir }) {
     const vkPort = env.VK_RECOVERY_PORT || "54089";
     const vkBaseUrl = env.VK_BASE_URL || `http://127.0.0.1:${vkPort}`;
     const kanbanIsVk =
-      (env.KANBAN_BACKEND || "github").toLowerCase() === "vk" ||
+      (env.KANBAN_BACKEND || "internal").toLowerCase() === "vk" ||
       ["vk", "hybrid"].includes((env.EXECUTOR_MODE || "internal").toLowerCase());
     const tomlResult = ensureCodexConfig({
       vkBaseUrl,

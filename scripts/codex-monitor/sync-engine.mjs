@@ -36,6 +36,8 @@ import { getSharedState } from "./shared-state-manager.mjs";
 
 const TAG = "[sync-engine]";
 
+const SYNC_POLICIES = new Set(["internal-primary", "bidirectional"]);
+
 // Shared state configuration
 const SHARED_STATE_ENABLED = process.env.SHARED_STATE_ENABLED !== "false"; // default true
 const SHARED_STATE_STALE_THRESHOLD_MS =
@@ -176,6 +178,8 @@ export class SyncEngine {
   #kanbanAdapter;
   /** @type {Function|null} */
   #sendTelegram;
+  /** @type {"internal-primary"|"bidirectional"} */
+  #syncPolicy;
 
   /** @type {ReturnType<typeof setInterval>|null} */
   #timer = null;
@@ -212,6 +216,14 @@ export class SyncEngine {
     this.#baseIntervalMs = this.#syncIntervalMs;
     this.#kanbanAdapter = options.kanbanAdapter ?? null;
     this.#sendTelegram = options.sendTelegram ?? null;
+    const requestedPolicy = String(
+      options.syncPolicy || process.env.KANBAN_SYNC_POLICY || "internal-primary",
+    )
+      .trim()
+      .toLowerCase();
+    this.#syncPolicy = SYNC_POLICIES.has(requestedPolicy)
+      ? requestedPolicy
+      : "internal-primary";
   }
 
   // -----------------------------------------------------------------------
@@ -254,6 +266,7 @@ export class SyncEngine {
    */
   async pullFromExternal() {
     const result = emptySyncResult();
+    const internalPrimary = this.#syncPolicy === "internal-primary";
 
     /** @type {Array} */
     let externalTasks;
@@ -292,6 +305,29 @@ export class SyncEngine {
           });
           result.pulled++;
           console.log(TAG, `Pulled new task ${ext.id}: ${ext.title}`);
+          continue;
+        }
+
+        if (internalPrimary) {
+          const mergedMeta = {
+            ...(internal.meta || {}),
+            ...(normalizedExt.meta || {}),
+          };
+          updateTask(ext.id, {
+            title: normalizedExt.title ?? internal.title,
+            description: normalizedExt.description ?? internal.description,
+            assignee: normalizedExt.assignee ?? internal.assignee,
+            priority: normalizedExt.priority ?? internal.priority,
+            projectId: normalizedExt.projectId ?? internal.projectId,
+            branchName: normalizedExt.branchName ?? internal.branchName,
+            prNumber: normalizedExt.prNumber ?? internal.prNumber,
+            prUrl: normalizedExt.prUrl ?? internal.prUrl,
+            externalStatus: normalizedExternalStatus,
+            externalBackend:
+              normalizedExt.backend ?? normalizedExt.externalBackend ?? null,
+            meta: mergedMeta,
+          });
+          markSynced(ext.id);
           continue;
         }
 
@@ -403,6 +439,13 @@ export class SyncEngine {
         internal.status !== "cancelled" &&
         internal.status !== "done"
       ) {
+        if (internalPrimary) {
+          console.log(
+            TAG,
+            `External task missing for ${internal.id} — preserving internal task (syncPolicy=internal-primary)`,
+          );
+          continue;
+        }
         try {
           setTaskStatus(internal.id, "cancelled", "external");
           updateTask(internal.id, {
@@ -718,6 +761,7 @@ export class SyncEngine {
       backoffActive: this.#backoffActive,
       currentIntervalMs: this.#syncIntervalMs,
       sharedStateEnabled: SHARED_STATE_ENABLED,
+      syncPolicy: this.#syncPolicy,
     };
   }
 
