@@ -271,7 +271,7 @@ const TAB_LOADERS = {
   dashboard: () =>
     Promise.all([loadStatus(), loadExecutor(), loadProjectSummary()]),
   tasks: () => loadTasks(),
-  agents: () => Promise.all([loadAgents(), loadExecutor()]),
+  agents: () => Promise.all([loadAgents(), loadExecutor(), import("../components/session-list.js").then((m) => m.loadSessions()).catch(() => {})]),
   infra: () =>
     Promise.all([
       loadWorktrees(),

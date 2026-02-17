@@ -30,6 +30,14 @@ import {
 } from "../components/shared.js";
 import { ProgressBar } from "../components/charts.js";
 import { Collapsible } from "../components/forms.js";
+import {
+  SessionList,
+  loadSessions,
+  selectedSessionId,
+  sessionsData,
+} from "../components/session-list.js";
+import { ChatView } from "../components/chat-view.js";
+import { DiffViewer } from "../components/diff-viewer.js";
 
 /* ─── Status indicator helpers ─── */
 function statusColor(s) {
@@ -499,5 +507,61 @@ export function AgentsTab() {
         onClose=${() => setSelectedAgent(null)}
       />
     `}
+
+    <!-- Sessions panel -->
+    <${SessionsPanel} />
+  `;
+}
+
+/* ─── Sessions Panel — split view with list + detail ─── */
+function SessionsPanel() {
+  const [detailTab, setDetailTab] = useState("chat");
+  const sessionId = selectedSessionId.value;
+
+  const handleBack = useCallback(() => {
+    selectedSessionId.value = null;
+  }, []);
+
+  return html`
+    <${Card} title="Sessions">
+      <div class="session-split">
+        <${SessionList} onSelect=${() => setDetailTab("chat")} />
+        <div class="session-detail">
+          ${sessionId && html`
+            <button class="session-back-btn" onClick=${handleBack}>
+              ← Back to sessions
+            </button>
+            <div class="session-detail-tabs">
+              <button
+                class="session-detail-tab ${detailTab === "chat" ? "active" : ""}"
+                onClick=${() => setDetailTab("chat")}
+              >💬 Chat</button>
+              <button
+                class="session-detail-tab ${detailTab === "diff" ? "active" : ""}"
+                onClick=${() => setDetailTab("diff")}
+              >📝 Diff</button>
+              <button
+                class="session-detail-tab ${detailTab === "context" ? "active" : ""}"
+                onClick=${() => setDetailTab("context")}
+              >📋 Context</button>
+            </div>
+          `}
+          ${detailTab === "chat" && html`<${ChatView} sessionId=${sessionId} />`}
+          ${detailTab === "diff" && sessionId && html`<${DiffViewer} sessionId=${sessionId} />`}
+          ${detailTab === "context" && sessionId && html`
+            <div class="chat-view chat-empty-state">
+              <div class="session-empty-icon">📋</div>
+              <div class="session-empty-text">Context view coming soon</div>
+            </div>
+          `}
+          ${!sessionId && detailTab !== "chat" && html`
+            <div class="chat-view chat-empty-state">
+              <div class="session-empty-icon">💬</div>
+              <div class="session-empty-text">Select a session</div>
+            </div>
+          `}
+        </div>
+      </div>
+    <//>
   `;
 }
