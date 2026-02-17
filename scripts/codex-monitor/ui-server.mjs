@@ -5,6 +5,7 @@ import { open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { networkInterfaces } from "node:os";
+import { connect as netConnect } from "node:net";
 import { resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -170,124 +171,87 @@ export function getFirewallState() {
 
 /**
  * Detect the active firewall and check if a given TCP port is allowed.
+ * Uses a TCP self-connect probe as the ground truth, then identifies the
+ * firewall for the fix command.
  * Returns { firewall, blocked, allowCmd, status } or null if no firewall.
  */
-function checkFirewall(port) {
+async function checkFirewall(port) {
+  const lanIp = getLocalLanIp();
+  if (!lanIp) return null;
+
+  // Ground truth: try connecting to ourselves on the LAN IP
+  const reachable = await new Promise((resolve) => {
+    const sock = netConnect({ host: lanIp, port, timeout: 3000 });
+    sock.once("connect", () => { sock.destroy(); resolve(true); });
+    sock.once("error", () => { sock.destroy(); resolve(false); });
+    sock.once("timeout", () => { sock.destroy(); resolve(false); });
+  });
+
+  // Detect which firewall is active (for the fix command)
+  const fwInfo = detectFirewallType(port);
+
+  if (reachable) {
+    return fwInfo
+      ? { ...fwInfo, blocked: false, status: "allowed" }
+      : null;
+  }
+
+  // Port is not reachable — report as blocked
+  return fwInfo
+    ? { ...fwInfo, blocked: true, status: "blocked" }
+    : { firewall: "unknown", blocked: true, allowCmd: `# Check your firewall settings for port ${port}/tcp`, status: "blocked" };
+}
+
+/**
+ * Identify the active firewall and build the fix command (without needing root).
+ */
+function detectFirewallType(port) {
   const platform = process.platform;
   try {
     if (platform === "linux") {
-      // Check ufw first (most common on Ubuntu/Debian)
+      // Check ufw
       try {
-        const ufwStatus = execSync("ufw status 2>/dev/null", { encoding: "utf8", timeout: 5000 });
-        if (ufwStatus.includes("Status: active")) {
-          const portAllowed = new RegExp(`^${port}/tcp\\s+ALLOW`, "m").test(ufwStatus) ||
-            new RegExp(`^${port}\\s+ALLOW`, "m").test(ufwStatus);
+        const active = execSync("systemctl is-active ufw 2>/dev/null", { encoding: "utf8", timeout: 3000 }).trim();
+        if (active === "active") {
           return {
             firewall: "ufw",
-            blocked: !portAllowed,
             allowCmd: `sudo ufw allow ${port}/tcp comment "codex-monitor UI"`,
-            status: portAllowed ? "allowed" : "blocked",
           };
-        }
-      } catch {
-        // ufw not available or not root — try reading status via systemctl
-        try {
-          const active = execSync("systemctl is-active ufw 2>/dev/null", { encoding: "utf8", timeout: 3000 }).trim();
-          if (active === "active") {
-            // ufw is active but we can't read rules without root — assume blocked
-            return {
-              firewall: "ufw",
-              blocked: true,
-              allowCmd: `sudo ufw allow ${port}/tcp comment "codex-monitor UI"`,
-              status: "unknown (need root to check rules)",
-            };
-          }
-        } catch { /* not active */ }
-      }
-
-      // Check firewalld
-      try {
-        const fwActive = execSync("systemctl is-active firewalld 2>/dev/null", { encoding: "utf8", timeout: 3000 }).trim();
-        if (fwActive === "active") {
-          try {
-            const ports = execSync("firewall-cmd --list-ports 2>/dev/null", { encoding: "utf8", timeout: 5000 });
-            const portAllowed = ports.includes(`${port}/tcp`);
-            return {
-              firewall: "firewalld",
-              blocked: !portAllowed,
-              allowCmd: `sudo firewall-cmd --add-port=${port}/tcp --permanent && sudo firewall-cmd --reload`,
-              status: portAllowed ? "allowed" : "blocked",
-            };
-          } catch {
-            return {
-              firewall: "firewalld",
-              blocked: true,
-              allowCmd: `sudo firewall-cmd --add-port=${port}/tcp --permanent && sudo firewall-cmd --reload`,
-              status: "unknown (need root to check rules)",
-            };
-          }
         }
       } catch { /* not active */ }
 
-      // Check raw iptables
+      // Check firewalld
       try {
-        const rules = execSync("iptables -L INPUT -n 2>/dev/null", { encoding: "utf8", timeout: 5000 });
-        // If we can read rules and there's a DROP/REJECT default, port might be blocked
-        const hasRules = rules.includes("DROP") || rules.includes("REJECT");
-        if (hasRules) {
-          const portAllowed = rules.includes(`dpt:${port}`);
+        const active = execSync("systemctl is-active firewalld 2>/dev/null", { encoding: "utf8", timeout: 3000 }).trim();
+        if (active === "active") {
           return {
-            firewall: "iptables",
-            blocked: !portAllowed,
-            allowCmd: `sudo iptables -I INPUT -p tcp --dport ${port} -j ACCEPT`,
-            status: portAllowed ? "allowed" : "likely blocked",
+            firewall: "firewalld",
+            allowCmd: `sudo firewall-cmd --add-port=${port}/tcp --permanent && sudo firewall-cmd --reload`,
           };
         }
-      } catch { /* can't read iptables */ }
+      } catch { /* not active */ }
 
-      return null; // No firewall detected
+      // Fallback: iptables
+      return {
+        firewall: "iptables",
+        allowCmd: `sudo iptables -I INPUT -p tcp --dport ${port} -j ACCEPT`,
+      };
     }
 
     if (platform === "win32") {
-      try {
-        const rules = execSync(
-          `netsh advfirewall firewall show rule name=all dir=in | findstr /C:"${port}"`,
-          { encoding: "utf8", timeout: 10000 },
-        );
-        return {
-          firewall: "windows",
-          blocked: !rules.includes(`${port}`),
-          allowCmd: `netsh advfirewall firewall add rule name="codex-monitor UI" dir=in action=allow protocol=tcp localport=${port}`,
-          status: rules.includes(`${port}`) ? "allowed" : "blocked",
-        };
-      } catch {
-        return {
-          firewall: "windows",
-          blocked: true,
-          allowCmd: `netsh advfirewall firewall add rule name="codex-monitor UI" dir=in action=allow protocol=tcp localport=${port}`,
-          status: "unknown",
-        };
-      }
+      return {
+        firewall: "windows",
+        allowCmd: `netsh advfirewall firewall add rule name="codex-monitor UI" dir=in action=allow protocol=tcp localport=${port}`,
+      };
     }
 
     if (platform === "darwin") {
-      // macOS pf — typically not blocking by default
-      try {
-        const pfStatus = execSync("/sbin/pfctl -s info 2>&1", { encoding: "utf8", timeout: 5000 });
-        if (pfStatus.includes("Status: Enabled")) {
-          return {
-            firewall: "pf",
-            blocked: false, // pf usually allows outbound; we'd need deeper parsing
-            allowCmd: `echo 'pass in proto tcp from any to any port ${port}' | sudo pfctl -ef -`,
-            status: "pf active (manual check recommended)",
-          };
-        }
-      } catch { /* pf not available */ }
-      return null;
+      return {
+        firewall: "pf",
+        allowCmd: `echo 'pass in proto tcp from any to any port ${port}' | sudo pfctl -ef -`,
+      };
     }
-  } catch {
-    // Firewall detection failed entirely
-  }
+  } catch { /* detection failed */ }
   return null;
 }
 
@@ -295,8 +259,8 @@ function checkFirewall(port) {
  * Attempt to open a firewall port. Uses pkexec for GUI prompt, falls back to sudo.
  * Returns { success, message }.
  */
-export function openFirewallPort(port) {
-  const state = firewallState || checkFirewall(port);
+export async function openFirewallPort(port) {
+  const state = firewallState || await checkFirewall(port);
   if (!state || !state.blocked) {
     return { success: true, message: "Port already allowed or no firewall detected." };
   }
@@ -318,7 +282,7 @@ export function openFirewallPort(port) {
     try {
       execSync(pkexecCmd, { encoding: "utf8", timeout: 60000, stdio: "pipe" });
       // Re-check after opening
-      firewallState = checkFirewall(port);
+      firewallState = await checkFirewall(port);
       return { success: true, message: `Firewall rule added via ${firewall}.` };
     } catch (err) {
       // pkexec failed (user dismissed, not available, etc.)
@@ -332,7 +296,7 @@ export function openFirewallPort(port) {
   if (process.platform === "win32") {
     try {
       execSync(allowCmd, { encoding: "utf8", timeout: 30000, stdio: "pipe" });
-      firewallState = checkFirewall(port);
+      firewallState = await checkFirewall(port);
       return { success: true, message: "Windows firewall rule added." };
     } catch {
       return {
@@ -1474,7 +1438,7 @@ export async function startTelegramUiServer(options = {}) {
   console.log(`[telegram-ui] Browser access: ${protocol}://${lanIp}:${actualPort}/?token=${sessionToken}`);
 
   // Check firewall rules for the UI port
-  firewallState = checkFirewall(actualPort);
+  firewallState = await checkFirewall(actualPort);
   if (firewallState) {
     if (firewallState.blocked) {
       console.warn(

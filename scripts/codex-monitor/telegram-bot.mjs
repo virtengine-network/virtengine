@@ -1807,7 +1807,7 @@ async function handleCallbackQuery(query) {
       `Please enter your admin password on the server if prompted.`,
       { parseMode: "Markdown" },
     );
-    const result = openFirewallPort(
+    const result = await openFirewallPort(
       Number(new URL(getTelegramUiUrl() || "http://localhost:5511").port || 5511),
     );
     if (result.success) {
