@@ -10442,8 +10442,10 @@ if (!process.env.VITEST && !acquireMonitorLock(config.cacheDir)) {
 try {
   const vkPort = config.vkRecoveryPort || "54089";
   const vkBaseUrl = config.vkEndpointUrl || `http://127.0.0.1:${vkPort}`;
+  const skipVk = !isVkRuntimeRequired();
   const tomlResult = ensureCodexConfig({
     vkBaseUrl,
+    skipVk,
   });
   if (!tomlResult.noChanges) {
     console.log("[monitor] updated ~/.codex/config.toml:");

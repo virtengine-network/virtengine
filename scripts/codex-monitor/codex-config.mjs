@@ -106,6 +106,63 @@ export function hasVibeKanbanEnv(toml) {
 }
 
 /**
+ * Remove the [mcp_servers.vibe_kanban] and [mcp_servers.vibe_kanban.env]
+ * sections (and their contents) from config.toml.
+ * Returns the cleaned TOML string.
+ */
+export function removeVibeKanbanMcp(toml) {
+  // Line-based approach: walk lines and skip VK-related sections.
+  const lines = toml.split("\n");
+  const out = [];
+  let skipping = false;
+  // Track comment lines immediately preceding a VK section header
+  let pendingComments = [];
+
+  for (const line of lines) {
+    // Detect section headers: lines starting with [ that aren't array values
+    const isSectionHeader = /^\[[\w]/.test(line);
+    const isVkSection =
+      /^\[mcp_servers\.vibe_kanban\b/.test(line);
+
+    if (isVkSection) {
+      // Drop any pending comment lines (they belong to this VK section)
+      pendingComments = [];
+      skipping = true;
+      continue;
+    }
+
+    if (skipping && isSectionHeader) {
+      // We've reached the next non-VK section — stop skipping
+      skipping = false;
+    }
+
+    if (skipping) continue;
+
+    // Buffer comment/blank lines that might precede a VK section header
+    if (/^#.*[Vv]ibe.[Kk]anban/.test(line) || /^# ── .*[Vv]ibe.[Kk]anban/.test(line)) {
+      pendingComments.push(line);
+      continue;
+    }
+
+    // Flush pending comments (they weren't followed by a VK header)
+    if (pendingComments.length) {
+      out.push(...pendingComments);
+      pendingComments = [];
+    }
+
+    out.push(line);
+  }
+
+  // Flush any remaining pending comments
+  if (pendingComments.length) {
+    out.push(...pendingComments);
+  }
+
+  // Clean up excessive blank lines
+  return out.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+/**
  * Check whether the config already has an [agent_sdk] section.
  */
 export function hasAgentSdkConfig(toml) {
@@ -304,12 +361,14 @@ export function ensureRetrySettings(toml, providerName) {
  */
 export function ensureCodexConfig({
   vkBaseUrl = "http://127.0.0.1:54089",
+  skipVk = false,
   dryRun = false,
 } = {}) {
   const result = {
     path: CONFIG_PATH,
     created: false,
     vkAdded: false,
+    vkRemoved: false,
     vkEnvUpdated: false,
     agentSdkAdded: false,
     timeoutsFixed: [],
@@ -332,9 +391,16 @@ export function ensureCodexConfig({
     ].join("\n");
   }
 
-  // ── 1. Ensure vibe_kanban MCP server ──────────────────────
+  // ── 1. Vibe-Kanban MCP server ────────────────────────────
+  // When VK is not the active kanban backend, remove the MCP section
+  // so the Codex CLI doesn't try to spawn it.
 
-  if (!hasVibeKanbanMcp(toml)) {
+  if (skipVk) {
+    if (hasVibeKanbanMcp(toml)) {
+      toml = removeVibeKanbanMcp(toml);
+      result.vkRemoved = true;
+    }
+  } else if (!hasVibeKanbanMcp(toml)) {
     toml += buildVibeKanbanBlock({ vkBaseUrl });
     result.vkAdded = true;
   } else {
@@ -446,6 +512,10 @@ export function printConfigSummary(result, log = console.log) {
 
   if (result.vkAdded) {
     log("  ✅ Added Vibe-Kanban MCP server to Codex config");
+  }
+
+  if (result.vkRemoved) {
+    log("  🗑️  Removed Vibe-Kanban MCP server (VK backend not active)");
   }
 
   if (result.vkEnvUpdated) {

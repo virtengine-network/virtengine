@@ -2590,8 +2590,12 @@ async function writeConfigFiles({ env, configJson, repoRoot, configDir }) {
   } else {
     const vkPort = env.VK_RECOVERY_PORT || "54089";
     const vkBaseUrl = env.VK_BASE_URL || `http://127.0.0.1:${vkPort}`;
+    const kanbanIsVk =
+      (env.KANBAN_BACKEND || "vk").toLowerCase() === "vk" ||
+      ["vk", "hybrid"].includes((env.EXECUTOR_MODE || "vk").toLowerCase());
     const tomlResult = ensureCodexConfig({
       vkBaseUrl,
+      skipVk: !kanbanIsVk,
       dryRun: false,
     });
     printConfigSummary(tomlResult, (msg) => console.log(msg));
