@@ -3,7 +3,7 @@
  *  Manages active tab, history stack, and Telegram BackButton
  * ────────────────────────────────────────────────────────────── */
 
-import { signal } from "https://esm.sh/@preact/signals@1.3.1";
+import { signal } from "@preact/signals";
 import { haptic, showBackButton, hideBackButton } from "./telegram.js";
 import { refreshTab } from "./state.js";
 

@@ -4,13 +4,13 @@
  *  Toggle, Stepper, SliderControl
  * ────────────────────────────────────────────────────────────── */
 
-import { h } from "https://esm.sh/preact@10.25.4";
+import { h } from "preact";
 import {
   useState,
   useRef,
   useCallback,
-} from "https://esm.sh/preact@10.25.4/hooks";
-import htm from "https://esm.sh/htm@3.1.1";
+} from "preact/hooks";
+import htm from "htm";
 
 const html = htm.bind(h);
 

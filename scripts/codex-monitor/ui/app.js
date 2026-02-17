@@ -3,9 +3,9 @@
  *  Modular SPA for Telegram Mini App (no build step)
  * ────────────────────────────────────────────────────────────── */
 
-import { h, render as preactRender } from "https://esm.sh/preact@10.25.4";
-import { useState, useEffect } from "https://esm.sh/preact@10.25.4/hooks";
-import htm from "https://esm.sh/htm@3.1.1";
+import { h, render as preactRender } from "preact";
+import { useState, useEffect } from "preact/hooks";
+import htm from "htm";
 
 const html = htm.bind(h);
 

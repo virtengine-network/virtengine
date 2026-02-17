@@ -3,7 +3,7 @@
  *  Enhanced Telegram Mini App SDK integration
  * ────────────────────────────────────────────────────────────── */
 
-import { signal } from "https://esm.sh/@preact/signals@1.3.1";
+import { signal } from "@preact/signals";
 
 /* ─── Core Accessor ─── */
 

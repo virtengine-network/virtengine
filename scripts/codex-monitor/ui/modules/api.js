@@ -3,7 +3,7 @@
  *  Handles REST calls, WS connection, and command sending
  * ────────────────────────────────────────────────────────────── */
 
-import { signal } from "https://esm.sh/@preact/signals@1.3.1";
+import { signal } from "@preact/signals";
 import { getInitData } from "./telegram.js";
 
 /** Reactive signal: whether the WebSocket is currently connected */

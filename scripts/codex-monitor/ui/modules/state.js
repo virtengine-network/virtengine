@@ -3,7 +3,7 @@
  *  All signals, data loaders, toast system, and tab refresh logic
  * ────────────────────────────────────────────────────────────── */
 
-import { signal } from "https://esm.sh/@preact/signals@1.3.1";
+import { signal } from "@preact/signals";
 import { apiFetch, onWsMessage } from "./api.js";
 import { cloneValue } from "./utils.js";
 import { generateId } from "./utils.js";
