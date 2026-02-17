@@ -444,7 +444,7 @@ async function startTunnel(localPort) {
 
   return new Promise((resolvePromise) => {
     const localUrl = `https://localhost:${localPort}`;
-    const args = ["tunnel", "--url", localUrl, "--no-autoupdate"];
+    const args = ["tunnel", "--url", localUrl, "--no-autoupdate", "--no-tls-verify"];
     console.log(`[telegram-ui] starting cloudflared tunnel → ${localUrl}`);
 
     const child = spawn(cfBin, args, {

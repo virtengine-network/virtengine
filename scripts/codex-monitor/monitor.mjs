@@ -6939,12 +6939,16 @@ async function sendTelegramMessage(text, options = {}) {
   // happens to contain words like "error" or "failed".
   // Orchestrator periodic updates contain counter labels like "Failed: 0" and
   // "error=0" which should NOT trigger error classification.
+  // Status updates (planner, monitor-monitor) contain "Last error: none" which
+  // is informational, not an actual error.
   const isPositive =
     textLower.includes("✅") ||
     textLower.includes("task completed") ||
     textLower.includes("branch merged") ||
     textLower.includes("pr merged") ||
-    (textLower.includes("orchestrator") && textLower.includes("-min update"));
+    (textLower.includes("orchestrator") && textLower.includes("-min update")) ||
+    (textLower.includes("update") && textLower.includes("last error: none")) ||
+    (textLower.includes("update") && textLower.includes("- reason:"));
 
   // Priority 1: Critical/Fatal
   if (
