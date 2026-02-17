@@ -61,6 +61,7 @@ import { loadExecutorConfig } from "./config.mjs";
 import {
   getTelegramUiUrl,
   startTelegramUiServer,
+  stopTelegramUiServer,
   getLocalLanIp,
   getFirewallState,
   openFirewallPort,
@@ -7798,6 +7799,7 @@ export function stopTelegramBot(options = {}) {
     stopBatchFlushLoop();
   }
   void releaseTelegramPollLock();
+  stopTelegramUiServer();
   console.log("[telegram-bot] stopped");
 }
 

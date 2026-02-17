@@ -789,12 +789,17 @@ let vkErrorBurstStartedAt = 0;
 let vkErrorBurstCount = 0;
 let vkErrorSuppressedUntil = 0;
 let vkErrorSuppressionReason = "";
+let vkErrorSuppressionMs = 0;
 const VK_ERROR_SUPPRESSION_DISABLED =
   isTruthyFlag(process.env.VITEST) ||
   String(process.env.NODE_ENV || "").toLowerCase() === "test";
 const VK_ERROR_BURST_WINDOW_MS = 30_000;
 const VK_ERROR_BURST_THRESHOLD = 3;
 const VK_ERROR_SUPPRESSION_MS = 60_000;
+const VK_ERROR_SUPPRESSION_MAX_MS = 5 * 60_000;
+const VK_WARNING_THROTTLE_DISABLED = VK_ERROR_SUPPRESSION_DISABLED;
+const VK_WARNING_THROTTLE_MS = 5 * 60_000;
+const vkWarningLastAt = new Map();
 let vibeKanbanProcess = null;
 let vibeKanbanStartedAt = 0;
 
@@ -2412,6 +2417,7 @@ function resetVkErrorBurst() {
   vkErrorBurstCount = 0;
   vkErrorSuppressedUntil = 0;
   vkErrorSuppressionReason = "";
+  vkErrorSuppressionMs = VK_ERROR_SUPPRESSION_MS;
 }
 
 function noteVkErrorBurst(reason) {
@@ -2426,14 +2432,21 @@ function noteVkErrorBurst(reason) {
   }
   vkErrorBurstCount += 1;
   if (vkErrorBurstCount >= VK_ERROR_BURST_THRESHOLD) {
-    vkErrorSuppressedUntil = now + VK_ERROR_SUPPRESSION_MS;
+    if (!vkErrorSuppressionMs) {
+      vkErrorSuppressionMs = VK_ERROR_SUPPRESSION_MS;
+    }
+    vkErrorSuppressedUntil = now + vkErrorSuppressionMs;
     vkErrorSuppressionReason = reason || "vk-unavailable";
     vkErrorBurstCount = 0;
     vkErrorBurstStartedAt = now;
     console.warn(
       `[monitor] fetchVk suppressing VK requests for ${Math.round(
-        VK_ERROR_SUPPRESSION_MS / 1000,
+        vkErrorSuppressionMs / 1000,
       )}s (reason: ${vkErrorSuppressionReason})`,
+    );
+    vkErrorSuppressionMs = Math.min(
+      (vkErrorSuppressionMs || VK_ERROR_SUPPRESSION_MS) * 2,
+      VK_ERROR_SUPPRESSION_MAX_MS,
     );
   }
 }
@@ -2446,6 +2459,17 @@ function shouldSuppressVkRequest(method) {
     return method === "GET";
   }
   return false;
+}
+
+function shouldLogVkWarning(key, intervalMs = VK_WARNING_THROTTLE_MS) {
+  if (VK_WARNING_THROTTLE_DISABLED) return true;
+  const now = Date.now();
+  const last = vkWarningLastAt.get(key) || 0;
+  if (now - last < intervalMs) {
+    return false;
+  }
+  vkWarningLastAt.set(key, now);
+  return true;
 }
 
 async function fetchVk(path, opts = {}) {
@@ -2481,7 +2505,9 @@ async function fetchVk(path, opts = {}) {
     // Network error, timeout, abort, etc. - res is undefined
     const msg = err?.message || String(err);
     if (!msg.includes("abort")) {
-      console.warn(`[monitor] fetchVk ${method} ${path} error: ${msg}`);
+      if (shouldLogVkWarning("network-error")) {
+        console.warn(`[monitor] fetchVk ${method} ${path} error: ${msg}`);
+      }
       void triggerVibeKanbanRecovery(
         `fetchVk ${method} ${path} network error: ${msg}`,
       );
@@ -2495,14 +2521,10 @@ async function fetchVk(path, opts = {}) {
   // Safety: validate response object (guards against mock/test issues)
   if (!res || typeof res.ok === "undefined") {
     const now = Date.now();
-    if (now - vkInvalidResponseLoggedAt > 5 * 60 * 1000) {
+    if (now - vkInvalidResponseLoggedAt > VK_WARNING_THROTTLE_MS) {
       vkInvalidResponseLoggedAt = now;
       console.warn(
         `[monitor] fetchVk ${method} ${path} error: invalid response object (res=${!!res}, res.ok=${res?.ok})`,
-      );
-    } else {
-      console.warn(
-        `[monitor] fetchVk ${method} ${path} error: invalid response object [details suppressed]`,
       );
     }
     void triggerVibeKanbanRecovery(
@@ -2514,9 +2536,11 @@ async function fetchVk(path, opts = {}) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    console.warn(
-      `[monitor] fetchVk ${method} ${path} failed: ${res.status} ${text.slice(0, 200)}`,
-    );
+    if (shouldLogVkWarning(`http-${res.status}`)) {
+      console.warn(
+        `[monitor] fetchVk ${method} ${path} failed: ${res.status} ${text.slice(0, 200)}`,
+      );
+    }
     if (res.status >= 500) {
       void triggerVibeKanbanRecovery(
         `fetchVk ${method} ${path} HTTP ${res.status}`,
@@ -2545,7 +2569,7 @@ async function fetchVk(path, opts = {}) {
       }
     }
     const now = Date.now();
-    const shouldLogDetails = now - vkNonJsonContentTypeLoggedAt > 5 * 60 * 1000;
+    const shouldLogDetails = shouldLogVkWarning("non-json");
     if (shouldLogDetails) {
       vkNonJsonContentTypeLoggedAt = now;
       console.warn(
@@ -2556,10 +2580,6 @@ async function fetchVk(path, opts = {}) {
           `[monitor] fetchVk ${method} ${path} body: ${text.slice(0, 200)}`,
         );
       }
-    } else {
-      console.warn(
-        `[monitor] fetchVk ${method} ${path} error: non-JSON response (${contentType || "unknown"}) [details suppressed]`,
-      );
     }
     void triggerVibeKanbanRecovery(
       `fetchVk ${method} ${path} non-JSON response`,
@@ -2579,9 +2599,11 @@ async function fetchVk(path, opts = {}) {
     resetVkErrorBurst();
     return parsed;
   } catch (err) {
-    console.warn(
-      `[monitor] fetchVk ${method} ${path} error: Invalid JSON - ${err.message}`,
-    );
+    if (shouldLogVkWarning("invalid-json")) {
+      console.warn(
+        `[monitor] fetchVk ${method} ${path} error: Invalid JSON - ${err.message}`,
+      );
+    }
     noteVkErrorBurst("invalid-json");
     return null;
   }

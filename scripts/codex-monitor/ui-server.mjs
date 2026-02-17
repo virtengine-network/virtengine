@@ -1467,6 +1467,35 @@ async function handleApi(req, res, url) {
     return;
   }
 
+  if (path === "/api/project-summary") {
+    try {
+      const adapter = getKanbanAdapter();
+      const projects = await adapter.listProjects();
+      const project = projects?.[0] || null;
+      if (project) {
+        const tasks = await adapter.listTasks(project.id || project.name).catch(() => []);
+        const completedCount = tasks.filter(
+          (t) => t.status === "done" || t.status === "closed" || t.status === "completed",
+        ).length;
+        jsonResponse(res, 200, {
+          ok: true,
+          data: {
+            id: project.id || project.name,
+            name: project.name || project.title || project.id,
+            description: project.description || project.body || null,
+            taskCount: tasks.length,
+            completedCount,
+          },
+        });
+      } else {
+        jsonResponse(res, 200, { ok: true, data: null });
+      }
+    } catch (err) {
+      jsonResponse(res, 200, { ok: true, data: null });
+    }
+    return;
+  }
+
   jsonResponse(res, 404, { ok: false, error: "Unknown API endpoint" });
 }
 
