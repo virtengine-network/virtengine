@@ -1,8 +1,9 @@
 import { execSync } from "node:child_process";
-import { createHmac } from "node:crypto";
-import { existsSync } from "node:fs";
-import { open, readFile, readdir, stat } from "node:fs/promises";
+import { createHmac, X509Certificate } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { networkInterfaces } from "node:os";
 import { resolve, extname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,9 +77,73 @@ const MIME_TYPES = {
 
 let uiServer = null;
 let uiServerUrl = null;
+let uiServerTls = false;
 let wsServer = null;
 const wsClients = new Set();
 let uiDeps = {};
+
+// ── Auto-TLS self-signed certificate generation ──────────────────────
+const TLS_CACHE_DIR = resolve(__dirname, ".cache", "tls");
+const TLS_CERT_PATH = resolve(TLS_CACHE_DIR, "server.crt");
+const TLS_KEY_PATH = resolve(TLS_CACHE_DIR, "server.key");
+const TLS_DISABLED = ["1", "true", "yes"].includes(
+  String(process.env.TELEGRAM_UI_TLS_DISABLE || "").toLowerCase(),
+);
+
+/**
+ * Ensures a self-signed TLS certificate exists in .cache/tls/.
+ * Generates one via openssl if missing or expired (valid for 825 days).
+ * Returns { key, cert } buffers or null if generation fails.
+ */
+function ensureSelfSignedCert() {
+  try {
+    if (!existsSync(TLS_CACHE_DIR)) {
+      mkdirSync(TLS_CACHE_DIR, { recursive: true });
+    }
+
+    // Reuse existing cert if still valid
+    if (existsSync(TLS_CERT_PATH) && existsSync(TLS_KEY_PATH)) {
+      try {
+        const certPem = readFileSync(TLS_CERT_PATH, "utf8");
+        const cert = new X509Certificate(certPem);
+        const notAfter = new Date(cert.validTo);
+        if (notAfter > new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)) {
+          return {
+            key: readFileSync(TLS_KEY_PATH),
+            cert: readFileSync(TLS_CERT_PATH),
+          };
+        }
+      } catch {
+        // Cert parse failed or expired — regenerate
+      }
+    }
+
+    // Generate self-signed cert via openssl
+    const lanIp = getLocalLanIp();
+    const subjectAltName = `DNS:localhost,IP:127.0.0.1,IP:${lanIp}`;
+    execSync(
+      `openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 ` +
+        `-keyout "${TLS_KEY_PATH}" -out "${TLS_CERT_PATH}" ` +
+        `-days 825 -nodes -batch ` +
+        `-subj "/CN=codex-monitor" ` +
+        `-addext "subjectAltName=${subjectAltName}"`,
+      { stdio: "pipe", timeout: 10_000 },
+    );
+
+    console.log(
+      `[telegram-ui] auto-generated self-signed TLS cert (SAN: ${subjectAltName})`,
+    );
+    return {
+      key: readFileSync(TLS_KEY_PATH),
+      cert: readFileSync(TLS_CERT_PATH),
+    };
+  } catch (err) {
+    console.warn(
+      `[telegram-ui] TLS cert generation failed, falling back to HTTP: ${err.message}`,
+    );
+    return null;
+  }
+}
 
 export function injectUiDependencies(deps = {}) {
   uiDeps = { ...uiDeps, ...deps };
@@ -87,7 +152,25 @@ export function injectUiDependencies(deps = {}) {
 export function getTelegramUiUrl() {
   const explicit =
     process.env.TELEGRAM_UI_BASE_URL || process.env.TELEGRAM_WEBAPP_URL;
-  if (explicit) return explicit.replace(/\/+$/, "");
+  if (explicit) {
+    // Auto-upgrade explicit HTTP URL to HTTPS when the server is running TLS
+    if (uiServerTls && explicit.startsWith("http://")) {
+      let upgraded = explicit.replace(/^http:\/\//, "https://");
+      // Ensure the port is present (the explicit URL may omit it)
+      try {
+        const parsed = new URL(upgraded);
+        if (!parsed.port && uiServer) {
+          const actualPort = uiServer.address()?.port;
+          if (actualPort) parsed.port = String(actualPort);
+          upgraded = parsed.href;
+        }
+      } catch {
+        // URL parse failed — use as-is
+      }
+      return upgraded.replace(/\/+$/, "");
+    }
+    return explicit.replace(/\/+$/, "");
+  }
   return uiServerUrl;
 }
 
@@ -1027,7 +1110,13 @@ export async function startTelegramUiServer(options = {}) {
 
   injectUiDependencies(options.dependencies || {});
 
-  uiServer = createServer(async (req, res) => {
+  // Auto-TLS: generate a self-signed cert for HTTPS unless explicitly disabled
+  let tlsOpts = null;
+  if (!TLS_DISABLED) {
+    tlsOpts = ensureSelfSignedCert();
+  }
+
+  const requestHandler = async (req, res) => {
     const url = new URL(
       req.url || "/",
       `http://${req.headers.host || "localhost"}`,
@@ -1037,7 +1126,15 @@ export async function startTelegramUiServer(options = {}) {
       return;
     }
     await handleStatic(req, res, url);
-  });
+  };
+
+  if (tlsOpts) {
+    uiServer = createHttpsServer(tlsOpts, requestHandler);
+    uiServerTls = true;
+  } else {
+    uiServer = createServer(requestHandler);
+    uiServerTls = false;
+  }
 
   wsServer = new WebSocketServer({ noServer: true });
   wsServer.on("connection", (socket) => {
@@ -1113,16 +1210,20 @@ export async function startTelegramUiServer(options = {}) {
   const lanIp = getLocalLanIp();
   const host = publicHost || lanIp;
   const actualPort = uiServer.address().port;
-  const protocol =
-    publicHost &&
-    !publicHost.startsWith("192.") &&
-    !publicHost.startsWith("10.") &&
-    !publicHost.startsWith("172.")
+  const protocol = uiServerTls
+    ? "https"
+    : publicHost &&
+        !publicHost.startsWith("192.") &&
+        !publicHost.startsWith("10.") &&
+        !publicHost.startsWith("172.")
       ? "https"
       : "http";
   uiServerUrl = `${protocol}://${host}:${actualPort}`;
   console.log(`[telegram-ui] server listening on ${uiServerUrl}`);
-  console.log(`[telegram-ui] LAN access: http://${lanIp}:${actualPort}`);
+  if (uiServerTls) {
+    console.log(`[telegram-ui] TLS enabled (self-signed) — Telegram WebApp buttons will use HTTPS`);
+  }
+  console.log(`[telegram-ui] LAN access: ${protocol}://${lanIp}:${actualPort}`);
 
   return uiServer;
 }
@@ -1151,6 +1252,7 @@ export function stopTelegramUiServer() {
     /* best effort */
   }
   uiServer = null;
+  uiServerTls = false;
 }
 
 export { getLocalLanIp };

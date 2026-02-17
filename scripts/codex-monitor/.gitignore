@@ -20,3 +20,6 @@ vibe-kanban.ps1
 node_modules/
 *.tgz
 /.codex-monitor/
+
+# Auto-generated TLS certificates
+.cache/tls/
