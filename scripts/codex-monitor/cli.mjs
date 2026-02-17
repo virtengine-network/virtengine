@@ -504,15 +504,38 @@ async function main() {
     // Redirect console to log file on daemon child
     const { createWriteStream } = await import("node:fs");
     const logStream = createWriteStream(DAEMON_LOG, { flags: "a" });
+    let logStreamErrored = false;
+    logStream.on("error", () => {
+      logStreamErrored = true;
+    });
     const origStdout = process.stdout.write.bind(process.stdout);
     const origStderr = process.stderr.write.bind(process.stderr);
+    const safeWrite = (writeFn, chunk, args) => {
+      try {
+        return writeFn(chunk, ...args);
+      } catch (err) {
+        if (
+          err &&
+          (err.code === "EPIPE" ||
+            err.code === "ERR_STREAM_DESTROYED" ||
+            err.code === "ERR_STREAM_WRITE_AFTER_END")
+        ) {
+          return false;
+        }
+        throw err;
+      }
+    };
     process.stdout.write = (chunk, ...a) => {
-      logStream.write(chunk);
-      return origStdout(chunk, ...a);
+      if (!logStreamErrored) {
+        safeWrite(logStream.write.bind(logStream), chunk, []);
+      }
+      return safeWrite(origStdout, chunk, a);
     };
     process.stderr.write = (chunk, ...a) => {
-      logStream.write(chunk);
-      return origStderr(chunk, ...a);
+      if (!logStreamErrored) {
+        safeWrite(logStream.write.bind(logStream), chunk, []);
+      }
+      return safeWrite(origStderr, chunk, a);
     };
     console.log(
       `\n[daemon] codex-monitor started at ${new Date().toISOString()} (PID ${process.pid})`,

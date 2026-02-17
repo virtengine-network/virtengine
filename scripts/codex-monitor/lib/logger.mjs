@@ -528,6 +528,21 @@ export function installConsoleInterceptor(opts = {}) {
   // from our own console.warn/error interceptors to avoid duplicates.
   let _inInterceptor = false;
   const _origStderrWrite = process.stderr.write.bind(process.stderr);
+  const safeStderrWrite = (chunk, ...rest) => {
+    try {
+      return _origStderrWrite(chunk, ...rest);
+    } catch (err) {
+      if (
+        err &&
+        (err.code === "EPIPE" ||
+          err.code === "ERR_STREAM_DESTROYED" ||
+          err.code === "ERR_STREAM_WRITE_AFTER_END")
+      ) {
+        return false;
+      }
+      throw err;
+    }
+  };
   process.stderr.write = (chunk, ...rest) => {
     if (!_inInterceptor) {
       const text = typeof chunk === "string" ? chunk : chunk?.toString?.("utf8") || "";
@@ -535,7 +550,7 @@ export function installConsoleInterceptor(opts = {}) {
         writeToErrorFile("STDERR", "process", text.replace(/\n$/, ""));
       }
     }
-    return _origStderrWrite(chunk, ...rest);
+    return safeStderrWrite(chunk, ...rest);
   };
 }
 
