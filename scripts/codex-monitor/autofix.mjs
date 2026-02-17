@@ -33,6 +33,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getConsoleLevel, LogLevel } from "./lib/logger.mjs";
+import { isBenignErrorMention } from "./utils.mjs";
 import { resolvePromptTemplate } from "./agent-prompts.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -277,7 +278,8 @@ export function extractFallbackContext(logText, reason) {
 
   const errorLines = lines
     .slice(-40)
-    .filter((l) => errorIndicators.some((re) => re.test(l)));
+    .filter((l) => errorIndicators.some((re) => re.test(l)))
+    .filter((l) => !isBenignErrorMention(l));
 
   return {
     tail,

@@ -1,11 +1,11 @@
 /* ─────────────────────────────────────────────────────────────
- *  Kanban Board Component — drag-and-drop task board
+ *  Kanban Board Component — Trello-style drag-and-drop task board
  * ────────────────────────────────────────────────────────────── */
 import { h } from "preact";
-import { useState, useCallback } from "preact/hooks";
+import { useState, useCallback, useRef, useEffect } from "preact/hooks";
 import htm from "htm";
 import { signal, computed } from "@preact/signals";
-import { tasksData, tasksLoaded, showToast, runOptimistic } from "../modules/state.js";
+import { tasksData, tasksLoaded, showToast, runOptimistic, loadTasks } from "../modules/state.js";
 import { apiFetch } from "../modules/api.js";
 import { haptic } from "../modules/telegram.js";
 import { formatRelative, truncate, cloneValue } from "../modules/utils.js";
@@ -27,7 +27,6 @@ const COLUMNS = [
   { id: "done", title: "Done", icon: "\u2705", color: "var(--color-done, #22c55e)" },
 ];
 
-// Map column ID → canonical status for API updates
 const COLUMN_TO_STATUS = {
   backlog: "todo",
   inProgress: "inprogress",
@@ -40,6 +39,13 @@ const PRIORITY_COLORS = {
   high: "var(--color-high, #f59e0b)",
   medium: "var(--color-medium, #3b82f6)",
   low: "var(--color-low, #8b95a2)",
+};
+
+const PRIORITY_LABELS = {
+  critical: "CRIT",
+  high: "HIGH",
+  medium: "MED",
+  low: "LOW",
 };
 
 function getColumnForStatus(status) {
@@ -68,6 +74,21 @@ const columnData = computed(() => {
 const dragTaskId = signal(null);
 const dragOverCol = signal(null);
 
+/* ─── Inline create for a column ─── */
+async function createTaskInColumn(columnStatus, title) {
+  haptic("medium");
+  try {
+    await apiFetch("/api/tasks/create", {
+      method: "POST",
+      body: JSON.stringify({ title, status: columnStatus }),
+    });
+    showToast("Task created", "success");
+    await loadTasks();
+  } catch {
+    /* toast via apiFetch */
+  }
+}
+
 /* ─── KanbanCard ─── */
 function KanbanCard({ task, onOpen }) {
   const onDragStart = useCallback((e) => {
@@ -82,7 +103,8 @@ function KanbanCard({ task, onOpen }) {
     e.currentTarget.classList.remove("dragging");
   }, []);
 
-  const priorityColor = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.low;
+  const priorityColor = PRIORITY_COLORS[task.priority] || null;
+  const priorityLabel = PRIORITY_LABELS[task.priority] || null;
 
   return html`
     <div
@@ -92,13 +114,16 @@ function KanbanCard({ task, onOpen }) {
       onDragEnd=${onDragEnd}
       onClick=${() => onOpen(task.id)}
     >
+      ${priorityLabel && html`
+        <span class="kanban-card-badge" style="background:${priorityColor}">${priorityLabel}</span>
+      `}
       <div class="kanban-card-title">${truncate(task.title || "(untitled)", 80)}</div>
+      ${task.description && html`
+        <div class="kanban-card-desc">${truncate(task.description, 72)}</div>
+      `}
       <div class="kanban-card-meta">
-        ${task.priority && html`
-          <span class="kanban-card-priority" style="background:${priorityColor}" title=${task.priority}></span>
-        `}
         <span class="kanban-card-id">${typeof task.id === "string" ? truncate(task.id, 12) : task.id}</span>
-        ${task.updated_at && html`<span>${formatRelative(task.updated_at)}</span>`}
+        ${task.created_at && html`<span>${formatRelative(task.created_at)}</span>`}
       </div>
     </div>
   `;
@@ -106,6 +131,13 @@ function KanbanCard({ task, onOpen }) {
 
 /* ─── KanbanColumn ─── */
 function KanbanColumn({ col, tasks, onOpen }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (showCreate && inputRef.current) inputRef.current.focus();
+  }, [showCreate]);
+
   const onDragOver = useCallback((e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -123,16 +155,14 @@ function KanbanColumn({ col, tasks, onOpen }) {
     dragTaskId.value = null;
     if (!taskId) return;
 
-    // Find current column for the task
     const currentTask = (tasksData.value || []).find((t) => t.id === taskId);
     if (!currentTask) return;
     const currentCol = getColumnForStatus(currentTask.status);
-    if (currentCol === col.id) return; // no-op same column
+    if (currentCol === col.id) return;
 
     const newStatus = COLUMN_TO_STATUS[col.id] || "todo";
     haptic("medium");
 
-    // Optimistic update
     const prev = cloneValue(tasksData.value);
     try {
       await runOptimistic(
@@ -163,6 +193,17 @@ function KanbanColumn({ col, tasks, onOpen }) {
     }
   }, [col.id, col.title]);
 
+  const handleInlineKeyDown = useCallback((e) => {
+    if (e.key === "Enter" && e.target.value.trim()) {
+      createTaskInColumn(COLUMN_TO_STATUS[col.id] || "todo", e.target.value.trim());
+      e.target.value = "";
+      setShowCreate(false);
+    }
+    if (e.key === "Escape") {
+      setShowCreate(false);
+    }
+  }, [col.id]);
+
   const isOver = dragOverCol.value === col.id;
 
   return html`
@@ -174,17 +215,32 @@ function KanbanColumn({ col, tasks, onOpen }) {
     >
       <div class="kanban-column-header" style="border-bottom-color: ${col.color}">
         <span>${col.icon}</span>
-        <span>${col.title}</span>
+        <span class="kanban-column-title">${col.title}</span>
         <span class="kanban-count">${tasks.length}</span>
+        <button
+          class="kanban-add-btn"
+          onClick=${() => { setShowCreate(!showCreate); haptic(); }}
+          title="Add task to ${col.title}"
+        >+</button>
       </div>
       <div class="kanban-cards">
+        ${showCreate && html`
+          <input
+            ref=${inputRef}
+            class="kanban-inline-create"
+            placeholder="Task title…"
+            onKeyDown=${handleInlineKeyDown}
+            onBlur=${() => setShowCreate(false)}
+          />
+        `}
         ${tasks.length
           ? tasks.map((task) => html`
               <${KanbanCard} key=${task.id} task=${task} onOpen=${onOpen} />
             `)
-          : html`<div class="kanban-empty-col">No tasks</div>`
+          : html`<div class="kanban-empty-col">Drop tasks here</div>`
         }
       </div>
+      <div class="kanban-scroll-fade"></div>
     </div>
   `;
 }

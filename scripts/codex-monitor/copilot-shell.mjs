@@ -23,6 +23,9 @@ const STATE_FILE = resolve(__dirname, "logs", "copilot-shell-state.json");
 const SESSION_LOG_DIR = resolve(__dirname, "logs", "copilot-sessions");
 const REPO_ROOT = resolveRepoRoot();
 
+// Valid reasoning effort levels for models that support it
+const VALID_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"];
+
 // ── State ────────────────────────────────────────────────────────────────────
 
 let CopilotClientClass = null; // CopilotClient class from SDK
@@ -119,6 +122,119 @@ function logSessionEvent(logPath, event) {
   }
 }
 
+// ── CLI Args & Handlers ──────────────────────────────────────────────────────
+
+/**
+ * Build CLI arguments for the Copilot subprocess.
+ * Enables experimental features (fleet, autopilot), auto-permissions, and autonomy.
+ */
+function buildCliArgs() {
+  const args = [];
+
+  // Always enable experimental features (fleet, autopilot, persisted permissions, etc.)
+  if (!envFlagEnabled(process.env.COPILOT_NO_EXPERIMENTAL)) {
+    args.push("--experimental");
+  }
+
+  // Auto-approve all permissions (tools, paths, URLs) — equivalent to /allow-all or /yolo
+  if (!envFlagEnabled(process.env.COPILOT_NO_ALLOW_ALL)) {
+    args.push("--allow-all");
+  }
+
+  // Disable ask_user tool — agent works fully autonomously
+  if (!envFlagEnabled(process.env.COPILOT_ENABLE_ASK_USER)) {
+    args.push("--no-ask-user");
+  }
+
+  // Prevent auto-update during SDK sessions (avoid mid-task restarts)
+  args.push("--no-auto-update");
+
+  // Enable all GitHub MCP tools if requested
+  if (envFlagEnabled(process.env.COPILOT_ENABLE_ALL_GITHUB_MCP_TOOLS)) {
+    args.push("--enable-all-github-mcp-tools");
+  }
+
+  // Disable built-in MCPs if custom ones are provided exclusively
+  if (envFlagEnabled(process.env.COPILOT_DISABLE_BUILTIN_MCPS)) {
+    args.push("--disable-builtin-mcps");
+  }
+
+  if (args.length > 0) {
+    console.log(`[copilot-shell] cliArgs: ${args.join(" ")}`);
+  }
+  return args;
+}
+
+/**
+ * Auto-approve all permission requests (shell, write, read, mcp, url).
+ * This is the SDK equivalent of --allow-all / --yolo.
+ */
+function autoApprovePermissions(request, _invocation) {
+  return { kind: "approved", rules: [] };
+}
+
+/**
+ * Auto-respond to agent user-input requests.
+ * Provides sensible defaults so the agent never blocks waiting for human input.
+ */
+function autoRespondToUserInput(request, _invocation) {
+  // If choices are provided, pick the first one
+  if (request.choices && request.choices.length > 0) {
+    console.log(
+      `[copilot-shell] auto-responding to "${request.question}" with choice: "${request.choices[0]}"`,
+    );
+    return { answer: request.choices[0], wasFreeform: false };
+  }
+  // For y/n style questions, default to "yes"
+  const question = (request.question || "").toLowerCase();
+  if (/\b(y\/n|yes\/no|confirm|proceed|continue)\b/i.test(question)) {
+    console.log(
+      `[copilot-shell] auto-responding "yes" to: "${request.question}"`,
+    );
+    return { answer: "yes", wasFreeform: true };
+  }
+  // Generic: tell the agent to proceed with its best judgment
+  console.log(
+    `[copilot-shell] auto-responding to: "${request.question}"`,
+  );
+  return {
+    answer: "Proceed with your best judgment. Do not wait for human input.",
+    wasFreeform: true,
+  };
+}
+
+/**
+ * Session lifecycle hooks for observability and logging.
+ */
+function buildSessionHooks() {
+  return {
+    onPreToolUse: async (input, _invocation) => {
+      // Auto-allow all tool executions
+      return { permissionDecision: "allow" };
+    },
+    onSessionStart: async (input, _invocation) => {
+      console.log(`[copilot-shell] session hook: started (source=${input.source})`);
+      return {};
+    },
+    onSessionEnd: async (input, _invocation) => {
+      console.log(
+        `[copilot-shell] session hook: ended (reason=${input.reason})`,
+      );
+      return {};
+    },
+    onErrorOccurred: async (input, _invocation) => {
+      console.error(
+        `[copilot-shell] session hook: error in ${input.errorContext}: ${input.error} (recoverable=${input.recoverable})`,
+      );
+      // Auto-retry recoverable errors
+      if (input.recoverable) {
+        return { errorHandling: "retry", retryCount: 2 };
+      }
+      return { errorHandling: "skip" };
+    },
+  };
+}
+
 // ── SDK Loading ──────────────────────────────────────────────────────────────
 
 async function loadCopilotSdk() {
@@ -212,26 +328,29 @@ async function ensureClientStarted() {
   const token = detectGitHubToken();
   const transport = resolveCopilotTransport();
 
+  // Build cliArgs for experimental features, permissions, and autonomy
+  const cliArgs = buildCliArgs();
+
   let clientOptions;
   if (transport === "url") {
     if (!cliUrl) {
       console.warn(
         "[copilot-shell] COPILOT_TRANSPORT=url requested but COPILOT_CLI_URL is unset; falling back to auto",
       );
-      clientOptions = cliPath || token ? { cliPath, token } : undefined;
+      clientOptions = cliPath || token ? { cliPath, token, cliArgs } : { cliArgs };
     } else {
       clientOptions = { cliUrl };
     }
   } else if (transport === "cli") {
-    clientOptions = { cliPath: cliPath || "copilot", token };
+    clientOptions = { cliPath: cliPath || "copilot", token, cliArgs };
   } else if (transport === "sdk") {
-    clientOptions = token ? { token } : undefined;
+    clientOptions = token ? { token, cliArgs } : { cliArgs };
   } else {
     clientOptions = cliUrl
       ? { cliUrl }
       : cliPath || token
-        ? { cliPath, token }
-        : undefined;
+        ? { cliPath, token, cliArgs }
+        : { cliArgs };
   }
 
   await withSanitizedOpenAiEnv(async () => {
@@ -372,10 +491,28 @@ function buildSessionConfig() {
       content: SYSTEM_PROMPT,
     },
     infiniteSessions: { enabled: true },
+    // Auto-approve all permissions (belt-and-suspenders with --allow-all cliArg)
+    onPermissionRequest: autoApprovePermissions,
+    // Auto-respond to agent questions (belt-and-suspenders with --no-ask-user)
+    onUserInputRequest: autoRespondToUserInput,
+    // Session lifecycle hooks for observability
+    hooks: buildSessionHooks(),
+    // Set working directory to repo root
+    workingDirectory: REPO_ROOT,
   };
   const model =
     process.env.COPILOT_MODEL || process.env.COPILOT_SDK_MODEL || "";
   if (model) config.model = model;
+
+  // Reasoning effort: low | medium | high | xhigh
+  const effort =
+    process.env.COPILOT_REASONING_EFFORT ||
+    process.env.COPILOT_SDK_REASONING_EFFORT ||
+    "";
+  if (effort && VALID_REASONING_EFFORTS.includes(effort.toLowerCase())) {
+    config.reasoningEffort = effort.toLowerCase();
+  }
+
   const mcpServers = loadMcpServers();
   if (mcpServers) config.mcpServers = mcpServers;
   return config;

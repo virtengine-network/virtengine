@@ -374,21 +374,21 @@ export function TasksTab() {
     haptic();
     if (tasksFilter) tasksFilter.value = s;
     if (tasksPage) tasksPage.value = 0;
-    await refreshTab();
+    await refreshTab("tasks");
   };
 
   const handlePriorityFilter = async (p) => {
     haptic();
     if (tasksPriority) tasksPriority.value = p;
     if (tasksPage) tasksPage.value = 0;
-    await refreshTab();
+    await refreshTab("tasks");
   };
 
   const handleSort = async (e) => {
     haptic();
     if (tasksSort) tasksSort.value = e.target.value;
     if (tasksPage) tasksPage.value = 0;
-    await refreshTab();
+    await refreshTab("tasks");
   };
 
   const handleSearch = useCallback(
@@ -400,12 +400,12 @@ export function TasksTab() {
 
   const handlePrev = async () => {
     if (tasksPage) tasksPage.value = Math.max(0, page - 1);
-    await refreshTab();
+    await refreshTab("tasks");
   };
 
   const handleNext = async () => {
     if (tasksPage) tasksPage.value = page + 1;
-    await refreshTab();
+    await refreshTab("tasks");
   };
 
   const handleStatusUpdate = async (taskId, newStatus) => {
@@ -796,7 +796,7 @@ function CreateTaskModalInline({ onClose }) {
       });
       showToast("Task created", "success");
       onClose();
-      await refreshTab();
+      await loadTasks();
     } catch {
       /* toast */
     }

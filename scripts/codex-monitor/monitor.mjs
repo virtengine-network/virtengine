@@ -1638,6 +1638,13 @@ const errorNoisePatterns = [
   /Cannot rebase: (working tree is dirty|git rebase already in progress)/i,
   /VK rebase (failed|requested|unavailable)/i,
   /git fetch failed in worktree/i,
+  // ── Benign "error" mentions in summary/stats lines ──
+  /errors?[=:]\s*0\b/i,
+  /\b0\s+errors?\b/i,
+  /\bno\s+errors?\b/i,
+  /errors?\s*(count|total|sum|rate)\s*[=:]\s*0/i,
+  /\bcomplete\b.*\berrors?[=:]\s*0/i,
+  /\bsuccess\b.*\berrors?\b/i,
 ];
 
 const vkErrorPatterns = [

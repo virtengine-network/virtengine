@@ -36,6 +36,27 @@ export function stripAnsi(text) {
 }
 
 /**
+ * Check if a line mentions "error" in a benign/summary context
+ * (e.g. "errors=0", "0 errors", "no errors found").
+ * Shared by isErrorLine() and autofix fallback to avoid false positives.
+ * @param {string} line - Log line to check
+ * @returns {boolean} True if the "error" mention is benign
+ */
+export function isBenignErrorMention(line) {
+  const benign = [
+    /errors?[=:]\s*0\b/i,
+    /\b0\s+errors?\b/i,
+    /\bno\s+errors?\b/i,
+    /\bcomplete\b.*\berrors?[=:]\s*0/i,
+    /\bpassed\b.*\berrors?\b/i,
+    /\bclean\b.*\berrors?\b/i,
+    /\bsuccess\b.*\berrors?\b/i,
+    /errors?\s*(count|total|sum|rate)\s*[=:]\s*0/i,
+  ];
+  return benign.some((rx) => rx.test(line));
+}
+
+/**
  * Check if a line matches error patterns (excluding noise patterns)
  * @param {string} line - Log line to check
  * @param {RegExp[]} errorPatterns - Patterns that indicate errors
@@ -44,6 +65,9 @@ export function stripAnsi(text) {
  */
 export function isErrorLine(line, errorPatterns, errorNoisePatterns) {
   if (errorNoisePatterns.some((pattern) => pattern.test(line))) {
+    return false;
+  }
+  if (isBenignErrorMention(line)) {
     return false;
   }
   return errorPatterns.some((pattern) => pattern.test(line));

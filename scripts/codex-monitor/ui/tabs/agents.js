@@ -2,7 +2,7 @@
  *  Tab: Agents — thread/slot cards, capacity, detail expansion
  * ────────────────────────────────────────────────────────────── */
 import { h } from "preact";
-import { useState, useCallback } from "preact/hooks";
+import { useState, useCallback, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
 
 const html = htm.bind(h);
@@ -50,6 +50,194 @@ function StatusDot({ status }) {
   ></span>`;
 }
 
+/* ─── Duration formatting ─── */
+function formatDuration(startedAt) {
+  if (!startedAt) return "";
+  const sec = Math.round((Date.now() - new Date(startedAt).getTime()) / 1000);
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+}
+
+/* ─── Workspace Viewer Modal ─── */
+function WorkspaceViewer({ agent, onClose }) {
+  const [logText, setLogText] = useState("Loading…");
+  const [contextData, setContextData] = useState(null);
+  const [steerInput, setSteerInput] = useState("");
+  const logRef = useRef(null);
+
+  const query = agent.branch || agent.taskId || "";
+
+  useEffect(() => {
+    if (!query) return;
+    let active = true;
+
+    const fetchLogs = () => {
+      apiFetch(`/api/agent-logs/tail?query=${encodeURIComponent(query)}&lines=200`, { _silent: true })
+        .then((res) => {
+          if (!active) return;
+          const data = res.data ?? res ?? "";
+          setLogText(typeof data === "string" ? data : (data.lines || []).join("\n") || JSON.stringify(data, null, 2));
+          if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+        })
+        .catch(() => { if (active) setLogText("(failed to load logs)"); });
+    };
+
+    const fetchContext = () => {
+      apiFetch(`/api/agent-context?query=${encodeURIComponent(query)}`, { _silent: true })
+        .then((res) => { if (active) setContextData(res.data ?? res ?? null); })
+        .catch(() => {});
+    };
+
+    fetchLogs();
+    fetchContext();
+    const interval = setInterval(fetchLogs, 5000);
+    return () => { active = false; clearInterval(interval); };
+  }, [query]);
+
+  const handleStop = async () => {
+    const ok = await showConfirm(`Force-stop agent on "${truncate(agent.taskTitle || agent.taskId || "task", 40)}"?`);
+    if (!ok) return;
+    haptic("heavy");
+    try {
+      await apiFetch("/api/executor/stop-slot", {
+        method: "POST",
+        body: JSON.stringify({ slotIndex: agent.index, taskId: agent.taskId }),
+      });
+      showToast("Stop signal sent", "success");
+      onClose();
+      scheduleRefresh(200);
+    } catch { /* toast via apiFetch */ }
+  };
+
+  const handleSteer = () => {
+    if (!steerInput.trim()) return;
+    sendCommandToChat(`/steer ${steerInput.trim()}`);
+    showToast("Steer command sent", "success");
+    setSteerInput("");
+  };
+
+  return html`
+    <div class="modal-overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+      <div class="modal-content">
+        <div class="modal-handle" />
+        <div class="workspace-viewer">
+          <div class="workspace-header">
+            <div>
+              <div class="task-card-title">
+                <${StatusDot} status=${agent.status || "busy"} />
+                ${agent.taskTitle || "(no title)"}
+              </div>
+              <div class="task-card-meta">
+                ${agent.branch || "?"} · Slot ${(agent.index ?? 0) + 1} · ${formatDuration(agent.startedAt)}
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onClick=${onClose}>✕</button>
+          </div>
+
+          <div class="workspace-log" ref=${logRef}>${logText}</div>
+
+          ${contextData && html`
+            <div style="padding:12px 16px;">
+              <div class="card-subtitle">Workspace Context</div>
+              ${contextData.changedFiles?.length > 0 && html`
+                <div class="meta-text mb-sm">Changed: ${contextData.changedFiles.join(", ")}</div>
+              `}
+              ${contextData.diffSummary && html`
+                <div class="meta-text">${contextData.diffSummary}</div>
+              `}
+              ${!contextData.changedFiles && !contextData.diffSummary && html`
+                <div class="meta-text">No workspace context available.</div>
+              `}
+            </div>
+          `}
+
+          <div class="workspace-controls">
+            <input
+              class="input"
+              placeholder="Steer agent…"
+              value=${steerInput}
+              onInput=${(e) => setSteerInput(e.target.value)}
+              onKeyDown=${(e) => e.key === "Enter" && handleSteer()}
+            />
+            <button class="btn btn-primary btn-sm" onClick=${handleSteer}>🎯</button>
+            <button class="btn btn-danger btn-sm" onClick=${handleStop}>⛔ Stop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ─── Dispatch Section ─── */
+function DispatchSection({ freeSlots }) {
+  const [taskId, setTaskId] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [dispatching, setDispatching] = useState(false);
+
+  const canDispatch = freeSlots > 0 && (taskId.trim() || prompt.trim());
+
+  const handleDispatch = async () => {
+    if (!canDispatch || dispatching) return;
+    haptic();
+    setDispatching(true);
+    try {
+      const body = taskId.trim()
+        ? { taskId: taskId.trim() }
+        : { prompt: prompt.trim() };
+      const res = await apiFetch("/api/executor/dispatch", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (res.ok !== false) {
+        showToast(`Dispatched to slot ${(res.slotIndex ?? 0) + 1}`, "success");
+        setTaskId("");
+        setPrompt("");
+        scheduleRefresh(200);
+      }
+    } catch {
+      /* toast via apiFetch */
+    } finally {
+      setDispatching(false);
+    }
+  };
+
+  return html`
+    <${Card} title="Dispatch Agent">
+      <div class="dispatch-section">
+        <div class="meta-text mb-sm">
+          ${freeSlots > 0
+            ? `${freeSlots} slot${freeSlots > 1 ? "s" : ""} available`
+            : "No free slots"}
+        </div>
+        <div class="input-row">
+          <input
+            class="input"
+            placeholder="Task ID"
+            value=${taskId}
+            onInput=${(e) => { setTaskId(e.target.value); if (e.target.value) setPrompt(""); }}
+          />
+        </div>
+        <div class="divider-label">or</div>
+        <textarea
+          class="input"
+          placeholder="Freeform prompt…"
+          rows="2"
+          value=${prompt}
+          onInput=${(e) => { setPrompt(e.target.value); if (e.target.value) setTaskId(""); }}
+        />
+        <button
+          class="btn btn-primary"
+          disabled=${!canDispatch || dispatching}
+          onClick=${handleDispatch}
+        >
+          ${dispatching ? "Dispatching…" : "🚀 Dispatch"}
+        </button>
+      </div>
+    <//>
+  `;
+}
+
 /* ─── AgentsTab ─── */
 export function AgentsTab() {
   const executor = executorData.value;
@@ -60,6 +248,7 @@ export function AgentsTab() {
   const activeSlots = execData?.activeSlots || 0;
 
   const [expandedSlot, setExpandedSlot] = useState(null);
+  const [selectedAgent, setSelectedAgent] = useState(null);
 
   /* Navigate to logs tab with agent query pre-filled */
   const viewAgentLogs = (query) => {
@@ -94,7 +283,14 @@ export function AgentsTab() {
     setExpandedSlot(expandedSlot === i ? null : i);
   };
 
+  /* Open workspace viewer for an agent */
+  const openWorkspace = (slot, i) => {
+    haptic();
+    setSelectedAgent({ ...slot, index: i });
+  };
+
   /* Capacity utilisation */
+  const freeSlots = Math.max(0, maxParallel - activeSlots);
   const capacityPct =
     maxParallel > 0 ? Math.round((activeSlots / maxParallel) * 100) : 0;
 
@@ -110,6 +306,9 @@ export function AgentsTab() {
     return html`<${Card} title="Loading…"><${SkeletonCard} count=${3} /><//>`;
 
   return html`
+    <!-- Dispatch section -->
+    <${DispatchSection} freeSlots=${freeSlots} />
+
     <!-- Capacity overview -->
     <${Card} title="Agent Capacity">
       <div class="stats-grid mb-sm">
@@ -147,7 +346,7 @@ export function AgentsTab() {
                 title=${slot
                   ? `${slot.taskTitle || slot.taskId} (${st})`
                   : `Slot ${i + 1} idle`}
-                onClick=${() => slot && toggleExpand(i)}
+                onClick=${() => slot && openWorkspace(slot, i)}
               >
                 <${StatusDot} status=${st} />
                 <span class="slot-label">${i + 1}</span>
@@ -189,7 +388,12 @@ export function AgentsTab() {
                     text=${slot.status || "busy"}
                   />
                 </div>
-                <div class="meta-text">Attempt ${slot.attempt || 1}</div>
+                <div class="flex-between">
+                  <div class="meta-text">Attempt ${slot.attempt || 1}</div>
+                  ${slot.startedAt && html`
+                    <div class="agent-duration">${formatDuration(slot.startedAt)}</div>
+                  `}
+                </div>
 
                 <!-- Progress indicator for active tasks -->
                 ${(slot.status === "running" || slot.status === "busy") &&
@@ -249,6 +453,12 @@ export function AgentsTab() {
                     🎯 Steer
                   </button>
                   <button
+                    class="btn btn-ghost btn-sm"
+                    onClick=${() => openWorkspace(slot, i)}
+                  >
+                    🔍 View
+                  </button>
+                  <button
                     class="btn btn-danger btn-sm"
                     onClick=${() => handleForceStop({ ...slot, index: i })}
                   >
@@ -280,6 +490,14 @@ export function AgentsTab() {
           </div>
         <//>
       <//>
+    `}
+
+    <!-- Workspace viewer modal -->
+    ${selectedAgent && html`
+      <${WorkspaceViewer}
+        agent=${selectedAgent}
+        onClose=${() => setSelectedAgent(null)}
+      />
     `}
   `;
 }

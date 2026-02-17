@@ -87,7 +87,7 @@ export function CreateTaskModal({ onClose }) {
       });
       showToast("Task created", "success");
       onClose();
-      await refreshTab();
+      await refreshTab("dashboard");
     } catch {
       /* toast shown by apiFetch */
     }
@@ -231,12 +231,22 @@ export function DashboardTab() {
   };
 
   /* ── Quick-action handler ── */
-  const handleQuickAction = (action) => {
+  const handleQuickAction = async (action, e) => {
     haptic();
     if (action.action === "create") {
       setShowCreate(true);
     } else if (action.cmd) {
-      sendCommandToChat(action.cmd);
+      try {
+        await sendCommandToChat(action.cmd);
+        showToast(`Sent: ${action.cmd}`, "success");
+        const btn = e?.currentTarget;
+        if (btn) {
+          btn.classList.add("quick-action-sent");
+          setTimeout(() => btn.classList.remove("quick-action-sent"), 1500);
+        }
+      } catch {
+        showToast("Command failed", "error");
+      }
     }
   };
 
@@ -345,7 +355,7 @@ export function DashboardTab() {
               key=${a.label}
               class="quick-action-btn"
               style="--qa-color: ${a.color}"
-              onClick=${() => handleQuickAction(a)}
+              onClick=${(e) => handleQuickAction(a, e)}
             >
               <span class="quick-action-icon">${a.icon}</span>
               <span class="quick-action-label">${a.label}</span>

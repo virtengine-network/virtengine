@@ -69,6 +69,19 @@ function envFlagEnabled(value) {
   return ["1", "true", "yes", "on", "y"].includes(raw);
 }
 
+function shouldAutoApproveCopilotPermissions() {
+  const raw = process.env.COPILOT_AUTO_APPROVE_PERMISSIONS;
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return true;
+  }
+  return envFlagEnabled(raw);
+}
+
+function buildCopilotPermissionHandler() {
+  if (!shouldAutoApproveCopilotPermissions()) return undefined;
+  return async () => ({ kind: "approved" });
+}
+
 function shouldFallbackForSdkError(error) {
   if (!error) return false;
   const message = String(error).toLowerCase();
@@ -600,9 +613,20 @@ async function launchCopilotThread(prompt, cwd, timeoutMs, extra = {}) {
   let unsubscribe = null;
   let finalResponse = "";
   const allItems = [];
+  const autoApprovePermissions = shouldAutoApproveCopilotPermissions();
+  const clientEnv = autoApprovePermissions
+    ? {
+        ...process.env,
+        COPILOT_ALLOW_ALL: process.env.COPILOT_ALLOW_ALL || "true",
+      }
+    : process.env;
   try {
     await withSanitizedOpenAiEnv(async () => {
-      const clientOpts = token ? { token } : undefined;
+      const clientOpts = { cwd, env: clientEnv };
+      if (token) {
+        clientOpts.githubToken = token;
+        clientOpts.token = token;
+      }
       client = new CopilotClientClass(clientOpts);
       await client.start();
     });
@@ -622,6 +646,7 @@ async function launchCopilotThread(prompt, cwd, timeoutMs, extra = {}) {
   try {
     const sessionConfig = {
       streaming: true,
+      workingDirectory: cwd,
       systemMessage: {
         mode: "replace",
         content:
@@ -630,6 +655,10 @@ async function launchCopilotThread(prompt, cwd, timeoutMs, extra = {}) {
       },
       infiniteSessions: { enabled: true },
     };
+    const permissionHandler = buildCopilotPermissionHandler();
+    if (permissionHandler) {
+      sessionConfig.onPermissionRequest = permissionHandler;
+    }
     const copilotModel = String(
       requestedModel ||
         process.env.COPILOT_MODEL ||
