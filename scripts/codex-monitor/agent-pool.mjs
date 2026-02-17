@@ -1514,7 +1514,10 @@ function isPoisonedCodexResumeError(errorValue) {
     lower.includes("encrypted content") ||
     lower.includes("could not be verified") ||
     lower.includes("state db missing rollout path") ||
-    lower.includes("missing rollout path")
+    lower.includes("missing rollout path") ||
+    lower.includes("tool call must have a tool call id") ||
+    lower.includes("tool_call_id") ||
+    (lower.includes("400") && lower.includes("tool call"))
   );
 }
 
