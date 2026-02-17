@@ -21,6 +21,7 @@ export const executorData = signal(null);
 export const projectSummary = signal(null);
 
 // ── Tasks
+export const tasksLoaded = signal(false);
 export const tasksData = signal([]);
 export const tasksPage = signal(1);
 export const tasksPageSize = signal(20);
@@ -128,6 +129,7 @@ export async function loadTasks() {
   tasksTotalPages.value =
     res.totalPages ||
     Math.max(1, Math.ceil((res.total || 0) / tasksPageSize.value));
+  tasksLoaded.value = true;
 }
 
 /** Load active agents → agentsData */

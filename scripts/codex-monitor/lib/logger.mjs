@@ -529,21 +529,46 @@ export function installConsoleInterceptor(opts = {}) {
   let _inInterceptor = false;
   const _origStderrWrite = process.stderr.write.bind(process.stderr);
   let _stderrBroken = false;
+  const isBenignStderrError = (err) =>
+    !!(
+      err &&
+      (err.code === "EPIPE" ||
+        err.code === "EIO" ||
+        err.code === "ERR_STREAM_DESTROYED" ||
+        err.code === "ERR_STREAM_WRITE_AFTER_END" ||
+        /\bEIO\b/.test(err.message) ||
+        /\bEPIPE\b/.test(err.message))
+    );
+  const markStderrBroken = (err) => {
+    if (_stderrBroken) return true;
+    if (isBenignStderrError(err)) {
+      _stderrBroken = true;
+      return true;
+    }
+    return false;
+  };
+  process.stderr.on("error", (err) => {
+    if (markStderrBroken(err)) {
+      writeToErrorFile("STDERR", "process", `stderr error: ${err?.message || err}`);
+      return;
+    }
+    // If stderr errors for an unexpected reason, record it but avoid crashing.
+    writeToErrorFile("STDERR", "process", `stderr unexpected error: ${err?.message || err}`);
+  });
   const safeStderrWrite = (chunk, ...rest) => {
-    if (_stderrBroken) return false;
+    if (
+      _stderrBroken ||
+      !process.stderr.writable ||
+      process.stderr.destroyed ||
+      process.stderr.writableEnded
+    ) {
+      _stderrBroken = true;
+      return false;
+    }
     try {
       return _origStderrWrite(chunk, ...rest);
     } catch (err) {
-      if (
-        err &&
-        (err.code === "EPIPE" ||
-          err.code === "EIO" ||
-          err.code === "ERR_STREAM_DESTROYED" ||
-          err.code === "ERR_STREAM_WRITE_AFTER_END" ||
-          /\bEIO\b/.test(err.message) ||
-          /\bEPIPE\b/.test(err.message))
-      ) {
-        _stderrBroken = true;
+      if (markStderrBroken(err)) {
         return false;
       }
       throw err;
@@ -558,6 +583,55 @@ export function installConsoleInterceptor(opts = {}) {
     }
     return safeStderrWrite(chunk, ...rest);
   };
+
+  // ── Harden stdout against broken pipes ────────────────────────────────
+  const _origStdoutWrite = process.stdout.write.bind(process.stdout);
+  let _stdoutBroken = false;
+  const isBenignStdoutError = (err) =>
+    !!(
+      err &&
+      (err.code === "EPIPE" ||
+        err.code === "EIO" ||
+        err.code === "ERR_STREAM_DESTROYED" ||
+        err.code === "ERR_STREAM_WRITE_AFTER_END" ||
+        /\bEIO\b/.test(err.message) ||
+        /\bEPIPE\b/.test(err.message))
+    );
+  const markStdoutBroken = (err) => {
+    if (_stdoutBroken) return true;
+    if (isBenignStdoutError(err)) {
+      _stdoutBroken = true;
+      return true;
+    }
+    return false;
+  };
+  process.stdout.on("error", (err) => {
+    if (markStdoutBroken(err)) {
+      writeToErrorFile("STDOUT", "process", `stdout error: ${err?.message || err}`);
+      return;
+    }
+    writeToErrorFile("STDOUT", "process", `stdout unexpected error: ${err?.message || err}`);
+  });
+  const safeStdoutWrite = (chunk, ...rest) => {
+    if (
+      _stdoutBroken ||
+      !process.stdout.writable ||
+      process.stdout.destroyed ||
+      process.stdout.writableEnded
+    ) {
+      _stdoutBroken = true;
+      return false;
+    }
+    try {
+      return _origStdoutWrite(chunk, ...rest);
+    } catch (err) {
+      if (markStdoutBroken(err)) {
+        return false;
+      }
+      throw err;
+    }
+  };
+  process.stdout.write = (chunk, ...rest) => safeStdoutWrite(chunk, ...rest);
 }
 
 /**

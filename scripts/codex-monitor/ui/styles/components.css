@@ -965,3 +965,45 @@ select.input {
     align-items: center;
   }
 }
+
+@media (min-width: 768px) {
+  .card {
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .stat-card {
+    padding: 18px 16px;
+  }
+
+  .stats-grid {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .task-card {
+    padding: 18px;
+    margin-bottom: 12px;
+  }
+
+  .list-item {
+    padding: 14px 0;
+  }
+
+  .empty-state {
+    padding: 60px 24px;
+  }
+
+  .modal-content {
+    max-width: 600px;
+  }
+
+  .chip {
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+
+  .search-input-wrap {
+    max-width: 480px;
+  }
+}

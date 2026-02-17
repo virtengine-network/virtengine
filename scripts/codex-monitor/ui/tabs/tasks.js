@@ -14,8 +14,10 @@ const html = htm.bind(h);
 
 import { haptic, showConfirm } from "../modules/telegram.js";
 import { apiFetch, sendCommandToChat } from "../modules/api.js";
+import { signal } from "@preact/signals";
 import {
   tasksData,
+  tasksLoaded,
   tasksPage,
   tasksPageSize,
   tasksFilter,
@@ -47,6 +49,10 @@ import {
   ListItem,
 } from "../components/shared.js";
 import { SegmentedControl, SearchInput, Toggle } from "../components/forms.js";
+import { KanbanBoard } from "../components/kanban-board.js";
+
+/* ─── View mode toggle ─── */
+const viewMode = signal("kanban");
 
 /* ─── Status chip definitions ─── */
 const STATUS_CHIPS = [
@@ -494,22 +500,46 @@ export function TasksTab() {
   };
 
   /* ── Render ── */
-  if (!tasks.length && !searchVal)
+  const isKanban = viewMode.value === "kanban";
+
+  if (!tasksLoaded.value && !tasks.length && !searchVal)
     return html`<${Card} title="Loading Tasks…"><${SkeletonCard} /><//>`;
 
+  if (tasksLoaded.value && !tasks.length && !searchVal)
+    return html`
+      <div class="flex-between mb-sm" style="padding:0 4px">
+        <div class="view-toggle">
+          <button class="view-toggle-btn ${!isKanban ? 'active' : ''}" onClick=${() => { viewMode.value = 'list'; haptic(); }}>☰ List</button>
+          <button class="view-toggle-btn ${isKanban ? 'active' : ''}" onClick=${() => { viewMode.value = 'kanban'; haptic(); }}>▦ Board</button>
+        </div>
+      </div>
+      <${EmptyState} message="No tasks yet. Create one to get started!" icon="\u{1F4CB}" />
+      <button class="fab" onClick=${() => { haptic(); setShowCreate(true); }}>${ICONS.plus}</button>
+      ${showCreate && html`<${CreateTaskModalInline} onClose=${() => setShowCreate(false)} />`}
+    `;
+
   return html`
-    <!-- Sticky search bar -->
-    <div class="sticky-search">
-      <${SearchInput}
-        ref=${searchRef}
-        placeholder="Search tasks…"
-        value=${searchVal}
-        onInput=${(e) => handleSearch(e.target.value)}
-      />
+    <!-- Sticky search bar + view toggle -->
+    <div class="sticky-search" style="display:flex;gap:8px;align-items:center">
+      <div style="flex:1">
+        <${SearchInput}
+          ref=${searchRef}
+          placeholder="Search tasks…"
+          value=${searchVal}
+          onInput=${(e) => handleSearch(e.target.value)}
+        />
+      </div>
+      <div class="view-toggle">
+        <button class="view-toggle-btn ${!isKanban ? 'active' : ''}" onClick=${() => { viewMode.value = 'list'; haptic(); }}>☰ List</button>
+        <button class="view-toggle-btn ${isKanban ? 'active' : ''}" onClick=${() => { viewMode.value = 'kanban'; haptic(); }}>▦ Board</button>
+      </div>
     </div>
 
-    <!-- Filters -->
-    <${Card} title="Task Board">
+    <!-- Kanban board view -->
+    ${isKanban && html`<${KanbanBoard} onOpenTask=${openDetail} />`}
+
+    <!-- List view filters -->
+    ${!isKanban && html`<${Card} title="Task Board">
       <div class="chip-group mb-sm">
         ${STATUS_CHIPS.map(
           (s) => html`
@@ -712,6 +742,7 @@ export function TasksTab() {
         Next →
       </button>
     </div>
+    `}
 
     <!-- FAB -->
     <button

@@ -459,6 +459,36 @@ export function cleanupStaleBranches(repoRoot, opts = {}) {
 // ── Monitor Singleton via PID file ──────────────────────────────────────
 
 const PID_FILE_NAME = "codex-monitor.pid";
+const MONITOR_MARKER = "codex-monitor/monitor.mjs";
+
+function parsePidFile(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return { pid: null, raw: text };
+  if (text.startsWith("{")) {
+    try {
+      const data = JSON.parse(text);
+      return { pid: Number(data?.pid), raw: text, data };
+    } catch {
+      return { pid: Number(text), raw: text };
+    }
+  }
+  return { pid: Number(text), raw: text };
+}
+
+function getProcessCommandLine(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) return "";
+  const processes = getProcesses();
+  const entry = processes.find((p) => Number(p.pid) === Number(pid));
+  return entry?.commandLine || "";
+}
+
+function isMonitorProcess(pid) {
+  const cmd = getProcessCommandLine(pid);
+  if (!cmd) return false;
+  const normalized = cmd.toLowerCase();
+  if (normalized.includes(MONITOR_MARKER)) return true;
+  return normalized.includes("codex-monitor") && normalized.includes("monitor.mjs");
+}
 
 /**
  * Acquire a singleton lock by writing our PID file.
@@ -470,21 +500,27 @@ export function acquireMonitorLock(lockDir) {
 
   if (existsSync(pidFile)) {
     try {
-      const raw = readFileSync(pidFile, "utf8").trim();
-      const existingPid = Number(raw);
+      const raw = readFileSync(pidFile, "utf8");
+      const parsed = parsePidFile(raw);
+      const existingPid = parsed.pid;
       if (
         existingPid &&
         existingPid !== process.pid &&
         isProcessAlive(existingPid)
       ) {
-        console.error(
-          `[maintenance] another codex-monitor is already running (PID ${existingPid}). Exiting.`,
+        if (isMonitorProcess(existingPid)) {
+          console.error(
+            `[maintenance] another codex-monitor is already running (PID ${existingPid}). Exiting.`,
+          );
+          return false;
+        }
+        console.warn(
+          `[maintenance] PID file points to non-monitor process (PID ${existingPid}); replacing lock`,
         );
-        return false;
       }
       // Stale PID file — previous monitor crashed without cleanup
       console.warn(
-        `[maintenance] removing stale PID file (PID ${raw} no longer alive)`,
+        `[maintenance] removing stale PID file (PID ${parsed.raw || "unknown"} no longer alive)`,
       );
     } catch {
       // Can't read PID file — just overwrite
@@ -492,11 +528,16 @@ export function acquireMonitorLock(lockDir) {
   }
 
   try {
-    writeFileSync(pidFile, String(process.pid), "utf8");
+    const payload = {
+      pid: process.pid,
+      started_at: new Date().toISOString(),
+      argv: process.argv,
+    };
+    writeFileSync(pidFile, JSON.stringify(payload, null, 2), "utf8");
     // Clean up on exit
     const cleanup = () => {
       try {
-        const current = readFileSync(pidFile, "utf8").trim();
+        const current = parsePidFile(readFileSync(pidFile, "utf8")).pid;
         if (Number(current) === process.pid) {
           unlinkSync(pidFile);
         }
