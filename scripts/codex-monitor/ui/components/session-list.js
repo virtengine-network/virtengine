@@ -37,9 +37,13 @@ export async function loadSessionMessages(id) {
   }
 }
 
-export async function createSession() {
+export async function createSession(options = {}) {
   try {
-    const res = await apiFetch("/api/sessions/create", { method: "POST" });
+    const body = options && Object.keys(options).length > 0 ? options : null;
+    const res = await apiFetch("/api/sessions/create", {
+      method: "POST",
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
     if (res?.session?.id) {
       await loadSessions();
       selectedSessionId.value = res.session.id;
@@ -63,24 +67,37 @@ function statusIcon(status) {
 }
 
 /* ─── SessionList component ─── */
-export function SessionList({ onSelect }) {
+export function SessionList({
+  onSelect,
+  showArchived = true,
+  onToggleArchived,
+  defaultType = null,
+}) {
   const [search, setSearch] = useState("");
-  const sessions = sessionsData.value || [];
+  const allSessions = sessionsData.value || [];
   const error = sessionsError.value;
 
+  const base = showArchived
+    ? allSessions
+    : allSessions.filter((s) => s.status !== "archived");
+
   const filtered = search
-    ? sessions.filter(
+    ? base.filter(
         (s) =>
           (s.title || "").toLowerCase().includes(search.toLowerCase()) ||
           (s.taskId || "").toLowerCase().includes(search.toLowerCase()),
       )
-    : sessions;
+    : base;
 
   const active = filtered.filter(
     (s) => s.status === "active" || s.status === "running",
   );
+  const archived = filtered.filter((s) => s.status === "archived");
   const recent = filtered.filter(
-    (s) => s.status !== "active" && s.status !== "running",
+    (s) =>
+      s.status !== "active" &&
+      s.status !== "running" &&
+      s.status !== "archived",
   );
 
   const handleSelect = useCallback(
@@ -117,9 +134,24 @@ export function SessionList({ onSelect }) {
     <div class="session-list">
       <div class="session-list-header">
         <span class="session-list-title">Sessions</span>
-        <button class="btn btn-primary btn-sm" onClick=${createSession}>
-          + New
-        </button>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${typeof onToggleArchived === "function" &&
+          html`
+            <button
+              class="btn btn-ghost btn-sm"
+              onClick=${() => onToggleArchived(!showArchived)}
+            >
+              ${showArchived ? "Hide Archived" : "Show Archived"}
+            </button>
+          `}
+          <button
+            class="btn btn-primary btn-sm"
+            onClick=${() =>
+              createSession(defaultType ? { type: defaultType } : {})}
+          >
+            + New
+          </button>
+        </div>
       </div>
 
       <div class="session-search">
@@ -170,6 +202,40 @@ export function SessionList({ onSelect }) {
         html`
           <div class="session-group-label">Recent Sessions</div>
           ${recent.map(
+            (s) => html`
+              <div
+                key=${s.id}
+                class="session-item ${selectedSessionId.value === s.id
+                  ? "active"
+                  : ""}"
+                onClick=${() => handleSelect(s.id)}
+              >
+                <div class="session-item-row">
+                  <span class="session-item-icon"
+                    >${sessionIcon(s.type)}</span
+                  >
+                  <span class="session-item-title"
+                    >${truncate(s.title || s.taskId || "Untitled", 28)}</span
+                  >
+                  <span class="session-item-status"
+                    >${statusIcon(s.status)}</span
+                  >
+                </div>
+                ${s.lastMessage &&
+                html`
+                  <div class="session-item-preview">
+                    ${truncate(s.lastMessage, 50)}
+                  </div>
+                `}
+                <div class="session-item-time">${formatRelative(s.updatedAt || s.createdAt)}</div>
+              </div>
+            `,
+          )}
+        `}
+        ${archived.length > 0 &&
+        html`
+          <div class="session-group-label">Archived</div>
+          ${archived.map(
             (s) => html`
               <div
                 key=${s.id}

@@ -43,6 +43,17 @@ export const ICONS = {
     <polyline points="9 22 9 12 15 12 15 22" />
   </svg>`,
 
+  chat: html`<svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M21 11.5a8.38 8.38 0 0 1-1.9 5.4 8.5 8.5 0 0 1-6.6 3.1 8.38 8.38 0 0 1-5.4-1.9L3 21l1.9-4.1A8.38 8.38 0 0 1 3 11.5 8.5 8.5 0 0 1 11.5 3h.5A8.5 8.5 0 0 1 21 11.5z" />
+  </svg>`,
+
   /* ── Status / Feedback ── */
   check: html`<svg
     viewBox="0 0 24 24"

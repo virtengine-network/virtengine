@@ -5,6 +5,9 @@ const fallbackEnabled =
   String(process.env.NODE_ENV || "").toLowerCase() !== "test";
 
 export function resolveFetch() {
+  if (process.env.VITEST) {
+    return initialFetch || globalThis.fetch;
+  }
   if (typeof globalThis.fetch === "function") {
     return globalThis.fetch;
   }

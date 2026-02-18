@@ -48,8 +48,20 @@ import { StartTaskModal } from "./tasks.js";
 
 /* ─── Quick Action definitions ─── */
 const QUICK_ACTIONS = [
-  { label: "Status", cmd: "/status", icon: "📊", color: "var(--accent)" },
-  { label: "Health", cmd: "/health", icon: "💚", color: "var(--color-done)" },
+  {
+    label: "Status",
+    cmd: "/status",
+    icon: "📊",
+    color: "var(--accent)",
+    targetTab: "dashboard",
+  },
+  {
+    label: "Health",
+    cmd: "/health",
+    icon: "💚",
+    color: "var(--color-done)",
+    targetTab: "dashboard",
+  },
   {
     label: "New Task",
     action: "create",
@@ -68,8 +80,15 @@ const QUICK_ACTIONS = [
     cmd: "/logs 50",
     icon: "📄",
     color: "var(--text-secondary)",
+    targetTab: "logs",
   },
-  { label: "Menu", cmd: "/menu", icon: "☰", color: "var(--color-todo)" },
+  {
+    label: "Menu",
+    cmd: "/menu",
+    icon: "☰",
+    color: "var(--color-todo)",
+    targetTab: "control",
+  },
 ];
 
 /* ─── CreateTaskModal ─── */
@@ -249,6 +268,12 @@ export function DashboardTab() {
   /* ── Quick-action handler ── */
   const handleQuickAction = async (action, e) => {
     haptic();
+    if (action.targetTab) {
+      navigateTo(action.targetTab, {
+        resetHistory: action.targetTab === "dashboard",
+        forceRefresh: true,
+      });
+    }
     if (action.action === "create") {
       setShowCreate(true);
     } else if (action.action === "start") {
@@ -256,18 +281,16 @@ export function DashboardTab() {
     } else if (action.cmd) {
       try {
         if (action.cmd.startsWith("/status")) {
-          await refreshTab("dashboard");
+          await refreshTab("dashboard", { force: true });
           showToast("Status refreshed", "success");
         } else if (action.cmd.startsWith("/health")) {
           const res = await apiFetch("/api/health", { _silent: true });
           const uptime = Number(res?.uptime || 0);
           showToast(`Health OK · uptime ${Math.round(uptime)}s`, "success");
         } else if (action.cmd.startsWith("/logs")) {
-          navigateTo("logs");
-          await refreshTab("logs");
+          await refreshTab("logs", { force: true });
           showToast("Opened logs", "success");
         } else if (action.cmd.startsWith("/menu")) {
-          navigateTo("control");
           showToast("Opened control panel", "success");
         } else {
           await sendCommandToChat(action.cmd);

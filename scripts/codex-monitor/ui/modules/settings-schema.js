@@ -201,6 +201,21 @@ export function getGroupedSettings(includeAdvanced = false) {
  */
 export function validateSetting(def, value) {
   if (value === "" || value == null) return { valid: true };
+  if (def.key === "CODEX_MONITOR_HOOK_TARGETS") {
+    const targets = String(value || "")
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean);
+    const allowed = new Set(["codex", "claude", "copilot", "all"]);
+    const invalid = targets.filter((entry) => !allowed.has(entry));
+    if (invalid.length > 0) {
+      return {
+        valid: false,
+        error: `Invalid targets: ${invalid.join(", ")}`,
+      };
+    }
+    return { valid: true };
+  }
   switch (def.type) {
     case "number": {
       const n = Number(value);

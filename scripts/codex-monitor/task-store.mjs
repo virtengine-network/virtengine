@@ -91,13 +91,41 @@ function truncate(str, max) {
   return s.length > max ? s.slice(0, max) : s;
 }
 
+function normalizeTags(raw) {
+  if (!raw) return [];
+  const values = Array.isArray(raw)
+    ? raw
+    : String(raw || "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+  const seen = new Set();
+  const tags = [];
+  for (const value of values) {
+    const normalized = String(value || "")
+      .trim()
+      .toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    tags.push(normalized);
+  }
+  return tags;
+}
+
 function defaultMeta() {
   return {
     version: 1,
     projectId: null,
     lastFullSync: null,
     taskCount: 0,
-    stats: { todo: 0, inprogress: 0, inreview: 0, done: 0, blocked: 0 },
+    stats: {
+      draft: 0,
+      todo: 0,
+      inprogress: 0,
+      inreview: 0,
+      done: 0,
+      blocked: 0,
+    },
   };
 }
 
@@ -113,6 +141,8 @@ function defaultTask(overrides = {}) {
     externalBackend: null,
     assignee: null,
     priority: null,
+    tags: [],
+    draft: false,
     projectId: null,
     branchName: null,
     prNumber: null,
@@ -145,7 +175,14 @@ function defaultTask(overrides = {}) {
 }
 
 function recalcStats() {
-  const stats = { todo: 0, inprogress: 0, inreview: 0, done: 0, blocked: 0 };
+  const stats = {
+    draft: 0,
+    todo: 0,
+    inprogress: 0,
+    inreview: 0,
+    done: 0,
+    blocked: 0,
+  };
   for (const t of Object.values(_store.tasks)) {
     if (t.status === "blocked") {
       stats.blocked++;
@@ -275,9 +312,25 @@ export function updateTask(taskId, updates) {
       task[k] = truncate(v, MAX_AGENT_OUTPUT);
     } else if (k === "lastError") {
       task[k] = truncate(v, MAX_ERROR_LENGTH);
+    } else if (k === "tags") {
+      task[k] = normalizeTags(v);
     } else {
       task[k] = v;
     }
+  }
+
+  if (typeof updates.draft === "boolean") {
+    task.draft = updates.draft;
+    if (updates.draft && task.status !== "draft") {
+      task.status = "draft";
+    } else if (!updates.draft && task.status === "draft") {
+      task.status = "todo";
+    }
+  }
+  if (task.status === "draft") {
+    task.draft = true;
+  } else if (task.draft && updates.draft == null) {
+    task.draft = false;
   }
 
   task.updatedAt = now();
@@ -298,6 +351,9 @@ export function addTask(taskData) {
     console.error(TAG, "addTask: task must have an id");
     return null;
   }
+  task.tags = normalizeTags(task.tags);
+  task.draft = Boolean(task.draft || task.status === "draft");
+  if (task.draft) task.status = "draft";
   task.lastAgentOutput = truncate(task.lastAgentOutput, MAX_AGENT_OUTPUT);
   task.lastError = truncate(task.lastError, MAX_ERROR_LENGTH);
 

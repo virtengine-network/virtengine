@@ -143,6 +143,10 @@ function WorkspaceViewer({ agent, onClose }) {
     const diagnostics = contextData?.diagnostics || {};
     const sessionInfo = contextData?.session || null;
     const slotInfo = contextData?.slot || null;
+    const actionHistory = contextData?.actionHistory || contextData?.toolHistory || [];
+    const fileAccess = contextData?.fileAccessSummary || null;
+    const fileAccessFiles = fileAccess?.files || [];
+    const fileAccessCounts = fileAccess?.counts || {};
 
     const formatReason = (reason) => {
       const map = {
@@ -168,7 +172,21 @@ function WorkspaceViewer({ agent, onClose }) {
       `;
     };
 
-    if (!ctx) {
+    const hasMatches =
+      (matches.worktrees && matches.worktrees.length > 0) ||
+      (matches.slots && matches.slots.length > 0) ||
+      (matches.sessions && matches.sessions.length > 0);
+    const hasActions = actionHistory.length > 0;
+    const hasFileAccess = fileAccessFiles.length > 0;
+    const showUnavailable =
+      !ctx &&
+      !sessionInfo &&
+      !slotInfo &&
+      !hasMatches &&
+      !hasActions &&
+      !hasFileAccess;
+
+    if (showUnavailable) {
       const reasons = diagnostics?.reasons || [];
       const hints = diagnostics?.hints || [];
       return html`
@@ -217,18 +235,68 @@ function WorkspaceViewer({ agent, onClose }) {
       `;
     }
 
-    const files = ctx.changedFiles || [];
-    const commits = ctx.recentCommits || [];
-    const aheadBehind = ctx.gitAheadBehind || "";
+    const renderActionHistory = () => {
+      if (!sessionInfo && actionHistory.length === 0) return null;
+      return html`
+        <div class="card mb-sm">
+          <div class="card-title">Action History</div>
+          ${actionHistory.length === 0 &&
+            html`<div class="meta-text">No recent tool actions recorded</div>`}
+          ${actionHistory.map((action, i) => {
+            const label =
+              action.type === "tool_result"
+                ? "RESULT"
+                : action.tool || "TOOL";
+            const detail = action.detail || action.content || "";
+            return html`
+              <div class="meta-text" key=${i}>
+                <span class="mono">${label}</span>
+                ${detail ? ` ${truncate(detail, 140)}` : ""}
+                ${action.timestamp ? ` · ${formatRelative(action.timestamp)}` : ""}
+              </div>
+            `;
+          })}
+        </div>
+      `;
+    };
+
+    const renderFileAccess = () => {
+      if (!sessionInfo && !fileAccess) return null;
+      const summaryLine = fileAccess
+        ? `${fileAccessCounts.read ?? 0} read · ${fileAccessCounts.write ?? 0} written · ${fileAccessCounts.other ?? 0} other`
+        : "No file access summary available";
+      return html`
+        <div class="card mb-sm">
+          <div class="card-title">File Access</div>
+          <div class="meta-text">${summaryLine}</div>
+          ${fileAccessFiles.length === 0 &&
+            html`<div class="meta-text mt-xs">No file access recorded</div>`}
+          ${fileAccessFiles.map((entry, i) => html`
+            <div class="meta-text" key=${i}>
+              <span class="mono">${entry.path}</span>
+              ${entry.kinds?.length
+                ? html`<span class="meta-text"> · ${entry.kinds.join(", ")}</span>`
+                : ""}
+            </div>
+          `)}
+        </div>
+      `;
+    };
+
+    const files = ctx?.changedFiles || [];
+    const commits = ctx?.recentCommits || [];
+    const aheadBehind = ctx?.gitAheadBehind || "";
     return html`
       <div class="workspace-context">
-        <div class="card mb-sm">
-          <div class="card-title">Branch</div>
-          <div class="meta-text">${ctx.gitBranch || agent.branch || "unknown"}</div>
-          <div class="meta-text mt-xs">${ctx.path || "unknown path"}</div>
-          ${aheadBehind &&
-            html`<div class="meta-text mt-xs">Ahead/Behind: ${aheadBehind}</div>`}
-        </div>
+        ${ctx && html`
+          <div class="card mb-sm">
+            <div class="card-title">Branch</div>
+            <div class="meta-text">${ctx.gitBranch || agent.branch || "unknown"}</div>
+            <div class="meta-text mt-xs">${ctx.path || "unknown path"}</div>
+            ${aheadBehind &&
+              html`<div class="meta-text mt-xs">Ahead/Behind: ${aheadBehind}</div>`}
+          </div>
+        `}
         ${sessionInfo && html`
           <div class="card mb-sm">
             <div class="card-title">Session</div>
@@ -256,6 +324,14 @@ function WorkspaceViewer({ agent, onClose }) {
               html`<div class="meta-text mt-xs">Branch: ${slotInfo.branch}</div>`}
           </div>
         `}
+        ${renderActionHistory()}
+        ${renderFileAccess()}
+        ${renderMatchList("Worktree Matches", matches.worktrees, (wt) =>
+          html`<span class="mono">${wt.name || wt.branch || "worktree"}</span> ${wt.path ? `· ${wt.path}` : ""}`)}
+        ${renderMatchList("Slot Matches", matches.slots, (slot) =>
+          html`<span class="mono">${slot.taskId || slot.taskTitle || "slot"}</span> ${slot.branch ? `· ${slot.branch}` : ""}`)}
+        ${renderMatchList("Session Matches", matches.sessions, (sess) =>
+          html`<span class="mono">${sess.id || sess.taskId || "session"}</span> ${sess.status ? `· ${sess.status}` : ""}`)}
         ${commits.length > 0 &&
         html`
           <div class="card mb-sm">
@@ -269,19 +345,21 @@ function WorkspaceViewer({ agent, onClose }) {
             )}
           </div>
         `}
-        <div class="card mb-sm">
-          <div class="card-title">Changed Files</div>
-          ${files.length === 0 &&
-          html`<div class="meta-text">Clean working tree</div>`}
-          ${files.map(
-            (f) => html`
-              <div class="meta-text" key=${f.file}>
-                <span class="mono">${f.code}</span> ${f.file}
-              </div>
-            `,
-          )}
-        </div>
-        ${ctx.diffSummary &&
+        ${ctx && html`
+          <div class="card mb-sm">
+            <div class="card-title">Changed Files</div>
+            ${files.length === 0 &&
+            html`<div class="meta-text">Clean working tree</div>`}
+            ${files.map(
+              (f) => html`
+                <div class="meta-text" key=${f.file}>
+                  <span class="mono">${f.code}</span> ${f.file}
+                </div>
+              `,
+            )}
+          </div>
+        `}
+        ${ctx?.diffSummary &&
         html`
           <div class="card">
             <div class="card-title">Diff Summary</div>

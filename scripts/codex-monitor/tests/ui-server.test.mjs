@@ -200,4 +200,28 @@ describe("ui-server mini app", () => {
     ).then((r) => r.json());
     expect(metrics.data.webhook.alertsTriggered).toBe(1);
   });
+
+  it("returns schema field errors for invalid hook targets", async () => {
+    const mod = await import("../ui-server.mjs");
+    const server = await mod.startTelegramUiServer({
+      port: await getFreePort(),
+      host: "127.0.0.1",
+    });
+    const port = server.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/settings/update`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        changes: {
+          CODEX_MONITOR_HOOK_TARGETS: "codex,invalid",
+        },
+      }),
+    });
+    const json = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(json.ok).toBe(false);
+    expect(json.fieldErrors?.CODEX_MONITOR_HOOK_TARGETS).toBeTruthy();
+  });
 });

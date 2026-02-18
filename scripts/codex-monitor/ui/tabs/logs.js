@@ -13,7 +13,7 @@ import htm from "htm";
 
 const html = htm.bind(h);
 
-import { haptic, showAlert, getTg } from "../modules/telegram.js";
+import { haptic, showAlert, getTg, openLink } from "../modules/telegram.js";
 import { apiFetch, sendCommandToChat } from "../modules/api.js";
 import {
   logsData,
@@ -154,6 +154,9 @@ export function LogsTab() {
 
   const branchFileDetails = useMemo(() => {
     if (!branchDetail) return [];
+    if (Array.isArray(branchDetail.filesChanged) && branchDetail.filesChanged.length) {
+      return branchDetail.filesChanged;
+    }
     if (Array.isArray(branchDetail.filesDetailed) && branchDetail.filesDetailed.length) {
       return branchDetail.filesDetailed;
     }
@@ -161,6 +164,22 @@ export function LogsTab() {
       return branchDetail.files.map((file) => ({ file }));
     }
     return [];
+  }, [branchDetail]);
+
+  const branchCommits = useMemo(() => {
+    if (!branchDetail) return [];
+    if (Array.isArray(branchDetail.commitList) && branchDetail.commitList.length) {
+      return branchDetail.commitList;
+    }
+    if (Array.isArray(branchDetail.commits) && branchDetail.commits.length) {
+      return branchDetail.commits;
+    }
+    return [];
+  }, [branchDetail]);
+
+  const workspaceLink = useMemo(() => {
+    if (!branchDetail) return null;
+    return branchDetail.workspaceLink || branchDetail.workspaceTarget || null;
   }, [branchDetail]);
 
   /* Raw log text */
@@ -681,11 +700,27 @@ export function LogsTab() {
             html`<button class="btn btn-primary btn-sm" onClick=${() => openWorkspace(branchDetail)}>
               🔍 Open Workspace Viewer
             </button>`}
+            ${branchDetail.workspaceLink?.url &&
+            html`<button
+              class="btn btn-secondary btn-sm"
+              onClick=${() => openLink(branchDetail.workspaceLink.url)}
+            >
+              🔗 Open Workspace Link
+            </button>`}
             <button
               class="btn btn-ghost btn-sm"
               onClick=${() => copyToClipboard(branchDetail.diffStat || "", "Diff")}
             >📋 Copy Diff</button>
           </div>
+          ${workspaceLink &&
+          html`
+            <div class="meta-text mb-sm">
+              Workspace: ${workspaceLink.label || workspaceLink.taskTitle || workspaceLink.branch || "Active"}
+              ${(workspaceLink.target?.workspacePath || workspaceLink.workspacePath)
+                ? html`<span class="mono"> · ${workspaceLink.target?.workspacePath || workspaceLink.workspacePath}</span>`
+                : ""}
+            </div>
+          `}
           ${branchDetail.diffSummary &&
           html`
             <div class="meta-text mb-sm">
@@ -695,19 +730,26 @@ export function LogsTab() {
               ${branchDetail.diffSummary.binaryFiles ? `· ${branchDetail.diffSummary.binaryFiles} binary` : ""}
             </div>
           `}
-          ${branchDetail.commits?.length > 0 &&
+          ${branchCommits.length > 0 &&
           html`
             <div class="card mb-sm">
               <div class="card-title">Commits</div>
-              ${branchDetail.commits.map(
-                (cm) => html`
+              ${branchCommits.map((cm) => {
+                const subject = cm.subject || cm.message || "";
+                const author =
+                  cm.author ||
+                  (cm.authorName && cm.authorEmail
+                    ? `${cm.authorName} <${cm.authorEmail}>`
+                    : cm.authorName || cm.authorEmail || "");
+                const dateVal = cm.authorDate || cm.date || cm.time;
+                return html`
                   <div class="meta-text" key=${cm.hash}>
-                    <span class="mono">${cm.hash}</span> ${cm.message || ""}
-                    ${cm.authorName ? `· ${cm.authorName}` : ""}${cm.authorEmail ? ` <${cm.authorEmail}>` : ""}
-                    ${cm.time ? `· ${cm.time}` : ""}${cm.authorDate ? `· ${new Date(cm.authorDate).toLocaleString()}` : ""}
+                    <span class="mono">${cm.hash}</span> ${subject}
+                    ${author ? `· ${author}` : ""}
+                    ${dateVal ? `· ${new Date(dateVal).toLocaleString()}` : ""}
                   </div>
-                `,
-              )}
+                `;
+              })}
             </div>
           `}
           <div class="card mb-sm">

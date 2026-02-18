@@ -459,6 +459,23 @@ function getTaskLabelSet(task) {
   );
 }
 
+function isDraftTask(task) {
+  if (!task) return false;
+  const status = String(task.status || "").toLowerCase();
+  if (status === "draft") return true;
+  if (task.draft === true || task?.meta?.draft === true || task?.meta?.isDraft === true) {
+    return true;
+  }
+  const labelSet = getTaskLabelSet(task);
+  if (labelSet.has("draft")) return true;
+  const tags = Array.isArray(task?.tags)
+    ? task.tags
+    : Array.isArray(task?.meta?.tags)
+      ? task.meta.tags
+      : [];
+  return tags.some((tag) => String(tag || "").trim().toLowerCase() === "draft");
+}
+
 function isCodexScopedTask(task) {
   if (!isGitHubBackend(task)) return true;
   const labelSet = getTaskLabelSet(task);
@@ -2271,6 +2288,16 @@ class TaskExecutor {
         if (tasks.length !== before) {
           console.debug(
             `${TAG} filtered ${before - tasks.length} non-codex-scoped task(s)`,
+          );
+        }
+      }
+
+      if (tasks && tasks.length > 0) {
+        const before = tasks.length;
+        tasks = tasks.filter((task) => !isDraftTask(task));
+        if (tasks.length !== before) {
+          console.debug(
+            `${TAG} filtered ${before - tasks.length} draft task(s)`,
           );
         }
       }

@@ -41,6 +41,7 @@ import {
   applyStoredDefaults,
 } from "./modules/state.js";
 import { activeTab, navigateTo, TAB_CONFIG } from "./modules/router.js";
+import { formatRelative } from "./modules/utils.js";
 
 /* ── Component imports ── */
 import { ToastContainer } from "./components/shared.js";
@@ -53,6 +54,7 @@ import {
 /* ── Tab imports ── */
 import { DashboardTab } from "./tabs/dashboard.js";
 import { TasksTab } from "./tabs/tasks.js";
+import { ChatTab } from "./tabs/chat.js";
 import { AgentsTab } from "./tabs/agents.js";
 import { InfraTab } from "./tabs/infra.js";
 import { ControlTab } from "./tabs/control.js";
@@ -76,10 +78,7 @@ try {
 /* ── Backend health helpers ── */
 
 function formatTimeAgo(ts) {
-  const secs = Math.round((Date.now() - ts) / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
-  return `${Math.round(secs / 3600)}h ago`;
+  return formatRelative(ts);
 }
 
 // Inject offline-banner CSS once
@@ -177,6 +176,7 @@ function OfflineBanner() {
 const TAB_COMPONENTS = {
   dashboard: DashboardTab,
   tasks: TasksTab,
+  chat: ChatTab,
   agents: AgentsTab,
   infra: InfraTab,
   control: ControlTab,
@@ -258,16 +258,24 @@ function BottomNav() {
   return html`
     <nav class="bottom-nav">
       ${TAB_CONFIG.filter((t) => t.id !== "settings").map(
-        (tab) => html`
+        (tab) => {
+          const isHome = tab.id === "dashboard";
+          const isActive = activeTab.value === tab.id;
+          return html`
           <button
             key=${tab.id}
             class="nav-item ${activeTab.value === tab.id ? "active" : ""}"
-            onClick=${() => navigateTo(tab.id)}
+            onClick=${() =>
+              navigateTo(tab.id, {
+                resetHistory: isHome,
+                forceRefresh: isHome && isActive,
+              })}
           >
             ${ICONS[tab.icon]}
             <span class="nav-label">${tab.label}</span>
           </button>
-        `,
+        `;
+        },
       )}
     </nav>
   `;
@@ -279,6 +287,7 @@ function BottomNav() {
 function App() {
   useBackendHealth();
   const { open: paletteOpen, onClose: paletteClose } = useCommandPalette();
+  const mainRef = useRef(null);
 
   useEffect(() => {
     // Initialize Telegram Mini App SDK
@@ -308,9 +317,9 @@ function App() {
       if (tag === "input" || tag === "textarea" || tag === "select") return;
       if (document.activeElement?.isContentEditable) return;
 
-      // Number keys 1-7 to switch tabs
+      // Number keys 1-8 to switch tabs
       const num = parseInt(e.key, 10);
-      if (num >= 1 && num <= 7 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (num >= 1 && num <= 8 && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const tabCfg = TAB_CONFIG[num - 1];
         if (tabCfg) {
           e.preventDefault();
@@ -333,6 +342,78 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const swipeTabs = TAB_CONFIG.filter((t) => t.id !== "settings");
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+    let tracking = false;
+    let blocked = false;
+
+    const shouldBlockSwipe = (target) => {
+      if (!target || typeof target.closest !== "function") return false;
+      return Boolean(
+        target.closest(".kanban-board") ||
+        target.closest(".kanban-cards") ||
+        target.closest(".chat-messages"),
+      );
+    };
+
+    const onTouchStart = (e) => {
+      if (e.touches.length !== 1) return;
+      const target = e.target;
+      blocked = shouldBlockSwipe(target);
+      if (blocked) return;
+      tracking = true;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      startTime = Date.now();
+    };
+
+    const onTouchMove = (e) => {
+      if (!tracking || blocked) return;
+      const dx = e.touches[0].clientX - startX;
+      const dy = e.touches[0].clientY - startY;
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+        e.preventDefault();
+      }
+    };
+
+    const onTouchEnd = (e) => {
+      if (!tracking || blocked) return;
+      tracking = false;
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+      const dt = Date.now() - startTime;
+      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) || dt > 700) return;
+
+      const currentIndex = swipeTabs.findIndex(
+        (tab) => tab.id === activeTab.value,
+      );
+      if (currentIndex < 0) return;
+      const direction = dx < 0 ? 1 : -1;
+      const nextIndex = currentIndex + direction;
+      if (nextIndex < 0 || nextIndex >= swipeTabs.length) return;
+      navigateTo(swipeTabs[nextIndex].id);
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, []);
+
   const CurrentTab = TAB_COMPONENTS[activeTab.value] || DashboardTab;
 
   return html`
@@ -341,7 +422,7 @@ function App() {
     <${ToastContainer} />
     <${CommandPalette} open=${paletteOpen} onClose=${paletteClose} />
     <${PullToRefresh} onRefresh=${() => refreshTab(activeTab.value)}>
-      <main class="main-content">
+      <main class="main-content" ref=${mainRef}>
         <${CurrentTab} />
       </main>
     <//>

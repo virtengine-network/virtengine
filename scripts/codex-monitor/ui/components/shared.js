@@ -47,6 +47,7 @@ export function Card({ title, subtitle, children, className = "", onClick }) {
  * ═══════════════════════════════════════════════ */
 
 const BADGE_STATUS_MAP = new Set([
+  "draft",
   "todo",
   "inprogress",
   "inreview",

@@ -643,6 +643,13 @@ class VKAdapter {
     if (typeof patch.priority === "string" && patch.priority.trim()) {
       body.priority = patch.priority.trim();
     }
+    if (Array.isArray(patch.tags) || typeof patch.tags === "string") {
+      body.tags = normalizeTags(patch.tags ?? patch.labels);
+    }
+    if (typeof patch.draft === "boolean") {
+      body.draft = patch.draft;
+      if (!patch.status) body.status = patch.draft ? "draft" : "todo";
+    }
     if (Object.keys(body).length === 0) {
       return this.getTask(taskId);
     }
@@ -656,11 +663,19 @@ class VKAdapter {
 
   async createTask(projectId, taskData) {
     const fetchVk = await this._getFetchVk();
+    const tags = normalizeTags(taskData?.tags || taskData?.labels || []);
+    const draft = Boolean(taskData?.draft || taskData?.status === "draft");
+    const payload = {
+      ...taskData,
+      status: draft ? "draft" : taskData?.status,
+      ...(tags.length ? { tags } : {}),
+      ...(draft ? { draft: true } : {}),
+    };
     // Use /api/tasks with project_id in body instead of
     // /api/projects/:id/tasks which gets caught by the SPA catch-all.
     const result = await fetchVk(`/api/tasks`, {
       method: "POST",
-      body: { ...taskData, project_id: projectId },
+      body: { ...payload, project_id: projectId },
     });
     const task = result?.data || result;
     return this._normaliseTask(task, projectId);
@@ -678,6 +693,8 @@ class VKAdapter {
 
   _normaliseTask(raw, projectId = null) {
     if (!raw) return null;
+    const tags = normalizeTags(raw.tags || raw.labels || raw.meta?.tags || []);
+    const draft = Boolean(raw.draft || raw.isDraft || raw.status === "draft");
     return {
       id: raw.id || raw.task_id || "",
       title: raw.title || raw.name || "",
@@ -685,6 +702,8 @@ class VKAdapter {
       status: normaliseStatus(raw.status),
       assignee: raw.assignee || raw.assigned_to || null,
       priority: raw.priority || null,
+      tags,
+      draft,
       projectId: raw.project_id || projectId,
       branchName: raw.branch_name || raw.branchName || null,
       prNumber: raw.pr_number || raw.prNumber || null,
@@ -1012,6 +1031,7 @@ class GitHubIssuesAdapter {
       ),
     );
     const labelStatus = statusFromLabels(labels);
+    const tags = extractTagsFromLabels(labels, this._taskScopeLabels || []);
 
     // Determine status from project Status field value
     const projectStatus =
@@ -1029,6 +1049,7 @@ class GitHubIssuesAdapter {
         status = "todo";
       }
     }
+    if (labelSet.has("draft")) status = "draft";
 
     // Codex meta flags
     const codexMeta = {
@@ -1067,6 +1088,8 @@ class GitHubIssuesAdapter {
         : labelSet.has("high")
           ? "high"
           : null,
+      tags,
+      draft: labelSet.has("draft") || status === "draft",
       projectId: `${this._owner}/${this._repo}`,
       branchName: branchMatch?.[1] || null,
       prNumber: prMatch?.[1] || null,
@@ -1079,6 +1102,7 @@ class GitHubIssuesAdapter {
         labels: rawLabels,
         assignees,
         task_url: issueUrl,
+        tags,
         codex: codexMeta,
         projectNumber: null, // set by caller
         projectItemId: projectItem.id || null,
@@ -1846,12 +1870,14 @@ class GitHubIssuesAdapter {
 
       // Keep status labels in sync for open issues.
       const labelByStatus = {
+        draft: "draft",
         inprogress: "inprogress",
         inreview: "inreview",
         blocked: "blocked",
       };
       const nextLabel = labelByStatus[normalised] || null;
       const statusLabels = [
+        "draft",
         "inprogress",
         "in-progress",
         "inreview",
@@ -1975,6 +2001,63 @@ class GitHubIssuesAdapter {
     if (hasEditArgs) {
       await this._gh(editArgs, { parseJson: false });
     }
+    if (
+      Array.isArray(patch.tags) ||
+      Array.isArray(patch.labels) ||
+      typeof patch.tags === "string"
+    ) {
+      const desired = normalizeTags(patch.tags ?? patch.labels);
+      const issue = await this._gh([
+        "issue",
+        "view",
+        num,
+        "--repo",
+        `${this._owner}/${this._repo}`,
+        "--json",
+        "labels",
+      ]);
+      const currentLabels = normalizeLabels(
+        (issue?.labels || []).map((l) => (typeof l === "string" ? l : l.name)),
+      );
+      const systemLabels = new Set([
+        ...SYSTEM_LABEL_KEYS,
+        ...normalizeLabels(this._taskScopeLabels || []),
+      ]);
+      const currentTags = currentLabels.filter((label) => !systemLabels.has(label));
+      const desiredSet = new Set(desired);
+      const toAdd = desired.filter((label) => !currentTags.includes(label));
+      const toRemove = currentTags.filter((label) => !desiredSet.has(label));
+      if (toAdd.length || toRemove.length) {
+        const labelArgs = [
+          "issue",
+          "edit",
+          num,
+          "--repo",
+          `${this._owner}/${this._repo}`,
+        ];
+        for (const label of toAdd) {
+          labelArgs.push("--add-label", label);
+        }
+        for (const label of toRemove) {
+          labelArgs.push("--remove-label", label);
+        }
+        try {
+          await this._gh(labelArgs, { parseJson: false });
+        } catch (err) {
+          for (const label of toAdd) {
+            try {
+              await this._ensureLabelExists(label);
+            } catch {
+              // ignore
+            }
+          }
+          await this._gh(labelArgs, { parseJson: false });
+        }
+      }
+    }
+    if (typeof patch.draft === "boolean" && !patch.status) {
+      await this.updateTaskStatus(num, patch.draft ? "draft" : "todo");
+    }
     if (typeof patch.status === "string" && patch.status.trim()) {
       return this.updateTaskStatus(num, patch.status.trim());
     }
@@ -2079,14 +2162,18 @@ class GitHubIssuesAdapter {
           "[kanban] failed to convert draft issue to repository issue",
         );
       }
-      const requestedLabels = normalizeLabels(taskData.labels || []);
-      const labelsToApply = new Set(requestedLabels);
-      labelsToApply.add(
-        String(this._canonicalTaskLabel || "codex-monitor").toLowerCase(),
-      );
-      if (requestedStatus === "inprogress") labelsToApply.add("inprogress");
-      if (requestedStatus === "inreview") labelsToApply.add("inreview");
-      if (requestedStatus === "blocked") labelsToApply.add("blocked");
+    const requestedLabels = normalizeLabels([
+      ...(taskData.labels || []),
+      ...(taskData.tags || []),
+    ]);
+    const labelsToApply = new Set(requestedLabels);
+    labelsToApply.add(
+      String(this._canonicalTaskLabel || "codex-monitor").toLowerCase(),
+    );
+    if (requestedStatus === "draft") labelsToApply.add("draft");
+    if (requestedStatus === "inprogress") labelsToApply.add("inprogress");
+    if (requestedStatus === "inreview") labelsToApply.add("inreview");
+    if (requestedStatus === "blocked") labelsToApply.add("blocked");
       for (const label of labelsToApply) {
         await this._ensureLabelExists(label);
       }
@@ -2110,12 +2197,16 @@ class GitHubIssuesAdapter {
       });
     }
 
-    const requestedLabels = normalizeLabels(taskData.labels || []);
+    const requestedLabels = normalizeLabels([
+      ...(taskData.labels || []),
+      ...(taskData.tags || []),
+    ]);
     const labelsToApply = new Set(requestedLabels);
     labelsToApply.add(
       String(this._canonicalTaskLabel || "codex-monitor").toLowerCase(),
     );
 
+    if (requestedStatus === "draft") labelsToApply.add("draft");
     if (requestedStatus === "inprogress") labelsToApply.add("inprogress");
     if (requestedStatus === "inreview") labelsToApply.add("inreview");
     if (requestedStatus === "blocked") labelsToApply.add("blocked");
@@ -2697,12 +2788,14 @@ To re-enable codex-monitor for this task, remove the \`${this._codexLabels.ignor
       ),
     );
     const labelStatus = statusFromLabels(labels);
+    const tags = extractTagsFromLabels(labels, this._taskScopeLabels || []);
     let status = "todo";
     if (issue.state === "closed" || issue.state === "CLOSED") {
       status = "done";
     } else if (labelStatus) {
       status = labelStatus;
     }
+    if (labelSet.has("draft")) status = "draft";
 
     // Check for codex-monitor labels
     const codexMeta = {
@@ -2727,12 +2820,15 @@ To re-enable codex-monitor for this task, remove the \`${this._codexLabels.ignor
         : labelSet.has("high")
           ? "high"
           : null,
+      tags,
+      draft: labelSet.has("draft") || status === "draft",
       projectId: `${this._owner}/${this._repo}`,
       branchName: branchMatch?.[1] || null,
       prNumber: prMatch?.[1] || null,
       meta: {
         ...issue,
         task_url: issue.url || null,
+        tags,
         codex: codexMeta,
       },
       taskUrl: issue.url || null,
@@ -2990,6 +3086,7 @@ class JiraAdapter {
     const fields = issue?.fields || {};
     const labels = normalizeLabels(fields.labels || []);
     const labelSet = new Set(labels);
+    const tags = extractTagsFromLabels(labels, this._taskScopeLabels || []);
     const codexMeta = {
       isIgnored:
         labelSet.has(this._codexLabels.ignore) || labelSet.has("codex:ignore"),
@@ -3003,6 +3100,8 @@ class JiraAdapter {
     const branchMatch = description.match(/branch:\s*`?([^\s`]+)`?/i);
     const prMatch = description.match(/pr:\s*#?(\d+)/i);
     const issueKey = String(issue?.key || "");
+    let status = this._normalizeJiraStatus(fields.status);
+    if (labelSet.has("draft")) status = "draft";
     const normalizedFieldValues = {};
     for (const [fieldKey, fieldValue] of Object.entries(fields || {})) {
       if (fieldValue == null) continue;
@@ -3027,13 +3126,15 @@ class JiraAdapter {
       id: issueKey,
       title: fields.summary || "",
       description,
-      status: this._normalizeJiraStatus(fields.status),
+      status,
       assignee:
         fields.assignee?.displayName ||
         fields.assignee?.emailAddress ||
         fields.assignee?.accountId ||
         null,
       priority: this._normalizePriority(fields.priority?.name),
+      tags,
+      draft: labelSet.has("draft") || status === "draft",
       projectId: fields.project?.key || null,
       branchName: branchMatch?.[1] || null,
       prNumber: prMatch?.[1] || null,
@@ -3044,6 +3145,7 @@ class JiraAdapter {
         ...issue,
         labels,
         fields: normalizedFieldValues,
+        tags,
         codex: codexMeta,
       },
       backend: "jira",
@@ -3362,10 +3464,14 @@ class JiraAdapter {
 
     if (filters.status) {
       const normalized = normaliseStatus(filters.status);
-      const statusNames = this._statusCandidates(normalized)
-        .map((name) => `"${name.replace(/"/g, '\\"')}"`)
-        .join(", ");
-      if (statusNames) clauses.push(`status in (${statusNames})`);
+      if (normalized === "draft") {
+        clauses.push(`labels in ("draft")`);
+      } else {
+        const statusNames = this._statusCandidates(normalized)
+          .map((name) => `"${name.replace(/"/g, '\\"')}"`)
+          .join(", ");
+        if (statusNames) clauses.push(`status in (${statusNames})`);
+      }
     }
 
     if (this._enforceTaskLabel && this._taskScopeLabels.length > 0) {
@@ -3447,6 +3553,13 @@ class JiraAdapter {
   async updateTaskStatus(taskId, status, options = {}) {
     const issueKey = this._validateIssueKey(taskId);
     const normalized = normaliseStatus(status);
+    if (normalized === "draft") {
+      await this.updateTask(issueKey, { draft: true });
+      if (options.sharedState) {
+        await this.persistSharedStateToIssue(issueKey, options.sharedState);
+      }
+      return this.getTask(issueKey);
+    }
     const current = await this.getTask(issueKey);
     if (current.status !== normalized) {
       const transitioned = await this._transitionIssue(issueKey, normalized);
@@ -3458,6 +3571,9 @@ class JiraAdapter {
     }
     if (options.sharedState) {
       await this.persistSharedStateToIssue(issueKey, options.sharedState);
+    }
+    if (current.status === "draft") {
+      await this.updateTask(issueKey, { draft: false });
     }
     if (
       options.projectFields &&
@@ -3481,8 +3597,29 @@ class JiraAdapter {
     if (typeof patch.priority === "string" && patch.priority.trim()) {
       fields.priority = { name: patch.priority.trim() };
     }
-    if (Array.isArray(patch.labels)) {
-      fields.labels = normalizeLabels(patch.labels);
+    const wantsTags =
+      Array.isArray(patch.tags) ||
+      Array.isArray(patch.labels) ||
+      typeof patch.tags === "string";
+    if (wantsTags || typeof patch.draft === "boolean") {
+      const issue = await this._fetchIssue(issueKey);
+      const currentLabels = normalizeLabels(issue?.fields?.labels || []);
+      const systemLabels = new Set([
+        ...SYSTEM_LABEL_KEYS,
+        ...normalizeLabels(this._taskScopeLabels || []),
+      ]);
+      const desiredTags = wantsTags
+        ? normalizeTags(patch.tags ?? patch.labels)
+        : currentLabels.filter((label) => !systemLabels.has(label));
+      const nextLabels = new Set(
+        currentLabels.filter((label) => systemLabels.has(label)),
+      );
+      for (const label of desiredTags) nextLabels.add(label);
+      if (typeof patch.draft === "boolean") {
+        if (patch.draft) nextLabels.add("draft");
+        else nextLabels.delete("draft");
+      }
+      fields.labels = [...nextLabels].map((label) => this._sanitizeJiraLabel(label));
     }
     if (patch.assignee) {
       fields.assignee = { accountId: String(patch.assignee) };
@@ -3535,9 +3672,13 @@ class JiraAdapter {
     const labels = normalizeLabels([
       ...(Array.isArray(this._taskScopeLabels) ? this._taskScopeLabels : []),
       ...normalizeLabels(taskData.labels || []),
+      ...normalizeLabels(taskData.tags || []),
     ]).map((label) => this._sanitizeJiraLabel(label));
     if (!labels.includes(this._canonicalTaskLabel)) {
       labels.push(this._sanitizeJiraLabel(this._canonicalTaskLabel));
+    }
+    if (requestedStatus === "draft" && !labels.includes("draft")) {
+      labels.push("draft");
     }
     const fields = {
       project: { key: projectKey },
@@ -3563,7 +3704,7 @@ class JiraAdapter {
       body: { fields },
     });
     const issueKey = this._validateIssueKey(created?.key || "");
-    if (requestedStatus !== "todo") {
+    if (requestedStatus !== "todo" && requestedStatus !== "draft") {
       return this.updateTaskStatus(issueKey, requestedStatus, {
         sharedState: taskData.sharedState,
       });

@@ -14,6 +14,7 @@ const html = htm.bind(h);
 
 /* ─── Column definitions ─── */
 const COLUMN_MAP = {
+  draft: ["draft"],
   backlog: ["backlog", "open", "new", "todo"],
   inProgress: ["in-progress", "inprogress", "working", "active", "assigned"],
   inReview: ["in-review", "inreview", "review", "pr-open", "pr-review"],
@@ -21,6 +22,7 @@ const COLUMN_MAP = {
 };
 
 const COLUMNS = [
+  { id: "draft", title: "Drafts", icon: "\u{1F4DD}", color: "var(--color-warning, #f59e0b)" },
   { id: "backlog", title: "Backlog", icon: "\u{1F4CB}", color: "var(--text-secondary)" },
   { id: "inProgress", title: "In Progress", icon: "\u{1F528}", color: "var(--color-inprogress, #3b82f6)" },
   { id: "inReview", title: "In Review", icon: "\u{1F440}", color: "var(--color-inreview, #f59e0b)" },
@@ -28,6 +30,7 @@ const COLUMNS = [
 ];
 
 const COLUMN_TO_STATUS = {
+  draft: "draft",
   backlog: "todo",
   inProgress: "inprogress",
   inReview: "inreview",
@@ -54,6 +57,16 @@ function getColumnForStatus(status) {
     if (statuses.includes(s)) return col;
   }
   return "backlog";
+}
+
+function getTaskTags(task) {
+  if (!task) return [];
+  const raw = Array.isArray(task.tags) && task.tags.length
+    ? task.tags
+    : Array.isArray(task?.meta?.tags)
+      ? task.meta.tags
+      : [];
+  return raw.filter((tag) => String(tag || "").trim().toLowerCase() !== "draft");
 }
 
 /* ─── Derived column data ─── */
@@ -174,7 +187,11 @@ async function createTaskInColumn(columnStatus, title) {
   try {
     await apiFetch("/api/tasks/create", {
       method: "POST",
-      body: JSON.stringify({ title, status: columnStatus }),
+      body: JSON.stringify({
+        title,
+        status: columnStatus,
+        draft: columnStatus === "draft",
+      }),
     });
     showToast("Task created", "success");
     await loadTasks();
@@ -249,6 +266,7 @@ function KanbanCard({ task, onOpen }) {
 
   const priorityColor = PRIORITY_COLORS[task.priority] || null;
   const priorityLabel = PRIORITY_LABELS[task.priority] || null;
+  const tags = getTaskTags(task);
 
   return html`
     <div
@@ -268,6 +286,11 @@ function KanbanCard({ task, onOpen }) {
       <div class="kanban-card-title">${truncate(task.title || "(untitled)", 80)}</div>
       ${task.description && html`
         <div class="kanban-card-desc">${truncate(task.description, 72)}</div>
+      `}
+      ${tags.length > 0 && html`
+        <div class="kanban-card-tags">
+          ${tags.map((tag) => html`<span class="tag-chip">#${tag}</span>`)}
+        </div>
       `}
       <div class="kanban-card-meta">
         <span class="kanban-card-id">${typeof task.id === "string" ? truncate(task.id, 12) : task.id}</span>

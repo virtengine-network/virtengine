@@ -31,11 +31,22 @@ export function formatDate(d) {
  * @returns {string}
  */
 export function formatRelative(d) {
-  if (!d) return "—";
+  if (d === null || d === undefined || d === "") return "—";
   try {
-    const date = d instanceof Date ? d : new Date(d);
-    if (isNaN(date.getTime())) return String(d);
-    const diffMs = Date.now() - date.getTime();
+    let date;
+    if (d instanceof Date) {
+      date = d;
+    } else if (typeof d === "number") {
+      if (!Number.isFinite(d)) return "—";
+      const normalized = Math.abs(d) < 1e12 ? d * 1000 : d;
+      date = new Date(normalized);
+    } else {
+      date = new Date(d);
+    }
+    const timestamp = date.getTime();
+    if (!Number.isFinite(timestamp)) return "—";
+    const diffMs = Date.now() - timestamp;
+    if (!Number.isFinite(diffMs)) return "—";
     if (diffMs < 0) return "just now";
     const seconds = Math.floor(diffMs / 1000);
     if (seconds < 60) return `${seconds}s ago`;
@@ -50,7 +61,7 @@ export function formatRelative(d) {
     const years = Math.floor(months / 12);
     return `${years}y ago`;
   } catch {
-    return String(d);
+    return "—";
   }
 }
 

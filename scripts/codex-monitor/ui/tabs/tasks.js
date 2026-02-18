@@ -62,6 +62,7 @@ const DOWNLOAD_ICON = html`<svg xmlns="http://www.w3.org/2000/svg" width="14" he
 /* ─── Status chip definitions ─── */
 const STATUS_CHIPS = [
   { value: "all", label: "All" },
+  { value: "draft", label: "Draft" },
   { value: "todo", label: "Todo" },
   { value: "inprogress", label: "Active" },
   { value: "inreview", label: "Review" },
@@ -83,6 +84,62 @@ const SORT_OPTIONS = [
   { value: "priority", label: "Priority" },
   { value: "title", label: "Title" },
 ];
+
+const SYSTEM_TAGS = new Set([
+  "draft",
+  "todo",
+  "inprogress",
+  "inreview",
+  "done",
+  "cancelled",
+  "error",
+  "blocked",
+  "critical",
+  "high",
+  "medium",
+  "low",
+  "codex:ignore",
+  "codex:claimed",
+  "codex:working",
+  "codex:stale",
+  "codex-monitor",
+  "codex-mointor",
+]);
+
+function normalizeTagInput(input) {
+  if (!input) return [];
+  const values = Array.isArray(input)
+    ? input
+    : String(input || "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+  const seen = new Set();
+  const tags = [];
+  for (const value of values) {
+    const normalized = String(value || "")
+      .trim()
+      .toLowerCase();
+    if (!normalized || seen.has(normalized) || SYSTEM_TAGS.has(normalized)) continue;
+    seen.add(normalized);
+    tags.push(normalized);
+  }
+  return tags;
+}
+
+function getTaskTags(task) {
+  if (!task) return [];
+  const direct = normalizeTagInput(task.tags || []);
+  if (direct.length) return direct;
+  const metaTags = normalizeTagInput(task?.meta?.tags || []);
+  if (metaTags.length) return metaTags;
+  const metaLabels = Array.isArray(task?.meta?.labels)
+    ? task.meta.labels.map((label) =>
+        typeof label === "string" ? label : label?.name || "",
+      )
+    : [];
+  return normalizeTagInput(metaLabels);
+}
 
 export function StartTaskModal({
   task,
@@ -175,18 +232,44 @@ export function TaskDetailModal({ task, onClose, onStart }) {
   const [description, setDescription] = useState(task?.description || "");
   const [status, setStatus] = useState(task?.status || "todo");
   const [priority, setPriority] = useState(task?.priority || "");
+  const [tagsInput, setTagsInput] = useState(
+    getTaskTags(task).join(", "),
+  );
+  const [draft, setDraft] = useState(
+    Boolean(task?.draft || task?.status === "draft"),
+  );
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setTitle(task?.title || "");
+    setDescription(task?.description || "");
+    setStatus(task?.status || "todo");
+    setPriority(task?.priority || "");
+    setTagsInput(getTaskTags(task).join(", "));
+    setDraft(Boolean(task?.draft || task?.status === "draft"));
+  }, [task?.id]);
 
   const handleSave = async () => {
     setSaving(true);
     haptic("medium");
     const prev = cloneValue(tasksData.value);
+    const tags = normalizeTagInput(tagsInput);
+    const wantsDraft = draft || status === "draft";
+    const nextStatus = wantsDraft ? "draft" : status;
     try {
       await runOptimistic(
         () => {
           tasksData.value = tasksData.value.map((t) =>
             t.id === task.id
-              ? { ...t, title, description, status, priority: priority || null }
+              ? {
+                  ...t,
+                  title,
+                  description,
+                  status: nextStatus,
+                  priority: priority || null,
+                  tags,
+                  draft: wantsDraft,
+                }
               : t,
           );
         },
@@ -197,8 +280,10 @@ export function TaskDetailModal({ task, onClose, onStart }) {
               taskId: task.id,
               title,
               description,
-              status,
+              status: nextStatus,
               priority,
+              tags,
+              draft: wantsDraft,
             }),
           });
           if (res?.data)
@@ -222,17 +307,24 @@ export function TaskDetailModal({ task, onClose, onStart }) {
   const handleStatusUpdate = async (newStatus) => {
     haptic("medium");
     const prev = cloneValue(tasksData.value);
+    const wantsDraft = newStatus === "draft";
     try {
       await runOptimistic(
         () => {
           tasksData.value = tasksData.value.map((t) =>
-            t.id === task.id ? { ...t, status: newStatus } : t,
+            t.id === task.id
+              ? { ...t, status: newStatus, draft: wantsDraft }
+              : t,
           );
         },
         async () => {
           const res = await apiFetch("/api/tasks/update", {
             method: "POST",
-            body: JSON.stringify({ taskId: task.id, status: newStatus }),
+            body: JSON.stringify({
+              taskId: task.id,
+              status: newStatus,
+              draft: wantsDraft,
+            }),
           });
           if (res?.data)
             tasksData.value = tasksData.value.map((t) =>
@@ -245,7 +337,10 @@ export function TaskDetailModal({ task, onClose, onStart }) {
         },
       );
       if (newStatus === "done" || newStatus === "cancelled") onClose();
-      else setStatus(newStatus);
+      else {
+        setStatus(newStatus);
+        setDraft(wantsDraft);
+      }
     } catch {
       /* toast */
     }
@@ -299,14 +394,33 @@ export function TaskDetailModal({ task, onClose, onStart }) {
           value=${description}
           onInput=${(e) => setDescription(e.target.value)}
         ></textarea>
+        <input
+          class="input"
+          placeholder="Tags (comma-separated)"
+          value=${tagsInput}
+          onInput=${(e) => setTagsInput(e.target.value)}
+        />
+        ${normalizeTagInput(tagsInput).length > 0 &&
+        html`
+          <div class="tag-row">
+            ${normalizeTagInput(tagsInput).map(
+              (tag) => html`<span class="tag-chip">#${tag}</span>`,
+            )}
+          </div>
+        `}
 
         <div class="input-row">
           <select
             class="input"
             value=${status}
-            onChange=${(e) => setStatus(e.target.value)}
+            onChange=${(e) => {
+              const next = e.target.value;
+              setStatus(next);
+              if (next === "draft") setDraft(true);
+              else if (draft) setDraft(false);
+            }}
           >
-            ${["todo", "inprogress", "inreview", "done", "cancelled"].map(
+            ${["draft", "todo", "inprogress", "inreview", "done", "cancelled"].map(
               (s) => html`<option value=${s}>${s}</option>`,
             )}
           </select>
@@ -321,6 +435,15 @@ export function TaskDetailModal({ task, onClose, onStart }) {
             )}
           </select>
         </div>
+        <${Toggle}
+          label="Draft (keep in backlog)"
+          checked=${draft}
+          onChange=${(next) => {
+            setDraft(next);
+            if (next) setStatus("draft");
+            else if (status === "draft") setStatus("todo");
+          }}
+        />
 
         <!-- Metadata -->
         ${task?.created_at &&
@@ -440,12 +563,21 @@ export function TasksTab() {
   const activeSlots = executorData.value?.data?.slots || [];
   const hasActiveSlots = activeSlots.length > 0;
   const completedOnly = filterVal === "done";
+  const lastNonCompletedRef = useRef(
+    filterVal && filterVal !== "done" ? filterVal : "all",
+  );
+
+  useEffect(() => {
+    if (filterVal && filterVal !== "done") {
+      lastNonCompletedRef.current = filterVal;
+    }
+  }, [filterVal]);
 
   /* Search (local fuzzy filter on already-loaded data) */
   const searchLower = searchVal.trim().toLowerCase();
   const visible = searchLower
     ? tasks.filter((t) =>
-        `${t.title || ""} ${t.description || ""} ${t.id || ""}`
+        `${t.title || ""} ${t.description || ""} ${t.id || ""} ${getTaskTags(t).join(" ")}`
           .toLowerCase()
           .includes(searchLower),
       )
@@ -457,6 +589,13 @@ export function TasksTab() {
     if (tasksFilter) tasksFilter.value = s;
     if (tasksPage) tasksPage.value = 0;
     await refreshTab("tasks");
+  };
+
+  const toggleCompletedFilter = async () => {
+    const next = completedOnly
+      ? lastNonCompletedRef.current || "all"
+      : "done";
+    await handleFilter(next);
   };
 
   const handlePriorityFilter = async (p) => {
@@ -529,16 +668,23 @@ export function TasksTab() {
   const handleStatusUpdate = async (taskId, newStatus) => {
     haptic("medium");
     const prev = cloneValue(tasks);
+    const wantsDraft = newStatus === "draft";
     await runOptimistic(
       () => {
         tasksData.value = tasksData.value.map((t) =>
-          t.id === taskId ? { ...t, status: newStatus } : t,
+          t.id === taskId
+            ? { ...t, status: newStatus, draft: wantsDraft }
+            : t,
         );
       },
       async () => {
         const res = await apiFetch("/api/tasks/update", {
           method: "POST",
-          body: JSON.stringify({ taskId, status: newStatus }),
+          body: JSON.stringify({
+            taskId,
+            status: newStatus,
+            draft: wantsDraft,
+          }),
         });
         if (res?.data)
           tasksData.value = tasksData.value.map((t) =>
@@ -634,12 +780,24 @@ export function TasksTab() {
     try {
       const res = await apiFetch("/api/tasks?limit=1000", { _silent: true });
       const allTasks = res?.data || res?.tasks || tasks;
-      const headers = ["ID", "Title", "Status", "Priority", "Created", "Updated", "Description"];
+      const headers = [
+        "ID",
+        "Title",
+        "Status",
+        "Priority",
+        "Tags",
+        "Draft",
+        "Created",
+        "Updated",
+        "Description",
+      ];
       const rows = allTasks.map((t) => [
         t.id || "",
         t.title || "",
         t.status || "",
         t.priority || "",
+        getTaskTags(t).join(", "),
+        t.draft || t.status === "draft" ? "true" : "false",
         t.created_at || "",
         t.updated_at || "",
         truncate(t.description || "", 200),
@@ -684,7 +842,7 @@ export function TasksTab() {
         </div>
         <button
           class="btn btn-ghost btn-sm"
-          onClick=${() => handleFilter(completedOnly ? "all" : "done")}
+          onClick=${toggleCompletedFilter}
         >
           ${completedOnly ? "Show All" : "Show Completed"}
         </button>
@@ -736,7 +894,7 @@ export function TasksTab() {
       </div>
       <button
         class="btn btn-ghost btn-sm"
-        onClick=${() => handleFilter(completedOnly ? "all" : "done")}
+        onClick=${toggleCompletedFilter}
       >
         ${completedOnly ? "Show All" : "Show Completed"}
       </button>
@@ -912,6 +1070,14 @@ export function TasksTab() {
               ? truncate(task.description, 120)
               : "No description."}
           </div>
+          ${getTaskTags(task).length > 0 &&
+          html`
+            <div class="tag-row">
+              ${getTaskTags(task).map(
+                (tag) => html`<span class="tag-chip">#${tag}</span>`,
+              )}
+            </div>
+          `}
           ${!batchMode &&
           html`
             <div class="btn-row mt-sm" onClick=${(e) => e.stopPropagation()}>
@@ -1006,6 +1172,8 @@ function CreateTaskModalInline({ onClose }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("medium");
+  const [tagsInput, setTagsInput] = useState("");
+  const [draft, setDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
@@ -1015,6 +1183,7 @@ function CreateTaskModalInline({ onClose }) {
     }
     setSubmitting(true);
     haptic("medium");
+    const tags = normalizeTagInput(tagsInput);
     try {
       await apiFetch("/api/tasks/create", {
         method: "POST",
@@ -1022,6 +1191,9 @@ function CreateTaskModalInline({ onClose }) {
           title: title.trim(),
           description: description.trim(),
           priority,
+          tags,
+          draft,
+          status: draft ? "draft" : "todo",
         }),
       });
       showToast("Task created", "success");
@@ -1044,7 +1216,7 @@ function CreateTaskModalInline({ onClose }) {
         tg.MainButton.offClick(handleSubmit);
       };
     }
-  }, [title, description, priority]);
+  }, [title, description, priority, tagsInput, draft]);
 
   return html`
     <${Modal} title="New Task" onClose=${onClose}>
@@ -1062,6 +1234,25 @@ function CreateTaskModalInline({ onClose }) {
           value=${description}
           onInput=${(e) => setDescription(e.target.value)}
         ></textarea>
+        <input
+          class="input"
+          placeholder="Tags (comma-separated)"
+          value=${tagsInput}
+          onInput=${(e) => setTagsInput(e.target.value)}
+        />
+        ${normalizeTagInput(tagsInput).length > 0 &&
+        html`
+          <div class="tag-row">
+            ${normalizeTagInput(tagsInput).map(
+              (tag) => html`<span class="tag-chip">#${tag}</span>`,
+            )}
+          </div>
+        `}
+        <${Toggle}
+          label="Draft (keep in backlog)"
+          checked=${draft}
+          onChange=${(next) => setDraft(next)}
+        />
         <${SegmentedControl}
           options=${[
             { value: "low", label: "Low" },

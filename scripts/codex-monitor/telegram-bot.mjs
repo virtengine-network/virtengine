@@ -1860,11 +1860,19 @@ async function handleCallbackQuery(query) {
     return;
   }
   if (data === "cb:confirm_restart") {
-    enqueueCommand(() => handleCommand("/restart", chatId));
+    await sendReply(
+      chatId,
+      "⚠️ Restart will stop the orchestrator process and let the monitor respawn it.\nProceed?",
+      { reply_markup: buildConfirmKeyboard("cb:do_restart", "Confirm Restart") },
+    );
+    return;
+  }
+  if (data === "cb:do_restart") {
+    enqueueCommand(() => handleCommand("/restart --confirm", chatId));
     return;
   }
   if (data === "cb:confirm_clear") {
-    enqueueCommand(() => handleCommand("/clear", chatId));
+    enqueueCommand(() => handleCommand("/clear --confirm", chatId));
     return;
   }
   if (data === "cb:confirm_cleanup") {
@@ -1884,6 +1892,20 @@ async function handleCallbackQuery(query) {
     if (query.message?.message_id) {
       await deleteDirect(chatId, query.message.message_id);
     }
+    return;
+  }
+  if (data.startsWith("cb:confirm_action:")) {
+    const token = data.slice("cb:confirm_action:".length);
+    const payload = readUiToken(token);
+    if (!payload || payload.type !== "confirm_cmd") {
+      await sendReply(chatId, "⏳ That action expired. Please try again.");
+      return;
+    }
+    uiTokenRegistry.delete(token);
+    if (query.message?.message_id) {
+      await deleteDirect(chatId, query.message.message_id);
+    }
+    await dispatchUiCommand(chatId, payload.command);
     return;
   }
 
@@ -2795,10 +2817,20 @@ const UI_INPUT_HANDLERS = {
   threads_kill: {
     prompt: "Task key to invalidate.",
     buildCommand: (input) => `/threads kill ${input}`,
+    confirm: true,
+    confirmTitle: "Invalidate Thread",
+    confirmLabel: "Invalidate",
+    confirmBackAction: "go:threads_kill",
+    confirmDetails: (input) => [`Task Key: \`${input}\``],
   },
   worktrees_release: {
     prompt: "Task key to release.",
     buildCommand: (input) => `/worktrees release ${input}`,
+    confirm: true,
+    confirmTitle: "Release Worktree",
+    confirmLabel: "Release",
+    confirmBackAction: "go:worktrees_release",
+    confirmDetails: (input) => [`Task Key: \`${input}\``],
   },
   shared_detail: {
     prompt: "Shared workspace ID to inspect.",
@@ -2807,10 +2839,20 @@ const UI_INPUT_HANDLERS = {
   shared_claim: {
     prompt: 'Claim workspace (id or full args, e.g. "cloud-01 --ttl 120").',
     buildCommand: (input) => `/claim ${input}`,
+    confirm: true,
+    confirmTitle: "Claim Shared Workspace",
+    confirmLabel: "Claim",
+    confirmBackAction: "go:shared_claim",
+    confirmDetails: (input) => [`Args: \`${shortSnippet(input, 120)}\``],
   },
   shared_release: {
     prompt: 'Release workspace (id or full args, e.g. "cloud-01 --force").',
     buildCommand: (input) => `/release ${input}`,
+    confirm: true,
+    confirmTitle: "Release Shared Workspace",
+    confirmLabel: "Release",
+    confirmBackAction: "go:shared_release",
+    confirmDetails: (input) => [`Args: \`${shortSnippet(input, 120)}\``],
   },
   agent_custom: {
     prompt:
@@ -2866,6 +2908,19 @@ function buildConfirmKeyboard(confirmId, confirmLabel = "Confirm") {
       ],
     ],
   };
+}
+
+function buildActionConfirmKeyboard(confirmId, confirmLabel, backAction) {
+  const rows = [
+    [
+      { text: `✅ ${confirmLabel || "Confirm"}`, callback_data: confirmId },
+      { text: "❌ Cancel", callback_data: "cb:dismiss" },
+    ],
+  ];
+  if (backAction) {
+    rows.push([uiButton("⬅️ Back", backAction)]);
+  }
+  return { inline_keyboard: rows };
 }
 
 function appendRefreshRow(keyboard, screenId, params = {}) {
@@ -2935,6 +2990,35 @@ async function promptUiInput(chatId, key, extra = {}) {
   });
 }
 
+async function promptActionConfirm(chatId, token, payload, options = {}) {
+  const title = payload.title || "Confirm Action";
+  const detailLines = Array.isArray(payload.detailLines)
+    ? payload.detailLines.filter(Boolean)
+    : [];
+  const hint = payload.hint ? String(payload.hint) : "";
+  const text = [
+    `*${title}*`,
+    detailLines.length ? "" : null,
+    ...detailLines,
+    hint ? "" : null,
+    hint,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const confirmId = `cb:confirm_action:${token}`;
+  const keyboard = buildActionConfirmKeyboard(
+    confirmId,
+    payload.confirmLabel || "Confirm",
+    payload.backAction,
+  );
+  await sendReply(chatId, text, {
+    parseMode: "Markdown",
+    reply_markup: keyboard,
+    skipSticky: true,
+    ...options,
+  });
+}
+
 async function handleUiInput(chatId, request, text) {
   const trimmed = String(text || "").trim();
   if (!trimmed) {
@@ -2961,6 +3045,23 @@ async function handleUiInput(chatId, request, text) {
   const command = buildCommand(trimmed, request);
   if (!command) {
     await sendReply(chatId, "⚠️ Could not build a command from that input.");
+    return;
+  }
+  if (request.confirm) {
+    const detailLines =
+      typeof request.confirmDetails === "function"
+        ? request.confirmDetails(trimmed, request, command)
+        : [`Command: \`${shortSnippet(command, 120)}\``];
+    const payload = {
+      type: "confirm_cmd",
+      command,
+      title: request.confirmTitle || "Confirm Action",
+      confirmLabel: request.confirmLabel || "Confirm",
+      detailLines,
+      backAction: request.confirmBackAction || null,
+    };
+    const token = issueUiToken(payload);
+    await promptActionConfirm(chatId, token, payload);
     return;
   }
   await dispatchUiCommand(chatId, command);
@@ -3087,6 +3188,11 @@ function parsePageParam(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
+function formatDurationMs(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return "0m";
+  return formatRuntimeSeconds(Math.floor(ms / 1000));
+}
+
 async function buildHomeStatusLine() {
   const data = await readStatusSnapshot();
   if (!data) return "Status: unavailable";
@@ -3115,19 +3221,36 @@ async function listWorktreeNames() {
   return entries.sort((a, b) => b.mtime - a.mtime).map((entry) => entry.name);
 }
 
-async function listThreadTaskKeys() {
+async function listThreadEntries() {
   try {
     const threads = getActiveThreads();
-    return threads.map((t) => t.taskKey).filter(Boolean);
+    return threads
+      .map((t) => ({
+        taskKey: t.taskKey,
+        sdk: t.sdk,
+        turnCount: t.turnCount,
+        ageMs: t.age,
+        threadId: t.threadId,
+      }))
+      .filter((entry) => entry.taskKey);
   } catch {
     return [];
   }
 }
 
-async function listWorktreeTaskKeys() {
+async function listWorktreeEntries() {
   try {
     const worktrees = await listManagedWorktrees();
-    return worktrees.map((wt) => wt.taskKey).filter(Boolean);
+    return worktrees
+      .map((wt) => ({
+        taskKey: wt.taskKey,
+        branch: wt.branch,
+        status: wt.status,
+        ageMs: wt.age,
+        owner: wt.owner,
+        path: wt.path,
+      }))
+      .filter((entry) => entry.taskKey);
   } catch {
     return [];
   }
@@ -3144,6 +3267,35 @@ async function listSharedWorkspaceEntries() {
   } catch {
     return [];
   }
+}
+
+function buildSharedWorkspaceDetailLines(workspace) {
+  if (!workspace) return [];
+  const lines = [
+    `Workspace: \`${workspace.id}\``,
+    workspace.name && workspace.name !== workspace.id
+      ? `Name: ${workspace.name}`
+      : null,
+    workspace.region ? `Region: ${workspace.region}` : null,
+    workspace.provider ? `Provider: ${workspace.provider}` : null,
+    `Status: ${workspace.availability}`,
+  ];
+  const lease = workspace.lease;
+  if (lease) {
+    lines.push(`Lease Owner: ${lease.owner || "unknown"}`);
+    if (lease.claimed_at) {
+      const claimedAt = Date.parse(lease.claimed_at);
+      lines.push(`Claimed: ${formatAgeFromTimestamp(claimedAt)}`);
+    }
+    if (lease.lease_expires_at) {
+      const expiresAt = Date.parse(lease.lease_expires_at);
+      lines.push(`Expires In: ${formatTimeUntil(expiresAt)}`);
+    }
+    if (lease.notes) {
+      lines.push(`Notes: ${shortSnippet(String(lease.notes), 120)}`);
+    }
+  }
+  return lines.filter(Boolean);
 }
 
 async function listWorkspaceRegistryEntries() {
@@ -3445,30 +3597,44 @@ Object.assign(UI_SCREENS, {
   threads_kill: {
     title: "Kill Thread",
     parent: "threads",
-    body: () => "Select a thread to invalidate.",
+    body: () => "Select a thread to review details and confirm invalidation.",
     keyboard: async (ctx) => {
       const page = parsePageParam(ctx.params?.page);
-      const keys = await listThreadTaskKeys();
-      if (keys.length === 0) {
+      const threads = await listThreadEntries();
+      if (threads.length === 0) {
         return buildKeyboard([
           [uiButton("Custom Task Key", uiInputAction("threads_kill"))],
           uiNavRow("threads"),
         ]);
       }
       const perPage = 8;
-      const totalPages = Math.max(1, Math.ceil(keys.length / perPage));
+      const totalPages = Math.max(1, Math.ceil(threads.length / perPage));
       const safePage = Math.min(page, totalPages - 1);
-      const slice = keys.slice(
+      const slice = threads.slice(
         safePage * perPage,
         safePage * perPage + perPage,
       );
       const rows = chunkButtons(
-        slice.map((key) => {
+        slice.map((entry) => {
+          const age = formatDurationMs(entry.ageMs);
+          const detailLines = [
+            `Task Key: \`${entry.taskKey}\``,
+            entry.sdk ? `SDK: \`${entry.sdk}\`` : null,
+            Number.isFinite(entry.turnCount) ? `Turns: ${entry.turnCount}` : null,
+            entry.threadId
+              ? `Thread: \`${entry.threadId.slice(0, 12)}…\``
+              : null,
+            `Age: ${age}`,
+          ];
           const token = issueUiToken({
-            type: "cmd",
-            command: `/threads kill ${key}`,
+            type: "confirm_cmd",
+            command: `/threads kill ${entry.taskKey}`,
+            title: "Invalidate Thread",
+            confirmLabel: "Invalidate",
+            detailLines,
+            backAction: uiGoAction("threads_kill", safePage),
           });
-          return uiButton(shortenLabel(key), uiTokenAction(token));
+          return uiButton(shortenLabel(entry.taskKey), uiTokenAction(token));
         }),
         2,
       );
@@ -3790,30 +3956,43 @@ Object.assign(UI_SCREENS, {
   worktrees_release: {
     title: "Release Worktree",
     parent: "workspaces",
-    body: () => "Select a task key to release its worktree.",
+    body: () => "Select a task key to review details and confirm release.",
     keyboard: async (ctx) => {
       const page = parsePageParam(ctx.params?.page);
-      const keys = await listWorktreeTaskKeys();
-      if (keys.length === 0) {
+      const entries = await listWorktreeEntries();
+      if (entries.length === 0) {
         return buildKeyboard([
           [uiButton("Custom Task Key", uiInputAction("worktrees_release"))],
           uiNavRow("workspaces"),
         ]);
       }
       const perPage = 8;
-      const totalPages = Math.max(1, Math.ceil(keys.length / perPage));
+      const totalPages = Math.max(1, Math.ceil(entries.length / perPage));
       const safePage = Math.min(page, totalPages - 1);
-      const slice = keys.slice(
+      const slice = entries.slice(
         safePage * perPage,
         safePage * perPage + perPage,
       );
       const rows = chunkButtons(
-        slice.map((key) => {
+        slice.map((entry) => {
+          const age = formatDurationMs(entry.ageMs);
+          const detailLines = [
+            `Task Key: \`${entry.taskKey}\``,
+            entry.branch ? `Branch: \`${entry.branch}\`` : null,
+            entry.status ? `Status: ${entry.status}` : null,
+            entry.owner ? `Owner: ${entry.owner}` : null,
+            `Age: ${age}`,
+            entry.path ? `Path: \`${shortPath(entry.path)}\`` : null,
+          ];
           const token = issueUiToken({
-            type: "cmd",
-            command: `/worktrees release ${key}`,
+            type: "confirm_cmd",
+            command: `/worktrees release ${entry.taskKey}`,
+            title: "Release Worktree",
+            confirmLabel: "Release",
+            detailLines,
+            backAction: uiGoAction("worktrees_release", safePage),
           });
-          return uiButton(shortenLabel(key), uiTokenAction(token));
+          return uiButton(shortenLabel(entry.taskKey), uiTokenAction(token));
         }),
         2,
       );
@@ -3841,7 +4020,7 @@ Object.assign(UI_SCREENS, {
   shared_claim: {
     title: "Claim Shared Workspace",
     parent: "workspaces",
-    body: () => "Select an available workspace to claim.",
+    body: () => "Select a workspace to review details and confirm claim.",
     keyboard: async (ctx) => {
       const page = parsePageParam(ctx.params?.page);
       const entries = await listSharedWorkspaceEntries();
@@ -3862,9 +4041,17 @@ Object.assign(UI_SCREENS, {
       );
       const rows = chunkButtons(
         slice.map((ws) => {
+          const detailLines = buildSharedWorkspaceDetailLines(ws);
+          if (ws.availability !== "available") {
+            detailLines.push("Note: Workspace is not marked available.");
+          }
           const token = issueUiToken({
-            type: "cmd",
+            type: "confirm_cmd",
             command: `/claim ${ws.id}`,
+            title: "Claim Shared Workspace",
+            confirmLabel: ws.availability === "available" ? "Claim" : "Claim Anyway",
+            detailLines,
+            backAction: uiGoAction("shared_claim", safePage),
           });
           const emoji = ws.availability === "available" ? "✅" : "🔒";
           return uiButton(
@@ -3896,7 +4083,7 @@ Object.assign(UI_SCREENS, {
   shared_release: {
     title: "Release Shared Workspace",
     parent: "workspaces",
-    body: () => "Release a shared workspace lease.",
+    body: () => "Select a workspace to review details and confirm release.",
     keyboard: async (ctx) => {
       const page = parsePageParam(ctx.params?.page);
       const entries = await listSharedWorkspaceEntries();
@@ -3915,9 +4102,17 @@ Object.assign(UI_SCREENS, {
       );
       const rows = chunkButtons(
         slice.map((ws) => {
+          const detailLines = buildSharedWorkspaceDetailLines(ws);
+          if (ws.availability !== "leased") {
+            detailLines.push("Note: Workspace is not currently leased.");
+          }
           const token = issueUiToken({
-            type: "cmd",
+            type: "confirm_cmd",
             command: `/release ${ws.id}`,
+            title: "Release Shared Workspace",
+            confirmLabel: "Release",
+            detailLines,
+            backAction: uiGoAction("shared_release", safePage),
           });
           const emoji = ws.availability === "leased" ? "🔓" : "ℹ️";
           return uiButton(
@@ -4176,6 +4371,13 @@ async function handleUiAction({ chatId, messageId, data }) {
         chatId,
         "⏳ That option expired. Please reopen the menu.",
       );
+      return;
+    }
+    if (payload.type === "confirm_cmd") {
+      if (staleSticky && messageId) {
+        await deleteDirect(chatId, messageId);
+      }
+      await promptActionConfirm(chatId, token, payload);
       return;
     }
     if (payload.type === "cmd") {
@@ -4650,6 +4852,19 @@ function formatAgeFromTimestamp(timestampMs) {
   const hours = Math.floor(ageSec / 3600);
   const remMin = Math.floor((ageSec % 3600) / 60);
   return remMin > 0 ? `${hours}h ${remMin}m ago` : `${hours}h ago`;
+}
+
+function formatTimeUntil(timestampMs) {
+  const ts = Number(timestampMs || 0);
+  if (!Number.isFinite(ts) || ts <= 0) return "n/a";
+  const deltaSec = Math.floor((ts - Date.now()) / 1000);
+  if (deltaSec <= 0) return "expired";
+  if (deltaSec < 60) return `${deltaSec}s`;
+  const mins = Math.floor(deltaSec / 60);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  const remMin = mins % 60;
+  return remMin > 0 ? `${hours}h ${remMin}m` : `${hours}h`;
 }
 
 async function cmdTasks(chatId) {
@@ -5305,7 +5520,16 @@ async function cmdDiff(chatId, _args) {
   }
 }
 
-async function cmdRestart(chatId) {
+async function cmdRestart(chatId, args) {
+  const confirmFlag = /--confirm\b/i.test(String(args || ""));
+  if (!confirmFlag) {
+    await sendReply(
+      chatId,
+      "⚠️ Restart will stop the orchestrator process and let the monitor respawn it.\nProceed?",
+      { reply_markup: buildConfirmKeyboard("cb:do_restart", "Confirm Restart") },
+    );
+    return;
+  }
   await sendReply(chatId, "🔄 Restarting orchestrator process...");
   try {
     if (_getCurrentChild) {
@@ -5503,7 +5727,27 @@ async function cmdHistory(chatId) {
   await sendReply(chatId, lines.filter(Boolean).join("\n"));
 }
 
-async function cmdClear(chatId) {
+async function cmdClear(chatId, args) {
+  const confirmFlag = /--confirm\b/i.test(String(args || ""));
+  if (!confirmFlag) {
+    const info = getPrimaryAgentInfo();
+    const sessionLabel = info.sessionId || info.threadId || "(none)";
+    const agentLabel = info.adapter || info.provider || getPrimaryAgentName();
+    const lines = [
+      "⚠️ This will clear the primary agent session and reset context.",
+      "",
+      `Agent: ${agentLabel}`,
+      `Session: ${sessionLabel}`,
+      `Turns: ${info.turnCount}`,
+      `Busy: ${info.isBusy ? "yes" : "no"}`,
+      "",
+      "Proceed?",
+    ];
+    await sendReply(chatId, lines.join("\n"), {
+      reply_markup: buildConfirmKeyboard("cb:confirm_clear", "Confirm Clear"),
+    });
+    return;
+  }
   await resetPrimaryAgent();
   await sendReply(
     chatId,

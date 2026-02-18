@@ -172,6 +172,13 @@
   text-overflow: ellipsis;
 }
 
+.kanban-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
 .kanban-card-meta {
   display: flex;
   align-items: center;

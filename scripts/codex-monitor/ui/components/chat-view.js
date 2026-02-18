@@ -10,6 +10,7 @@ import { formatRelative, truncate } from "../modules/utils.js";
 import {
   sessionMessages,
   loadSessionMessages,
+  loadSessions,
   selectedSessionId,
   sessionsData,
 } from "./session-list.js";
@@ -152,6 +153,8 @@ export function ChatView({ sessionId, readOnly = false }) {
   const session = (sessionsData.value || []).find((s) => s.id === sessionId);
   const isActive =
     session?.status === "active" || session?.status === "running";
+  const resumeLabel =
+    session?.status === "archived" ? "Unarchive" : "Resume Session";
 
   /* Load messages on mount and poll while active */
   useEffect(() => {
@@ -170,7 +173,7 @@ export function ChatView({ sessionId, readOnly = false }) {
       active = false;
       clearInterval(interval);
     };
-  }, [sessionId]);
+  }, [sessionId, session?.status]);
 
   /* Auto-scroll to bottom */
   useEffect(() => {
@@ -210,10 +213,25 @@ export function ChatView({ sessionId, readOnly = false }) {
   const handleResume = useCallback(async () => {
     try {
       await apiFetch(`/api/sessions/${sessionId}/resume`, { method: "POST" });
-      showToast("Session resumed", "success");
+      showToast(
+        session?.status === "archived" ? "Session unarchived" : "Session resumed",
+        "success",
+      );
+      await loadSessions();
       await loadSessionMessages(sessionId);
     } catch {
       showToast("Failed to resume session", "error");
+    }
+  }, [sessionId]);
+
+  const handleArchive = useCallback(async () => {
+    try {
+      await apiFetch(`/api/sessions/${sessionId}/archive`, { method: "POST" });
+      showToast("Session archived", "success");
+      await loadSessions();
+      await loadSessionMessages(sessionId);
+    } catch {
+      showToast("Failed to archive session", "error");
     }
   }, [sessionId]);
 
@@ -246,11 +264,27 @@ export function ChatView({ sessionId, readOnly = false }) {
   return html`
     <div class="chat-view">
       <div class="chat-header">
-        <div class="chat-header-title">
-          ${session?.title || session?.taskId || "Session"}
+        <div class="chat-header-info">
+          <div class="chat-header-title">
+            ${session?.title || session?.taskId || "Session"}
+          </div>
+          <div class="chat-header-meta">
+            ${session?.type || "manual"} · ${session?.status || "unknown"}
+          </div>
         </div>
-        <div class="chat-header-meta">
-          ${session?.type || "manual"} · ${session?.status || "unknown"}
+        <div class="chat-header-actions">
+          ${session?.status === "archived" &&
+          html`
+            <button class="btn btn-primary btn-sm" onClick=${handleResume}>
+              Unarchive
+            </button>
+          `}
+          ${session?.status !== "archived" &&
+          html`
+            <button class="btn btn-ghost btn-sm" onClick=${handleArchive}>
+              Archive
+            </button>
+          `}
         </div>
       </div>
 
@@ -313,7 +347,7 @@ export function ChatView({ sessionId, readOnly = false }) {
         ${!isActive && session?.status &&
         html`
           <button class="btn btn-primary btn-sm chat-resume-btn" onClick=${handleResume}>
-            ▶ Resume Session
+            ▶ ${resumeLabel}
           </button>
         `}
         <div class="chat-input-row">

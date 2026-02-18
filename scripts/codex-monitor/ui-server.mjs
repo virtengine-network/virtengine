@@ -1478,6 +1478,25 @@ async function readJsonBody(req) {
   });
 }
 
+function normalizeTagsInput(input) {
+  if (!input) return [];
+  const values = Array.isArray(input)
+    ? input
+    : String(input || "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+  const seen = new Set();
+  const tags = [];
+  for (const value of values) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    tags.push(normalized);
+  }
+  return tags;
+}
+
 async function getLatestLogTail(lineCount) {
   const files = await readdir(logsDir).catch(() => []);
   const logFile = files
@@ -1809,16 +1828,23 @@ async function handleApi(req, res, url) {
         return;
       }
       const adapter = getKanbanAdapter();
+      const tagsProvided = body && Object.prototype.hasOwnProperty.call(body, "tags");
+      const tags = tagsProvided ? normalizeTagsInput(body?.tags) : undefined;
+      const draftProvided = body && Object.prototype.hasOwnProperty.call(body, "draft");
       const patch = {
         status: body?.status,
         title: body?.title,
         description: body?.description,
         priority: body?.priority,
+        ...(tagsProvided ? { tags } : {}),
+        ...(draftProvided ? { draft: Boolean(body?.draft) } : {}),
       };
       const hasPatch = Object.values(patch).some(
         (value) => typeof value === "string" && value.trim(),
       );
-      if (!hasPatch) {
+      const hasTags = Array.isArray(patch.tags);
+      const hasDraft = typeof patch.draft === "boolean";
+      if (!hasPatch && !hasTags && !hasDraft) {
         jsonResponse(res, 400, {
           ok: false,
           error: "No update fields provided",
@@ -1850,17 +1876,27 @@ async function handleApi(req, res, url) {
         return;
       }
       const adapter = getKanbanAdapter();
+      const tagsProvided = body && Object.prototype.hasOwnProperty.call(body, "tags");
+      const tags = tagsProvided ? normalizeTagsInput(body?.tags) : undefined;
+      const draftProvided = body && Object.prototype.hasOwnProperty.call(body, "draft");
       const patch = {
         title: body?.title,
         description: body?.description,
         priority: body?.priority,
         status: body?.status,
+        ...(tagsProvided ? { tags } : {}),
+        ...(draftProvided ? { draft: Boolean(body?.draft) } : {}),
       };
       const hasPatch = Object.values(patch).some(
         (value) => typeof value === "string" && value.trim(),
       );
-      if (!hasPatch) {
-        jsonResponse(res, 400, { ok: false, error: "No edit fields provided" });
+      const hasTags = Array.isArray(patch.tags);
+      const hasDraft = typeof patch.draft === "boolean";
+      if (!hasPatch && !hasTags && !hasDraft) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: "No edit fields provided",
+        });
         return;
       }
       const updated =
@@ -1889,11 +1925,19 @@ async function handleApi(req, res, url) {
       }
       const projectId = body?.project || "";
       const adapter = getKanbanAdapter();
+      const tags = normalizeTagsInput(body?.tags);
+      const wantsDraft = Boolean(body?.draft) || body?.status === "draft";
       const taskData = {
         title: String(title).trim(),
         description: body?.description || "",
-        status: body?.status || "todo",
+        status: body?.status || (wantsDraft ? "draft" : "todo"),
         priority: body?.priority || undefined,
+        ...(tags.length ? { tags } : {}),
+        ...(tags.length ? { labels: tags } : {}),
+        meta: {
+          ...(tags.length ? { tags } : {}),
+          ...(wantsDraft ? { draft: true } : {}),
+        },
       };
       const created = await adapter.createTask(projectId, taskData);
       jsonResponse(res, 200, { ok: true, data: created });
@@ -3018,6 +3062,26 @@ async function handleApi(req, res, url) {
 
         jsonResponse(res, 200, { ok: true, messageId });
         broadcastUiEvent(["sessions"], "invalidate", { reason: "session-message", sessionId });
+      } catch (err) {
+        jsonResponse(res, 500, { ok: false, error: err.message });
+      }
+      return;
+    }
+
+    if (action === "archive" && req.method === "POST") {
+      try {
+        const tracker = getSessionTracker();
+        const session = tracker.getSessionById(sessionId);
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Session not found" });
+          return;
+        }
+        tracker.updateSessionStatus(sessionId, "archived");
+        jsonResponse(res, 200, { ok: true });
+        broadcastUiEvent(["sessions"], "invalidate", {
+          reason: "session-archived",
+          sessionId,
+        });
       } catch (err) {
         jsonResponse(res, 500, { ok: false, error: err.message });
       }

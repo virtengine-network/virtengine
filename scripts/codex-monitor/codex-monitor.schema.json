@@ -47,7 +47,7 @@
       "properties": {
         "backend": {
           "type": "string",
-          "enum": ["vk", "github", "jira"]
+          "enum": ["internal", "vk", "github", "jira"]
         },
         "projectId": { "type": "string" },
         "github": {

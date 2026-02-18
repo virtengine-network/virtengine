@@ -17,17 +17,36 @@ const tabHistory = [];
  * Navigate to a new tab. Pushes current tab onto the history stack
  * and refreshes data for the target tab.
  * @param {string} tab
+ * @param {{ resetHistory?: boolean, forceRefresh?: boolean }} [opts]
  */
-export function navigateTo(tab) {
-  if (tab === activeTab.value) return;
+export function navigateTo(tab, opts = {}) {
+  const { resetHistory = false, forceRefresh = false } = opts;
+  const goingHome = tab === "dashboard";
+  const shouldReset = resetHistory || goingHome;
+
+  if (tab === activeTab.value) {
+    if (forceRefresh) refreshTab(tab, { force: true });
+    if (shouldReset) {
+      tabHistory.length = 0;
+      hideBackButton();
+    }
+    return;
+  }
+
   haptic("light");
-  tabHistory.push(activeTab.value);
+  if (shouldReset) {
+    tabHistory.length = 0;
+  } else {
+    tabHistory.push(activeTab.value);
+  }
   activeTab.value = tab;
-  refreshTab(tab);
+  refreshTab(tab, forceRefresh ? { force: true } : undefined);
 
   // Show Telegram BackButton when there is history
   if (tabHistory.length > 0) {
     showBackButton(goBack);
+  } else {
+    hideBackButton();
   }
 }
 
@@ -53,6 +72,7 @@ export function goBack() {
 export const TAB_CONFIG = [
   { id: "dashboard", label: "Home", icon: "grid" },
   { id: "tasks", label: "Tasks", icon: "check" },
+  { id: "chat", label: "Chat", icon: "chat" },
   { id: "agents", label: "Agents", icon: "cpu" },
   { id: "infra", label: "Infra", icon: "server" },
   { id: "control", label: "Control", icon: "sliders" },
