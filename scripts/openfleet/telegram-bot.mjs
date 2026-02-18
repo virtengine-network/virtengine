@@ -3029,7 +3029,7 @@ async function handleUiInput(chatId, request, text) {
     return;
   }
   if (request.key === "starttask") {
-    await showStartTaskSdkPicker(chatId, trimmed);
+    await showStartTaskExecutorPicker(chatId, trimmed);
     return;
   }
   if (request.key === "starttask_model") {
@@ -3037,6 +3037,7 @@ async function handleUiInput(chatId, request, text) {
       taskId: request.taskId,
       sdk: request.sdk,
       model: trimmed,
+      executor: request.executor,
     });
     return;
   }
@@ -3070,8 +3071,49 @@ async function handleUiInput(chatId, request, text) {
   await dispatchUiCommand(chatId, command);
 }
 
-function buildStartTaskCommand(taskId, sdk, model) {
+function normalizeStartTaskExecutor(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  if (raw === "auto") return "auto";
+  if (["internal", "local", "agent", "pool"].includes(raw)) return "internal";
+  if (["vk", "vibe", "kanban", "cloud"].includes(raw)) return "vk";
+  return "";
+}
+
+function resolveStartTaskExecutorMode() {
+  const raw =
+    (_getExecutorMode?.() || process.env.EXECUTOR_MODE || "internal")
+      .toString()
+      .trim()
+      .toLowerCase();
+  if (["internal", "vk", "hybrid"].includes(raw)) return raw;
+  return "internal";
+}
+
+function getStartTaskExecutorAvailability(mode) {
+  const normalized = String(mode || "").trim().toLowerCase();
+  return {
+    internal: normalized === "internal" || normalized === "hybrid",
+    vk: normalized === "vk" || normalized === "hybrid",
+  };
+}
+
+function resolveStartTaskExecutor(requested, mode) {
+  const normalized = normalizeStartTaskExecutor(requested);
+  const availability = getStartTaskExecutorAvailability(mode);
+  if (!normalized || normalized === "auto") {
+    if (availability.internal) return "internal";
+    if (availability.vk) return "vk";
+    return null;
+  }
+  if (normalized === "internal" && !availability.internal) return null;
+  if (normalized === "vk" && !availability.vk) return null;
+  return normalized;
+}
+
+function buildStartTaskCommand(taskId, sdk, model, executor) {
   const parts = ["/starttask", taskId];
+  if (executor) parts.push("--executor", executor);
   if (sdk) parts.push("--sdk", sdk);
   if (model) parts.push("--model", model);
   return parts.join(" ");
@@ -3083,16 +3125,19 @@ async function promptStartTaskConfirm(chatId, details = {}) {
     await sendReply(chatId, "⚠️ Task ID missing for manual start.");
     return;
   }
-  const sdk = details.sdk ? String(details.sdk).trim() : "";
-  const model = details.model ? String(details.model).trim() : "";
-  const command = buildStartTaskCommand(taskId, sdk, model);
+  const executor = normalizeStartTaskExecutor(details.executor);
+  const isVk = executor === "vk";
+  const sdk = !isVk && details.sdk ? String(details.sdk).trim() : "";
+  const model = !isVk && details.model ? String(details.model).trim() : "";
+  const command = buildStartTaskCommand(taskId, sdk, model, executor);
   const token = issueUiToken({ type: "cmd", command });
   const lines = [
     "🚀 *Confirm Manual Start*",
     "",
     `Task: \`${taskId}\``,
-    sdk ? `SDK: \`${sdk}\`` : "SDK: `auto`",
-    model ? `Model: \`${model}\`` : "Model: `default`",
+    executor ? `Executor: \`${executor}\`` : "Executor: `auto`",
+    isVk ? "SDK: `n/a`" : sdk ? `SDK: \`${sdk}\`` : "SDK: `auto`",
+    isVk ? "Model: `n/a`" : model ? `Model: \`${model}\`` : "Model: `default`",
   ];
   const keyboard = buildKeyboard([
     [
@@ -3106,23 +3151,93 @@ async function promptStartTaskConfirm(chatId, details = {}) {
   });
 }
 
-async function showStartTaskSdkPicker(chatId, taskId) {
+async function showStartTaskExecutorPicker(chatId, taskId) {
   const safeId = String(taskId || "").trim();
   if (!safeId) {
     await sendReply(chatId, "⚠️ Task ID missing.");
     return;
   }
+  const mode = resolveStartTaskExecutorMode();
+  const availability = getStartTaskExecutorAvailability(mode);
+  const buttons = [];
+  if (availability.internal) {
+    buttons.push({
+      label: availability.vk ? "🧠 Internal" : "🧠 Internal (only)",
+      executor: "internal",
+    });
+  }
+  if (availability.vk) {
+    buttons.push({ label: "☁️ VK", executor: "vk" });
+  }
+  if (!buttons.length) {
+    await sendReply(
+      chatId,
+      "⚠️ No executors available. Check EXECUTOR_MODE configuration.",
+    );
+    return;
+  }
+  const rows = [
+    ...chunkButtons(
+      buttons.map((entry) =>
+        uiButton(
+          entry.label,
+          uiTokenAction(
+            issueUiToken({
+              type: "starttask_executor",
+              taskId: safeId,
+              executor: entry.executor,
+            }),
+          ),
+        ),
+      ),
+      2,
+    ),
+    [uiButton("❌ Cancel", "cancel")],
+  ];
+  const lines = [
+    "Select executor for manual start:",
+    "",
+    `Task: \`${safeId}\``,
+    `Mode: \`${mode}\``,
+  ];
+  await sendReply(chatId, lines.join("\n"), {
+    parseMode: "Markdown",
+    reply_markup: buildKeyboard(rows),
+  });
+}
+
+async function showStartTaskSdkPicker(chatId, taskId, executor) {
+  const safeId = String(taskId || "").trim();
+  if (!safeId) {
+    await sendReply(chatId, "⚠️ Task ID missing.");
+    return;
+  }
+  const safeExecutor = normalizeStartTaskExecutor(executor) || "internal";
   const available = getAvailableSdks();
   const sdkList = available.length > 0 ? available : ["codex", "copilot", "claude"];
-  const tokenAuto = issueUiToken({ type: "starttask_confirm", taskId: safeId });
+  const tokenAuto = issueUiToken({
+    type: "starttask_confirm",
+    taskId: safeId,
+    executor: safeExecutor,
+  });
   const tokens = sdkList.map((sdk) => ({
     sdk,
-    token: issueUiToken({ type: "starttask_sdk", taskId: safeId, sdk }),
+    token: issueUiToken({
+      type: "starttask_sdk",
+      taskId: safeId,
+      sdk,
+      executor: safeExecutor,
+    }),
   }));
+  const tokenBack = issueUiToken({
+    type: "starttask_executor_list",
+    taskId: safeId,
+  });
   const lines = [
     "Select the SDK for manual start:",
     "",
     `Task: \`${safeId}\``,
+    `Executor: \`${safeExecutor}\``,
   ];
   const rows = [
     [uiButton("🤖 Auto", uiTokenAction(tokenAuto))],
@@ -3130,6 +3245,7 @@ async function showStartTaskSdkPicker(chatId, taskId) {
       tokens.map((entry) => uiButton(entry.sdk, uiTokenAction(entry.token))),
       2,
     ),
+    [uiButton("⬅️ Back", uiTokenAction(tokenBack))],
     [uiButton("❌ Cancel", "cancel")],
   ];
   const keyboard = buildKeyboard(rows);
@@ -3139,9 +3255,10 @@ async function showStartTaskSdkPicker(chatId, taskId) {
   });
 }
 
-async function showStartTaskModelPicker(chatId, taskId, sdk) {
+async function showStartTaskModelPicker(chatId, taskId, sdk, executor) {
   const safeId = String(taskId || "").trim();
   const safeSdk = String(sdk || "").trim();
+  const safeExecutor = normalizeStartTaskExecutor(executor) || "internal";
   if (!safeId || !safeSdk) {
     await sendReply(chatId, "⚠️ Missing task ID or SDK.");
     return;
@@ -3153,22 +3270,26 @@ async function showStartTaskModelPicker(chatId, taskId, sdk) {
     type: "starttask_confirm",
     taskId: safeId,
     sdk: safeSdk,
+    executor: safeExecutor,
   });
   const tokenCustom = issueUiToken({
     type: "input",
     key: "starttask_model",
     taskId: safeId,
     sdk: safeSdk,
+    executor: safeExecutor,
     prompt: `Custom model for ${safeSdk}:`,
   });
   const tokenBack = issueUiToken({
     type: "starttask_sdk_list",
     taskId: safeId,
+    executor: safeExecutor,
   });
   const lines = [
     "Choose a model option:",
     "",
     `Task: \`${safeId}\``,
+    `Executor: \`${safeExecutor}\``,
     `SDK: \`${safeSdk}\``,
   ];
   const rows = [[uiButton("Default Model", uiTokenAction(tokenDefault))]];
@@ -3183,6 +3304,7 @@ async function showStartTaskModelPicker(chatId, taskId, sdk) {
                 type: "starttask_confirm",
                 taskId: safeId,
                 sdk: safeSdk,
+                executor: safeExecutor,
                 model,
               }),
             ),
@@ -4448,12 +4570,37 @@ async function handleUiAction({ chatId, messageId, data }) {
       await promptStartTaskConfirm(chatId, payload);
       return;
     }
+    if (payload.type === "starttask_executor") {
+      const executor = normalizeStartTaskExecutor(payload.executor);
+      if (executor === "vk") {
+        await promptStartTaskConfirm(chatId, {
+          taskId: payload.taskId,
+          executor,
+        });
+        return;
+      }
+      await showStartTaskSdkPicker(chatId, payload.taskId, executor || "internal");
+      return;
+    }
     if (payload.type === "starttask_sdk") {
-      await showStartTaskModelPicker(chatId, payload.taskId, payload.sdk);
+      await showStartTaskModelPicker(
+        chatId,
+        payload.taskId,
+        payload.sdk,
+        payload.executor,
+      );
       return;
     }
     if (payload.type === "starttask_sdk_list") {
-      await showStartTaskSdkPicker(chatId, payload.taskId);
+      await showStartTaskSdkPicker(
+        chatId,
+        payload.taskId,
+        payload.executor,
+      );
+      return;
+    }
+    if (payload.type === "starttask_executor_list") {
+      await showStartTaskExecutorPicker(chatId, payload.taskId);
       return;
     }
   }
@@ -5169,11 +5316,15 @@ async function cmdStartTask(chatId, args) {
   const tokens = rawArgs ? rawArgs.split(/\s+/) : [];
   const taskId = String(tokens.shift() || "").trim();
   if (!taskId) {
-    await sendReply(chatId, "Usage: /starttask <taskId>");
+    await sendReply(
+      chatId,
+      "Usage: /starttask <taskId> [--executor internal|vk] [--sdk <sdk>] [--model <model>]",
+    );
     return;
   }
   let sdk = "";
   let model = "";
+  let executorArg = "";
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token === "--sdk" && tokens[i + 1]) {
@@ -5194,12 +5345,40 @@ async function cmdStartTask(chatId, args) {
       model = token.slice("--model=".length);
       continue;
     }
+    if (token === "--executor" && tokens[i + 1]) {
+      executorArg = tokens[i + 1];
+      i += 1;
+      continue;
+    }
+    if (token.startsWith("--executor=")) {
+      executorArg = token.slice("--executor=".length);
+      continue;
+    }
   }
-  const executor = _getInternalExecutor?.();
-  if (!executor) {
+  const executorMode = resolveStartTaskExecutorMode();
+  const normalizedExecutor = executorArg ? normalizeStartTaskExecutor(executorArg) : "";
+  if (executorArg && !normalizedExecutor) {
     await sendReply(
       chatId,
-      "⚠️ Manual start requires internal executor. Set EXECUTOR_MODE=internal or hybrid and restart the monitor.",
+      `⚠️ Unknown executor "${executorArg}". Use internal or vk.`,
+    );
+    return;
+  }
+  const selectedExecutor = resolveStartTaskExecutor(
+    normalizedExecutor,
+    executorMode,
+  );
+  if (!selectedExecutor) {
+    const availability = getStartTaskExecutorAvailability(executorMode);
+    const options = [
+      availability.internal ? "internal" : null,
+      availability.vk ? "vk" : null,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+    await sendReply(
+      chatId,
+      `⚠️ Executor "${normalizedExecutor || "auto"}" not available (mode: ${executorMode}). Available: ${options || "none"}`,
     );
     return;
   }
@@ -5210,6 +5389,46 @@ async function cmdStartTask(chatId, args) {
       await sendReply(chatId, `Task "${taskId}" not found.`);
       return;
     }
+    if (selectedExecutor === "vk") {
+      if (typeof adapter.submitTaskAttempt !== "function") {
+        await sendReply(
+          chatId,
+          `⚠️ VK executor not available for current backend (${getKanbanBackendName()}).`,
+        );
+        return;
+      }
+      const attempt = await adapter.submitTaskAttempt(taskId);
+      try {
+        if (typeof adapter.updateTaskStatus === "function") {
+          await adapter.updateTaskStatus(taskId, "inprogress");
+        } else if (typeof adapter.updateTask === "function") {
+          await adapter.updateTask(taskId, { status: "inprogress" });
+        }
+      } catch (err) {
+        console.warn(
+          `[openfleet] manual start failed to mark task ${taskId} inprogress: ${err.message}`,
+        );
+      }
+      const detailLines = [
+        `✅ VK executor submitted for ${task.title || task.id}.`,
+        attempt?.id ? `Attempt: ${attempt.id}` : null,
+        attempt?.branch ? `Branch: ${attempt.branch}` : null,
+      ].filter(Boolean);
+      if (sdk || model) {
+        detailLines.push("Note: SDK/model overrides are ignored for VK.");
+      }
+      await sendReply(chatId, detailLines.join("\n"));
+      return;
+    }
+
+    const executor = _getInternalExecutor?.();
+    if (!executor) {
+      await sendReply(
+        chatId,
+        "⚠️ Manual start requires internal executor. Set EXECUTOR_MODE=internal or hybrid and restart the monitor.",
+      );
+      return;
+    }
     void executor.executeTask(task, {
       sdk: sdk || undefined,
       model: model || undefined,
@@ -5217,6 +5436,7 @@ async function cmdStartTask(chatId, args) {
     await sendReply(
       chatId,
       `✅ Manual start queued for ${task.title || task.id}.` +
+        `\nExecutor: ${selectedExecutor}` +
         (sdk ? `\nSDK: ${sdk}` : "") +
         (model ? `\nModel: ${model}` : ""),
     );
