@@ -420,6 +420,10 @@ function getActiveKanbanBackend() {
   }
 }
 
+function isVkBackendActive() {
+  return getActiveKanbanBackend() === "vk";
+}
+
 function isVkRuntimeRequired() {
   const backend = getActiveKanbanBackend();
   const runtimeExecutorMode = getExecutorMode();
@@ -1705,9 +1709,9 @@ function notifyErrorLine(line) {
     return;
   }
   if (vkErrorPatterns.some((pattern) => pattern.test(line))) {
-    // Only forward VK errors when VK backend is actually required.
+    // Only forward VK errors when VK backend is actually active.
     // Prevents stale stdout lines from triggering false Telegram alerts.
-    if (isVkRuntimeRequired()) {
+    if (isVkBackendActive()) {
       notifyVkError(line);
     }
     return;
@@ -1732,7 +1736,7 @@ function notifyErrorLine(line) {
 function notifyVkError(line) {
   // In GitHub/Jira/internal-only modes, VK outages are non-actionable noise.
   // Suppress alerts to avoid false-positive reliability digests.
-  if (!isVkRuntimeRequired()) {
+  if (!isVkBackendActive()) {
     return;
   }
   const key = "vibe-kanban-unavailable";
