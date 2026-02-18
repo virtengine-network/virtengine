@@ -109,6 +109,7 @@ export const SETTINGS_SCHEMA = [
   { key: "STALE_TASK_AGE_HOURS",           label: "Stale Task Age",             category: "kanban", type: "number", defaultVal: 3, min: 1, max: 168, unit: "hours", description: "Hours before an in-progress task with no activity is considered stale and eligible for recovery." },
   { key: "TASK_PLANNER_MODE",              label: "Task Planner Mode",          category: "kanban", type: "select", defaultVal: "kanban", options: ["kanban", "codex-sdk", "disabled"], description: "How the autonomous task planner operates. 'disabled' turns off automatic task generation." },
   { key: "TASK_PLANNER_DEDUP_HOURS",       label: "Planner Dedup Window",       category: "kanban", type: "number", defaultVal: 6, min: 1, max: 72, unit: "hours", description: "Hours to look back for duplicate task detection.", advanced: true },
+  { key: "CODEX_MONITOR_PROMPT_PLANNER",  label: "Planner Prompt Path",         category: "advanced", type: "string", description: "Override the task planner prompt file path.", advanced: true },
 
   // ── GitHub / Git ─────────────────────────────────────────
   { key: "GITHUB_TOKEN",                   label: "GitHub Token",               category: "github", type: "secret", sensitive: true, description: "Personal access token or fine-grained token for GitHub API. Required for GitHub kanban backend." },
