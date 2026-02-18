@@ -133,6 +133,9 @@ export const SETTINGS_SCHEMA = [
 
   // ── Security / Sandbox ────────────────────────────────────
   { key: "CODEX_SANDBOX",                  label: "Sandbox Mode",               category: "security", type: "select", defaultVal: "workspace-write", options: ["workspace-write", "danger-full-access", "read-only"], description: "Agent filesystem access level. 'workspace-write' is permissive within workspace while avoiding full host access." },
+  { key: "CODEX_FEATURES_BWRAP",           label: "Bubblewrap Sandbox",          category: "security", type: "boolean", defaultVal: true, description: "Enable Linux bubblewrap sandbox. Disable if user namespaces are blocked (bwrap uid map errors)." },
+  { key: "CODEX_SANDBOX_PERMISSIONS",      label: "Sandbox Permissions",         category: "security", type: "string", defaultVal: "disk-full-write-access", description: "Comma-separated sandbox permission entries for Codex CLI config." },
+  { key: "CODEX_SANDBOX_WRITABLE_ROOTS",   label: "Writable Roots",              category: "security", type: "string", description: "Comma-separated writable roots for workspace-write sandbox (include repo/.git as needed)." },
   { key: "CONTAINER_ENABLED",              label: "Container Isolation",        category: "security", type: "boolean", defaultVal: false, description: "Run agent tasks inside Docker/Podman containers for OS-level isolation.", restart: true },
   { key: "CONTAINER_RUNTIME",              label: "Container Runtime",          category: "security", type: "select", defaultVal: "docker", options: ["auto", "docker", "podman", "container"], description: "Container engine to use for isolated execution." },
   { key: "CONTAINER_IMAGE",                label: "Container Image",            category: "security", type: "string", defaultVal: "node:22-slim", description: "Docker image for agent execution containers." },

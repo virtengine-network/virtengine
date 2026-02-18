@@ -45,6 +45,23 @@ function detectRepoRoot() {
   }
 }
 
+function readProcValue(path) {
+  try {
+    return readFileSync(path, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function isUserNamespaceDisabled() {
+  if (process.platform !== "linux") return false;
+  const unpriv = readProcValue("/proc/sys/kernel/unprivileged_userns_clone");
+  if (unpriv === "0") return true;
+  const maxUserNs = readProcValue("/proc/sys/user/max_user_namespaces");
+  if (maxUserNs && Number(maxUserNs) === 0) return true;
+  return false;
+}
+
 function isPathInside(parent, child) {
   const rel = relative(parent, child);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
@@ -477,11 +494,31 @@ export function runConfigDoctor(options = {}) {
         });
       }
     }
-    if (!/^\[sandbox_permissions\]/m.test(toml)) {
+    if (
+      !/^\s*sandbox_permissions\s*=/m.test(toml) &&
+      !/^\[sandbox_permissions\]/m.test(toml)
+    ) {
       issues.warnings.push({
         code: "CODEX_NO_SANDBOX_PERMS",
-        message: "No [sandbox_permissions] in Codex config — may restrict agent file access.",
+        message: "No sandbox_permissions in Codex config — may restrict agent file access.",
         fix: "Run codex-monitor --setup to auto-configure sandbox permissions",
+      });
+    }
+    if (!/^\[sandbox_workspace_write\]/m.test(toml)) {
+      issues.warnings.push({
+        code: "CODEX_NO_SANDBOX_WORKSPACE",
+        message: "No [sandbox_workspace_write] section in Codex config — workspace-write roots may be missing.",
+        fix: "Run codex-monitor --setup to add workspace-write defaults (writable_roots, network_access).",
+      });
+    }
+    if (
+      isUserNamespaceDisabled() &&
+      /use_linux_sandbox_bwrap\s*=\s*true/i.test(toml)
+    ) {
+      issues.warnings.push({
+        code: "CODEX_BWRAP_DISABLED",
+        message: "Bubblewrap sandbox is enabled but unprivileged user namespaces appear disabled.",
+        fix: "Set CODEX_FEATURES_BWRAP=false and re-run codex-monitor --setup (or edit ~/.codex/config.toml [features]).",
       });
     }
   } else {

@@ -58,6 +58,10 @@ import {
   getRecentCommits,
 } from "./diff-stats.mjs";
 import { resolveRepoRoot } from "./repo-root.mjs";
+import {
+  SETTINGS_SCHEMA,
+  validateSetting,
+} from "./ui/modules/settings-schema.js";
 
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const repoRoot = resolveRepoRoot();
@@ -154,7 +158,8 @@ const SETTINGS_KNOWN_KEYS = [
   "CLOUDFLARE_TUNNEL_NAME", "CLOUDFLARE_TUNNEL_CREDENTIALS",
   "TELEGRAM_PRESENCE_INTERVAL_SEC", "TELEGRAM_PRESENCE_DISABLED",
   "VE_INSTANCE_LABEL", "VE_COORDINATOR_ELIGIBLE", "VE_COORDINATOR_PRIORITY",
-  "CODEX_SANDBOX", "CONTAINER_ENABLED", "CONTAINER_RUNTIME", "CONTAINER_IMAGE",
+  "CODEX_SANDBOX", "CODEX_FEATURES_BWRAP", "CODEX_SANDBOX_PERMISSIONS", "CODEX_SANDBOX_WRITABLE_ROOTS",
+  "CONTAINER_ENABLED", "CONTAINER_RUNTIME", "CONTAINER_IMAGE",
   "CONTAINER_TIMEOUT_MS", "MAX_CONCURRENT_CONTAINERS", "CONTAINER_MEMORY_LIMIT", "CONTAINER_CPU_LIMIT",
   "CODEX_MONITOR_SENTINEL_AUTO_START", "SENTINEL_AUTO_RESTART_MONITOR",
   "SENTINEL_CRASH_LOOP_THRESHOLD", "SENTINEL_CRASH_LOOP_WINDOW_MIN",
@@ -2614,6 +2619,23 @@ async function handleApi(req, res, url) {
         jsonResponse(res, 400, { ok: false, error: `Unknown keys: ${unknownKeys.join(", ")}` });
         return;
       }
+      const fieldErrors = {};
+      for (const [key, value] of Object.entries(changes)) {
+        const def = SETTINGS_SCHEMA.find((s) => s.key === key);
+        if (!def) continue;
+        const result = validateSetting(def, String(value ?? ""));
+        if (!result.valid) {
+          fieldErrors[key] = result.error || "Invalid value";
+        }
+      }
+      if (Object.keys(fieldErrors).length > 0) {
+        jsonResponse(res, 400, {
+          ok: false,
+          error: "Validation failed",
+          fieldErrors,
+        });
+        return;
+      }
       for (const [key, value] of Object.entries(changes)) {
         const strVal = String(value);
         if (strVal.length > 2000) {
@@ -3047,6 +3069,11 @@ async function handleApi(req, res, url) {
 }
 
 async function handleStatic(req, res, url) {
+  if (!requireAuth(req)) {
+    textResponse(res, 401, "Unauthorized");
+    return;
+  }
+
   const pathname = url.pathname === "/" ? "/index.html" : url.pathname;
   const filePath = resolve(uiRoot, `.${pathname}`);
 
@@ -3120,6 +3147,33 @@ export async function startTelegramUiServer(options = {}) {
     if (url.pathname.startsWith("/api/")) {
       await handleApi(req, res, url);
       return;
+    }
+
+    // Telegram initData exchange: ?tgWebAppData=... or ?initData=... → set session cookie and redirect
+    const initDataQuery =
+      url.searchParams.get("tgWebAppData") ||
+      url.searchParams.get("initData") ||
+      "";
+    if (
+      initDataQuery &&
+      sessionToken &&
+      req.method === "GET"
+    ) {
+      const token = process.env.TELEGRAM_BOT_TOKEN || "";
+      if (validateInitData(String(initDataQuery), token)) {
+        const secure = uiServerTls ? "; Secure" : "";
+        const cleanUrl = new URL(url.toString());
+        cleanUrl.searchParams.delete("tgWebAppData");
+        cleanUrl.searchParams.delete("initData");
+        const redirectPath =
+          cleanUrl.pathname + (cleanUrl.searchParams.toString() ? `?${cleanUrl.searchParams.toString()}` : "");
+        res.writeHead(302, {
+          "Set-Cookie": `ve_session=${sessionToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400${secure}`,
+          Location: redirectPath || "/",
+        });
+        res.end();
+        return;
+      }
     }
     await handleStatic(req, res, url);
   };

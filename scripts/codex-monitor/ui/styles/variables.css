@@ -11,8 +11,8 @@
   --bg-card: var(--tg-theme-section-bg-color, #161b22);
   --bg-surface: var(--tg-theme-secondary-bg-color, #0d1117);
   --bg-input: var(--tg-theme-secondary-bg-color, #0d1117);
-  --bg-card-hover: rgba(240, 246, 252, 0.05);
-  --bg-elevated: #1c2128;
+  --bg-card-hover: rgba(240, 246, 252, 0.04);
+  --bg-elevated: #21262d;
 
   --text-primary: var(--tg-theme-text-color, #c9d1d9);
   --text-secondary: var(
@@ -22,9 +22,9 @@
   --text-hint: var(--tg-theme-hint-color, #6e7681);
   --text-bright: #f0f6fc;
 
-  --accent: var(--tg-theme-button-color, var(--tg-theme-link-color, #2f81f7));
+  --accent: var(--tg-theme-button-color, var(--tg-theme-link-color, #1f6feb));
   --accent-text: var(--tg-theme-button-text-color, #f0f6fc);
-  --accent-hover: var(--tg-theme-accent-text-color, #58a6ff);
+  --accent-hover: var(--tg-theme-accent-text-color, #388bfd);
 
   --link-color: var(--tg-theme-link-color, #58a6ff);
   --destructive: var(--tg-theme-destructive-text-color, #f85149);
@@ -97,32 +97,32 @@
   --glass-highlight: rgba(240, 246, 252, 0.04);
 
   /* Glow System */
-  --accent-glow: rgba(88, 166, 255, 0.25);
-  --accent-subtle: rgba(88, 166, 255, 0.18);
-  --glow-progress: rgba(88, 166, 255, 0.3);
-  --glow-success: rgba(46, 160, 67, 0.3);
-  --glow-warning: rgba(210, 153, 34, 0.3);
-  --glow-error: rgba(248, 81, 73, 0.3);
+  --accent-glow: rgba(31, 111, 235, 0.18);
+  --accent-subtle: rgba(31, 111, 235, 0.12);
+  --glow-progress: rgba(31, 111, 235, 0.22);
+  --glow-success: rgba(35, 134, 54, 0.22);
+  --glow-warning: rgba(187, 128, 9, 0.22);
+  --glow-error: rgba(248, 81, 73, 0.22);
   --shadow-glow: 0 0 18px var(--accent-glow);
   --shadow-glow-sm: 0 0 8px var(--accent-glow);
-  --border-glow: rgba(88, 166, 255, 0.35);
+  --border-glow: rgba(31, 111, 235, 0.25);
 
   /* Status colors (keep custom - TG doesn't provide these) */
   --color-todo: #8b949e;
-  --color-inprogress: #58a6ff;
-  --color-inreview: #d29922;
-  --color-done: #2ea043;
+  --color-inprogress: #1f6feb;
+  --color-inreview: #bb8009;
+  --color-done: #238636;
   --color-error: #f85149;
   --color-cancelled: #6e7681;
   --color-critical: #f85149;
-  --color-high: #d29922;
-  --color-medium: #58a6ff;
+  --color-high: #bb8009;
+  --color-medium: #1f6feb;
   --color-low: #8b949e;
 
   /* Gradients */
-  --gradient-accent: linear-gradient(180deg, #2f81f7 0%, #1f6feb 100%);
-  --gradient-accent-hover: linear-gradient(180deg, #58a6ff 0%, #2f81f7 100%);
-  --gradient-progress: linear-gradient(90deg, #2f81f7 0%, #2ea043 100%);
+  --gradient-accent: var(--accent);
+  --gradient-accent-hover: var(--accent-hover);
+  --gradient-progress: linear-gradient(90deg, #1f6feb 0%, #238636 100%);
   --gradient-hero: none;
   --gradient-surface: none;
   --gradient-radial-glow: none;
@@ -166,8 +166,8 @@
     --glass-bg: #ffffff;
     --glass-border: #d0d7de;
     --glass-highlight: rgba(27, 31, 36, 0.04);
-    --accent-glow: rgba(9, 105, 218, 0.15);
-    --accent-subtle: rgba(9, 105, 218, 0.12);
+    --accent-glow: rgba(9, 105, 218, 0.12);
+    --accent-subtle: rgba(9, 105, 218, 0.08);
     --gradient-mesh: none;
     --gradient-radial-glow: none;
   }

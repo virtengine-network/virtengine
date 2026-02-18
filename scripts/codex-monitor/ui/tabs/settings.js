@@ -590,7 +590,17 @@ function ServerConfigMode() {
         throw new Error(res?.error || "Save failed");
       }
     } catch (err) {
-      showToast(`Save failed: ${err.message}`, "error");
+      let parsed = null;
+      try {
+        parsed = JSON.parse(err.message);
+      } catch {
+        parsed = null;
+      }
+      if (parsed?.fieldErrors && typeof parsed.fieldErrors === "object") {
+        setErrors((prev) => ({ ...prev, ...parsed.fieldErrors }));
+      }
+      const message = parsed?.error || err.message;
+      showToast(`Save failed: ${message}`, "error");
       haptic("heavy");
     } finally {
       setSaving(false);

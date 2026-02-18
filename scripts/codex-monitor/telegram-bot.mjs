@@ -1867,6 +1867,18 @@ async function handleCallbackQuery(query) {
     enqueueCommand(() => handleCommand("/clear", chatId));
     return;
   }
+  if (data === "cb:confirm_cleanup") {
+    enqueueCommand(() => handleCommand("/cleanup --confirm", chatId));
+    return;
+  }
+  if (data === "cb:confirm_threads_clear") {
+    enqueueCommand(() => handleCommand("/threads clear --confirm", chatId));
+    return;
+  }
+  if (data === "cb:confirm_stop") {
+    enqueueCommand(() => handleCommand("/stop --confirm", chatId));
+    return;
+  }
   if (data === "cb:dismiss") {
     // Delete the message with the buttons
     if (query.message?.message_id) {
@@ -2756,6 +2768,10 @@ const UI_INPUT_HANDLERS = {
     prompt: "Enter the task ID to start manually.",
     buildCommand: (input) => `/starttask ${input}`,
   },
+  starttask_model: {
+    prompt: (ctx) => `Model for ${ctx.sdk || "selected"} SDK:`,
+    buildCommand: () => null,
+  },
   retry_reason: {
     prompt: "Retry reason (any short label).",
     buildCommand: (input) => `/retry ${input}`,
@@ -2841,6 +2857,31 @@ function buildKeyboard(rows) {
   return { inline_keyboard: rows };
 }
 
+function buildConfirmKeyboard(confirmId, confirmLabel = "Confirm") {
+  return {
+    inline_keyboard: [
+      [
+        { text: `✅ ${confirmLabel}`, callback_data: confirmId },
+        { text: "❌ Cancel", callback_data: "cb:dismiss" },
+      ],
+    ],
+  };
+}
+
+function appendRefreshRow(keyboard, screenId, params = {}) {
+  if (!keyboard || !keyboard.inline_keyboard) return keyboard;
+  const action = uiGoAction(screenId, params.page);
+  const rows = keyboard.inline_keyboard || [];
+  const hasRefresh = rows.some((row) =>
+    row.some((btn) => btn?.text === "🔄 Refresh"),
+  );
+  if (hasRefresh) return keyboard;
+  return {
+    ...keyboard,
+    inline_keyboard: [...rows, [uiButton("🔄 Refresh", action)]],
+  };
+}
+
 function chunkButtons(buttons, perRow = 2) {
   const rows = [];
   for (let i = 0; i < buttons.length; i += perRow) {
@@ -2900,6 +2941,18 @@ async function handleUiInput(chatId, request, text) {
     await sendReply(chatId, "⚠️ Input was empty. Prompt cancelled.");
     return;
   }
+  if (request.key === "starttask") {
+    await showStartTaskSdkPicker(chatId, trimmed);
+    return;
+  }
+  if (request.key === "starttask_model") {
+    await promptStartTaskConfirm(chatId, {
+      taskId: request.taskId,
+      sdk: request.sdk,
+      model: trimmed,
+    });
+    return;
+  }
   const buildCommand = request.buildCommand;
   if (typeof buildCommand !== "function") {
     await sendReply(chatId, "⚠️ Unable to process that input.");
@@ -2911,6 +2964,112 @@ async function handleUiInput(chatId, request, text) {
     return;
   }
   await dispatchUiCommand(chatId, command);
+}
+
+function buildStartTaskCommand(taskId, sdk, model) {
+  const parts = ["/starttask", taskId];
+  if (sdk) parts.push("--sdk", sdk);
+  if (model) parts.push("--model", model);
+  return parts.join(" ");
+}
+
+async function promptStartTaskConfirm(chatId, details = {}) {
+  const taskId = String(details.taskId || "").trim();
+  if (!taskId) {
+    await sendReply(chatId, "⚠️ Task ID missing for manual start.");
+    return;
+  }
+  const sdk = details.sdk ? String(details.sdk).trim() : "";
+  const model = details.model ? String(details.model).trim() : "";
+  const command = buildStartTaskCommand(taskId, sdk, model);
+  const token = issueUiToken({ type: "cmd", command });
+  const lines = [
+    "🚀 *Confirm Manual Start*",
+    "",
+    `Task: \`${taskId}\``,
+    sdk ? `SDK: \`${sdk}\`` : "SDK: `auto`",
+    model ? `Model: \`${model}\`` : "Model: `default`",
+  ];
+  const keyboard = buildKeyboard([
+    [
+      uiButton("✅ Start", uiTokenAction(token)),
+      uiButton("❌ Cancel", "cancel"),
+    ],
+  ]);
+  await sendReply(chatId, lines.join("\n"), {
+    parseMode: "Markdown",
+    reply_markup: keyboard,
+  });
+}
+
+async function showStartTaskSdkPicker(chatId, taskId) {
+  const safeId = String(taskId || "").trim();
+  if (!safeId) {
+    await sendReply(chatId, "⚠️ Task ID missing.");
+    return;
+  }
+  const tokenAuto = issueUiToken({ type: "starttask_confirm", taskId: safeId });
+  const tokenCodex = issueUiToken({ type: "starttask_sdk", taskId: safeId, sdk: "codex" });
+  const tokenCopilot = issueUiToken({ type: "starttask_sdk", taskId: safeId, sdk: "copilot" });
+  const tokenClaude = issueUiToken({ type: "starttask_sdk", taskId: safeId, sdk: "claude" });
+  const lines = [
+    "Select the SDK for manual start:",
+    "",
+    `Task: \`${safeId}\``,
+  ];
+  const keyboard = buildKeyboard([
+    [uiButton("🤖 Auto", uiTokenAction(tokenAuto))],
+    [
+      uiButton("Codex", uiTokenAction(tokenCodex)),
+      uiButton("Copilot", uiTokenAction(tokenCopilot)),
+    ],
+    [uiButton("Claude", uiTokenAction(tokenClaude))],
+    [uiButton("❌ Cancel", "cancel")],
+  ]);
+  await sendReply(chatId, lines.join("\n"), {
+    parseMode: "Markdown",
+    reply_markup: keyboard,
+  });
+}
+
+async function showStartTaskModelPicker(chatId, taskId, sdk) {
+  const safeId = String(taskId || "").trim();
+  const safeSdk = String(sdk || "").trim();
+  if (!safeId || !safeSdk) {
+    await sendReply(chatId, "⚠️ Missing task ID or SDK.");
+    return;
+  }
+  const tokenDefault = issueUiToken({
+    type: "starttask_confirm",
+    taskId: safeId,
+    sdk: safeSdk,
+  });
+  const tokenCustom = issueUiToken({
+    type: "input",
+    key: "starttask_model",
+    taskId: safeId,
+    sdk: safeSdk,
+    prompt: `Custom model for ${safeSdk}:`,
+  });
+  const tokenBack = issueUiToken({
+    type: "starttask_sdk_list",
+    taskId: safeId,
+  });
+  const lines = [
+    "Choose a model option:",
+    "",
+    `Task: \`${safeId}\``,
+    `SDK: \`${safeSdk}\``,
+  ];
+  const keyboard = buildKeyboard([
+    [uiButton("Default Model", uiTokenAction(tokenDefault))],
+    [uiButton("Custom Model", uiTokenAction(tokenCustom))],
+    [uiButton("⬅️ Back", uiTokenAction(tokenBack))],
+  ]);
+  await sendReply(chatId, lines.join("\n"), {
+    parseMode: "Markdown",
+    reply_markup: keyboard,
+  });
 }
 
 function uiNavRow(parent) {
@@ -3929,9 +4088,10 @@ async function showUiScreen(chatId, messageId, screenId, params = {}, opts = {})
     typeof screen.keyboard === "function"
       ? await screen.keyboard(ctx)
       : screen.keyboard;
+  const finalKeyboard = appendRefreshRow(keyboard, screenId, params);
   const sendOpts = {
     parseMode: "Markdown",
-    reply_markup: keyboard,
+    reply_markup: finalKeyboard,
   };
   if (resolvedMessageId) {
     await editDirect(chatId, resolvedMessageId, text, sendOpts);
@@ -4040,6 +4200,18 @@ async function handleUiAction({ chatId, messageId, data }) {
       await showUiScreen(chatId, resolvedMessageId, payload.screenId, payload.params, {
         sticky: stickyEnabled,
       });
+      return;
+    }
+    if (payload.type === "starttask_confirm") {
+      await promptStartTaskConfirm(chatId, payload);
+      return;
+    }
+    if (payload.type === "starttask_sdk") {
+      await showStartTaskModelPicker(chatId, payload.taskId, payload.sdk);
+      return;
+    }
+    if (payload.type === "starttask_sdk_list") {
+      await showStartTaskSdkPicker(chatId, payload.taskId);
       return;
     }
   }
@@ -4738,10 +4910,35 @@ async function cmdTasks(chatId) {
 }
 
 async function cmdStartTask(chatId, args) {
-  const taskId = String(args || "").trim();
+  const rawArgs = String(args || "").trim();
+  const tokens = rawArgs ? rawArgs.split(/\s+/) : [];
+  const taskId = String(tokens.shift() || "").trim();
   if (!taskId) {
     await sendReply(chatId, "Usage: /starttask <taskId>");
     return;
+  }
+  let sdk = "";
+  let model = "";
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === "--sdk" && tokens[i + 1]) {
+      sdk = tokens[i + 1];
+      i += 1;
+      continue;
+    }
+    if (token.startsWith("--sdk=")) {
+      sdk = token.slice("--sdk=".length);
+      continue;
+    }
+    if (token === "--model" && tokens[i + 1]) {
+      model = tokens[i + 1];
+      i += 1;
+      continue;
+    }
+    if (token.startsWith("--model=")) {
+      model = token.slice("--model=".length);
+      continue;
+    }
   }
   const executor = _getInternalExecutor?.();
   if (!executor) {
@@ -4758,10 +4955,15 @@ async function cmdStartTask(chatId, args) {
       await sendReply(chatId, `Task "${taskId}" not found.`);
       return;
     }
-    void executor.executeTask(task);
+    void executor.executeTask(task, {
+      sdk: sdk || undefined,
+      model: model || undefined,
+    });
     await sendReply(
       chatId,
-      `✅ Manual start queued for ${task.title || task.id}.`,
+      `✅ Manual start queued for ${task.title || task.id}.` +
+        (sdk ? `\nSDK: ${sdk}` : "") +
+        (model ? `\nModel: ${model}` : ""),
     );
   } catch (err) {
     await sendReply(chatId, `❌ Manual start failed: ${err.message}`);
@@ -5246,11 +5448,20 @@ async function cmdPlan(chatId, args) {
   }
 }
 
-async function cmdCleanupMerged(chatId) {
+async function cmdCleanupMerged(chatId, args) {
+  const confirmFlag = /--confirm\b/i.test(String(args || ""));
   if (!_reconcileTaskStatuses) {
     await sendReply(
       chatId,
       "❌ Cleanup not available (not injected from monitor).",
+    );
+    return;
+  }
+  if (!confirmFlag) {
+    await sendReply(
+      chatId,
+      "⚠️ Cleanup will reconcile VK task statuses with PR/branch state.\nProceed?",
+      { reply_markup: buildConfirmKeyboard("cb:confirm_cleanup", "Confirm Cleanup") },
     );
     return;
   }
@@ -5912,10 +6123,28 @@ async function cmdRequirements(chatId, args) {
 }
 
 async function cmdThreads(chatId, subArg) {
-  if (subArg && subArg.trim().toLowerCase() === "clear") {
-    clearThreadRegistry();
-    await sendReply(chatId, "✅ Thread registry cleared.");
-    return;
+  if (subArg) {
+    const parts = subArg.trim().split(/\s+/);
+    const sub = parts[0]?.toLowerCase();
+    if (sub === "clear") {
+      const confirmed = parts.slice(1).some((p) => p === "--confirm");
+      if (!confirmed) {
+        await sendReply(
+          chatId,
+          "⚠️ This will clear all thread records. Proceed?",
+          {
+            reply_markup: buildConfirmKeyboard(
+              "cb:confirm_threads_clear",
+              "Confirm Clear",
+            ),
+          },
+        );
+        return;
+      }
+      clearThreadRegistry();
+      await sendReply(chatId, "✅ Thread registry cleared.");
+      return;
+    }
   }
 
   if (subArg && subArg.trim().toLowerCase().startsWith("kill ")) {
@@ -6859,7 +7088,16 @@ async function cmdBackground(chatId, args) {
 
 // ── /stop — Stop Running Agent ───────────────────────────────────────────────
 
-async function cmdStop(chatId) {
+async function cmdStop(chatId, args) {
+  const confirmFlag = /--confirm\b/i.test(String(args || ""));
+  if (!confirmFlag) {
+    await sendReply(
+      chatId,
+      "⚠️ Stop will halt the active agent session. Proceed?",
+      { reply_markup: buildConfirmKeyboard("cb:confirm_stop", "Confirm Stop") },
+    );
+    return;
+  }
   if (!activeAgentSession) {
     await sendReply(chatId, "No agent is currently running.");
     return;

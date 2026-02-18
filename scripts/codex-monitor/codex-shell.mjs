@@ -17,6 +17,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAgentSdkConfig } from "./agent-sdk.mjs";
 import { resolveRepoRoot } from "./repo-root.mjs";
+import { resolveCodexProfileRuntime } from "./codex-model-profiles.mjs";
 
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
 
@@ -233,6 +234,9 @@ const THREAD_OPTIONS = {
  */
 async function getThread() {
   if (activeThread) return activeThread;
+
+  const { env: resolvedEnv } = resolveCodexProfileRuntime(process.env);
+  Object.assign(process.env, resolvedEnv);
 
   if (!codexInstance) {
     const Cls = await loadCodexSdk();

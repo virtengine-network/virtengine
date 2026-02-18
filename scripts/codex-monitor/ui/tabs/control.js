@@ -468,20 +468,36 @@ export function ControlTab() {
 
     <!-- ── Executor Controls ── -->
     <${Card} title="Executor Controls">
-      <div class="meta-text mb-sm">
-        Mode: <strong>${mode}</strong> · Slots:
-        ${execData?.activeSlots ?? 0}/${execData?.maxParallel ?? "—"} ·
-        ${executor?.paused
-          ? html`<${Badge} status="error" text="Paused" />`
-          : html`<${Badge} status="done" text="Running" />`}
-      </div>
-      <div class="meta-text mb-sm">
-        Poll:
-        ${execData?.pollIntervalMs ? execData.pollIntervalMs / 1000 : "—"}s ·
-        Timeout:
-        ${execData?.taskTimeoutMs
-          ? Math.round(execData.taskTimeoutMs / 60000)
-          : "—"}m
+      <div class="sticky-controls">
+        <div class="meta-text mb-sm">
+          Mode: <strong>${mode}</strong> · Slots:
+          ${execData?.activeSlots ?? 0}/${execData?.maxParallel ?? "—"} ·
+          ${executor?.paused
+            ? html`<${Badge} status="error" text="Paused" />`
+            : html`<${Badge} status="done" text="Running" />`}
+        </div>
+        <div class="meta-text mb-sm">
+          Poll:
+          ${execData?.pollIntervalMs ? execData.pollIntervalMs / 1000 : "—"}s ·
+          Timeout:
+          ${execData?.taskTimeoutMs
+            ? Math.round(execData.taskTimeoutMs / 60000)
+            : "—"}m
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" onClick=${handlePause}>
+            ⏸ Pause
+          </button>
+          <button class="btn btn-secondary btn-sm" onClick=${handleResume}>
+            ▶ Resume
+          </button>
+          <button
+            class="btn btn-ghost btn-sm"
+            onClick=${() => sendCmd("/executor")}
+          >
+            /executor
+          </button>
+        </div>
       </div>
 
       <div class="range-row mb-md">
@@ -495,21 +511,6 @@ export function ControlTab() {
           onChange=${(e) => handleMaxParallel(Number(e.target.value))}
         />
         <span class="pill">Max ${maxParallel}</span>
-      </div>
-
-      <div class="btn-row">
-        <button class="btn btn-primary btn-sm" onClick=${handlePause}>
-          ⏸ Pause
-        </button>
-        <button class="btn btn-secondary btn-sm" onClick=${handleResume}>
-          ▶ Resume
-        </button>
-        <button
-          class="btn btn-ghost btn-sm"
-          onClick=${() => sendCmd("/executor")}
-        >
-          /executor
-        </button>
       </div>
     <//>
 

@@ -99,6 +99,7 @@ const TAG = "[kanban]";
 const STATUS_MAP = {
   // VK statuses
   todo: "todo",
+  draft: "draft",
   inprogress: "inprogress",
   started: "inprogress",
   "in-progress": "inprogress",
@@ -129,15 +130,43 @@ function normaliseStatus(raw) {
 }
 
 const STATUS_LABEL_KEYS = new Set([
+  "draft",
   "todo",
   "backlog",
   "inprogress",
+  "started",
   "in-progress",
   "in_progress",
   "inreview",
   "in-review",
   "in_review",
   "blocked",
+]);
+
+const PRIORITY_LABEL_KEYS = new Set([
+  "critical",
+  "high",
+  "medium",
+  "low",
+]);
+
+const CODEX_LABEL_KEYS = new Set([
+  "codex:ignore",
+  "codex:claimed",
+  "codex:working",
+  "codex:stale",
+  "codex-monitor",
+  "codex-mointor",
+]);
+
+const SYSTEM_LABEL_KEYS = new Set([
+  ...STATUS_LABEL_KEYS,
+  ...PRIORITY_LABEL_KEYS,
+  ...CODEX_LABEL_KEYS,
+  "done",
+  "closed",
+  "cancelled",
+  "canceled",
 ]);
 
 function statusFromLabels(labels) {
@@ -243,6 +272,8 @@ class InternalAdapter {
 
   _normalizeTask(task) {
     if (!task) return null;
+    const tags = normalizeTags(task.tags || task.meta?.tags || []);
+    const draft = Boolean(task.draft || task.meta?.draft || task.status === "draft");
     return {
       id: String(task.id || ""),
       title: task.title || "",
@@ -250,6 +281,8 @@ class InternalAdapter {
       status: normaliseStatus(task.status),
       assignee: task.assignee || null,
       priority: task.priority || null,
+      tags,
+      draft,
       projectId: task.projectId || "internal",
       branchName: task.branchName || null,
       prNumber: task.prNumber || null,
@@ -316,17 +349,60 @@ class InternalAdapter {
     return this._normalizeTask(updated);
   }
 
+  async updateTask(taskId, patch = {}) {
+    const normalizedId = String(taskId || "").trim();
+    if (!normalizedId) {
+      throw new Error("[kanban] internal updateTask requires taskId");
+    }
+    const updates = {};
+    if (typeof patch.title === "string") updates.title = patch.title;
+    if (typeof patch.description === "string") updates.description = patch.description;
+    if (typeof patch.status === "string" && patch.status.trim()) {
+      updates.status = normaliseStatus(patch.status);
+    }
+    if (typeof patch.priority === "string") updates.priority = patch.priority;
+    if (Array.isArray(patch.tags) || Array.isArray(patch.labels) || typeof patch.tags === "string") {
+      updates.tags = normalizeTags(patch.tags ?? patch.labels);
+    }
+    if (typeof patch.draft === "boolean") {
+      updates.draft = patch.draft;
+      if (!patch.status) {
+        updates.status = patch.draft ? "draft" : "todo";
+      }
+    }
+    if (patch.meta && typeof patch.meta === "object") {
+      const current = getInternalTask(normalizedId);
+      updates.meta = {
+        ...(current?.meta || {}),
+        ...patch.meta,
+      };
+    }
+    const updated = patchInternalTask(normalizedId, updates);
+    if (!updated) {
+      throw new Error(`[kanban] internal task not found: ${normalizedId}`);
+    }
+    return this._normalizeTask(updated);
+  }
+
   async createTask(projectId, taskData = {}) {
     const id = String(taskData.id || randomUUID());
+    const tags = normalizeTags(taskData.tags || taskData.labels || []);
+    const draft = Boolean(taskData.draft || taskData.status === "draft");
     const created = addInternalTask({
       id,
       title: taskData.title || "Untitled task",
       description: taskData.description || "",
-      status: normaliseStatus(taskData.status || "todo"),
+      status: draft ? "draft" : normaliseStatus(taskData.status || "todo"),
       assignee: taskData.assignee || null,
       priority: taskData.priority || null,
+      tags,
+      draft,
       projectId: taskData.projectId || projectId || "internal",
-      meta: taskData.meta || {},
+      meta: {
+        ...(taskData.meta || {}),
+        ...(tags.length ? { tags } : {}),
+        ...(draft ? { draft: true } : {}),
+      },
     });
     if (!created) {
       throw new Error("[kanban] internal task creation failed");
@@ -384,6 +460,16 @@ function normalizeLabels(raw) {
     labels.push(normalized);
   }
   return labels;
+}
+
+function normalizeTags(raw) {
+  return normalizeLabels(raw);
+}
+
+function extractTagsFromLabels(labels, extraSystem = []) {
+  const normalized = normalizeLabels(labels);
+  const extra = new Set(normalizeLabels(extraSystem));
+  return normalized.filter((label) => !SYSTEM_LABEL_KEYS.has(label) && !extra.has(label));
 }
 
 // ---------------------------------------------------------------------------

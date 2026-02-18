@@ -1479,6 +1479,18 @@ select.input {
   margin-bottom: var(--space-sm, 8px);
 }
 
+/* ─── Sticky Controls ─── */
+.sticky-controls {
+  position: sticky;
+  top: calc(var(--header-height) + 8px);
+  z-index: 20;
+  background: var(--bg-secondary);
+  padding: 8px 0 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+}
+
 /* ─── Toggle Label ─── */
 .toggle-label {
   display: inline-flex;

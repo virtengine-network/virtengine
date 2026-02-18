@@ -175,6 +175,7 @@ $script:MAX_FOLLOWUPS_PER_TASK = 6  # Hard cap on follow-ups per task before mar
 $script:StatePath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) ".cache\ve-orchestrator-state.json"
 $script:CopilotStatePath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) ".cache\ve-orchestrator-copilot.json"
 $script:StatusStatePath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) ".cache\ve-orchestrator-status.json"
+$script:PauseStatePath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) ".cache\ve-orchestrator-pause.json"
 $script:StopFilePath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) ".cache\ve-orchestrator-stop"
 $script:RebaseCooldownPath = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) ".cache\ve-rebase-cooldown.json"
 $script:AgentLogDir = Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")) ".cache\agent-logs"
@@ -190,6 +191,25 @@ $script:SlotMetrics = @{
     total_idle_seconds     = 0.0
     total_capacity_seconds = 0.0
     last_snapshot          = $null
+}
+
+function Get-GlobalPauseState {
+    try {
+        if (Test-Path $script:PauseStatePath) {
+            $raw = Get-Content -Path $script:PauseStatePath -Raw
+            if ($raw) { return ($raw | ConvertFrom-Json) }
+        }
+    }
+    catch {
+        Write-Warning "[orchestrator] Failed to read pause state: $($_.Exception.Message)"
+    }
+    return @{ paused = $false; reason = $null; pauseUntil = $null; updatedAt = $null; source = $null }
+}
+
+function Test-GlobalPause {
+    $state = Get-GlobalPauseState
+    if ($state -and ($state.paused -eq $true)) { return $true }
+    return $false
 }
 
 $script:CiSweepEvery = $null
@@ -1397,10 +1417,18 @@ function Save-StatusSnapshot {
     $reviewTasks = @($script:TrackedAttempts.GetEnumerator() | Where-Object { $_.Value.status -eq "review" } | ForEach-Object { $_.Value.task_id })
     $errorTasks = @($script:TrackedAttempts.GetEnumerator() | Where-Object { $_.Value.status -eq "error" } | ForEach-Object { $_.Value.task_id })
     $manualReviewTasks = @($script:TrackedAttempts.GetEnumerator() | Where-Object { $_.Value.status -eq "manual_review" } | ForEach-Object { $_.Value.task_id })
+    $pauseState = Get-GlobalPauseState
     $todoTasks = Get-VKTasks -Status "todo"
     $backlogRemaining = if ($todoTasks) { @($todoTasks).Count } else { 0 }
     $snapshot = @{
         updated_at            = (Get-Date).ToString("o")
+        global_pause          = @{
+            paused      = [bool]($pauseState.paused)
+            reason      = $pauseState.reason
+            pause_until = $pauseState.pauseUntil
+            updated_at  = $pauseState.updatedAt
+            source      = $pauseState.source
+        }
         counts                = $counts
         tasks_submitted       = $script:TasksSubmitted
         tasks_completed       = $script:TasksCompleted
@@ -6461,7 +6489,12 @@ function Start-Orchestrator {
             if (Test-OrchestratorStop) { break }
 
             # Step 4: Fill empty parallel slots with new task submissions
-            if (@(Get-PendingFollowUpAttempts).Count -eq 0) {
+            if (Test-GlobalPause) {
+                $pauseState = Get-GlobalPauseState
+                $reason = if ($pauseState.reason) { " ($($pauseState.reason))" } else { "" }
+                Write-Log "Global pause active$reason — skipping new task dispatch this cycle" -Level "WARN"
+            }
+            elseif (@(Get-PendingFollowUpAttempts).Count -eq 0) {
                 Fill-ParallelSlots
             }
 

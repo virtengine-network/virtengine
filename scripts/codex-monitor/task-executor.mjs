@@ -15,7 +15,6 @@ import {
   existsSync,
   appendFileSync,
   mkdirSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { execSync, spawnSync } from "node:child_process";
@@ -906,6 +905,10 @@ class TaskExecutor {
         } else if (this._paused && this._pauseUntil) {
           this._schedulePauseExpiry();
         }
+        writeOrchestratorPauseState(this._paused, this._pauseReason, {
+          pauseUntil: this._pauseUntil,
+          source: "runtime-restore",
+        });
       }
       const nextId = Number(parsed?.nextAgentInstanceId || 1);
       if (Number.isFinite(nextId) && nextId > 0) {
@@ -1249,6 +1252,9 @@ class TaskExecutor {
     this._pausedAt = Date.now();
     this._pauseReason = reason ? String(reason) : this._pauseReason;
     this._saveRuntimeState();
+    writeOrchestratorPauseState(true, this._pauseReason, {
+      pauseUntil: this._pauseUntil,
+    });
     console.log(
       `${TAG} paused — no new tasks will be dispatched (active: ${this._activeSlots.size})`,
     );
@@ -1273,6 +1279,7 @@ class TaskExecutor {
       this._pauseTimer = null;
     }
     this._saveRuntimeState();
+    writeOrchestratorPauseState(false, null, { pauseUntil: null });
     console.log(
       `${TAG} resumed after ${pauseDuration}s pause — will pick up tasks on next poll`,
     );
@@ -1294,6 +1301,9 @@ class TaskExecutor {
     this._pauseReason = reason ? String(reason) : this._pauseReason;
     this._schedulePauseExpiry();
     this._saveRuntimeState();
+    writeOrchestratorPauseState(true, this._pauseReason, {
+      pauseUntil: this._pauseUntil,
+    });
     console.log(
       `${TAG} pause expires in ${Math.round(durationMs / 1000)}s (${reason || "unspecified"})`,
     );

@@ -913,6 +913,60 @@ function writeWorkspaceVsCodeSettings(repoRoot, env) {
   }
 }
 
+function buildRecommendedCopilotMcpServers() {
+  return {
+    context7: {
+      command: "npx",
+      args: ["-y", "@upstash/context7-mcp"],
+    },
+    "sequential-thinking": {
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+    },
+    playwright: {
+      command: "npx",
+      args: ["-y", "@playwright/mcp@latest"],
+    },
+    "microsoft-docs": {
+      url: "https://learn.microsoft.com/api/mcp",
+    },
+  };
+}
+
+function writeWorkspaceCopilotMcpConfig(repoRoot) {
+  try {
+    const vscodeDir = resolve(repoRoot, ".vscode");
+    const mcpPath = resolve(vscodeDir, "mcp.json");
+    mkdirSync(vscodeDir, { recursive: true });
+
+    let existing = {};
+    if (existsSync(mcpPath)) {
+      try {
+        existing = JSON.parse(readFileSync(mcpPath, "utf8"));
+      } catch {
+        existing = {};
+      }
+    }
+
+    const existingServers =
+      existing.mcpServers ||
+      existing["github.copilot.mcpServers"] ||
+      existing;
+
+    const recommended = buildRecommendedCopilotMcpServers();
+    const mergedServers = {
+      ...recommended,
+      ...(typeof existingServers === "object" ? existingServers : {}),
+    };
+
+    const next = { mcpServers: mergedServers };
+    writeFileSync(mcpPath, JSON.stringify(next, null, 2) + "\n", "utf8");
+    return { path: mcpPath, updated: true };
+  } catch (err) {
+    return { path: null, updated: false, error: err.message };
+  }
+}
+
 function parseHookCommandInput(rawValue) {
   const raw = String(rawValue || "").trim();
   if (!raw) return null;
@@ -1139,6 +1193,46 @@ function toBooleanEnvString(value, fallback = false) {
   return parseBooleanEnvValue(value, fallback) ? "true" : "false";
 }
 
+function readProcValue(path) {
+  try {
+    return readFileSync(path, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function hasBwrapBinary() {
+  if (process.platform !== "linux") return false;
+  try {
+    execSync("bwrap --version", { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function detectBwrapSupport() {
+  if (process.platform !== "linux") return false;
+  const unpriv = readProcValue("/proc/sys/kernel/unprivileged_userns_clone");
+  if (unpriv === "0") return false;
+  const maxUserNs = readProcValue("/proc/sys/user/max_user_namespaces");
+  if (maxUserNs && Number(maxUserNs) === 0) return false;
+  return hasBwrapBinary();
+}
+
+function buildDefaultWritableRoots(repoRoot) {
+  if (!repoRoot) return "";
+  const roots = new Set();
+  const repo = String(repoRoot);
+  if (repo) {
+    const parent = dirname(repo);
+    if (parent && parent !== repo) roots.add(parent);
+    roots.add(repo);
+    roots.add(resolve(repo, ".git"));
+  }
+  return Array.from(roots).join(",");
+}
+
 function normalizeSetupConfiguration({
   env,
   configJson,
@@ -1249,6 +1343,14 @@ function normalizeSetupConfiguration({
     ["workspace-write", "danger-full-access", "read-only"],
     "workspace-write",
   );
+  env.CODEX_FEATURES_BWRAP = toBooleanEnvString(
+    env.CODEX_FEATURES_BWRAP,
+    detectBwrapSupport(),
+  );
+  env.CODEX_SANDBOX_PERMISSIONS =
+    env.CODEX_SANDBOX_PERMISSIONS || "disk-full-write-access";
+  env.CODEX_SANDBOX_WRITABLE_ROOTS =
+    env.CODEX_SANDBOX_WRITABLE_ROOTS || buildDefaultWritableRoots(repoRoot);
 
   env.VK_BASE_URL = env.VK_BASE_URL || "http://127.0.0.1:54089";
   env.VK_RECOVERY_PORT = String(
@@ -1265,6 +1367,8 @@ function normalizeSetupConfiguration({
     ["sdk", "auto", "cli", "url"],
     "sdk",
   );
+  env.COPILOT_MCP_CONFIG =
+    env.COPILOT_MCP_CONFIG || resolve(repoRoot, ".vscode", "mcp.json");
   env.CLAUDE_TRANSPORT = normalizeEnum(
     env.CLAUDE_TRANSPORT || process.env.CLAUDE_TRANSPORT,
     ["sdk", "auto", "cli"],
@@ -3663,6 +3767,15 @@ async function writeConfigFiles({ env, configJson, repoRoot, configDir }) {
     );
   } else if (vscodeSettingsResult.error) {
     warn(`Could not update workspace settings: ${vscodeSettingsResult.error}`);
+  }
+
+  const copilotMcpResult = writeWorkspaceCopilotMcpConfig(repoRoot);
+  if (copilotMcpResult.updated) {
+    success(
+      `Copilot MCP config updated: ${relative(repoRoot, copilotMcpResult.path)}`,
+    );
+  } else if (copilotMcpResult.error) {
+    warn(`Could not update Copilot MCP config: ${copilotMcpResult.error}`);
   }
 
   // ── Codex CLI config.toml ─────────────────────────────

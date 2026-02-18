@@ -3,6 +3,7 @@ import {
   buildCommonMcpBlocks,
   ensureAgentMaxThreads,
   ensureFeatureFlags,
+  ensureSandboxWorkspaceWrite,
 } from "../codex-config.mjs";
 
 describe("codex-config defaults", () => {
@@ -59,5 +60,27 @@ describe("codex-config defaults", () => {
     const result = ensureAgentMaxThreads(input, { maxThreads: 12 });
     expect(result.changed).toBe(false);
     expect(result.toml).toContain("max_threads = 4");
+  });
+
+  it("honors env overrides for feature flags", () => {
+    const input = ["[features]", "use_linux_sandbox_bwrap = true", ""].join("\n");
+    const { toml } = ensureFeatureFlags(input, {
+      CODEX_FEATURES_BWRAP: "false",
+    });
+    expect(toml).toContain("use_linux_sandbox_bwrap = false");
+  });
+
+  it("adds sandbox workspace-write defaults with repo roots", () => {
+    const input = ["[features]", "child_agents_md = true", ""].join("\n");
+    const result = ensureSandboxWorkspaceWrite(input, {
+      repoRoot: "/tmp/virtengine",
+      writableRoots: "",
+    });
+    expect(result.changed).toBe(true);
+    expect(result.added).toBe(true);
+    expect(result.toml).toContain("[sandbox_workspace_write]");
+    expect(result.toml).toContain('"/tmp"');
+    expect(result.toml).toContain('"/tmp/virtengine"');
+    expect(result.toml).toContain('"/tmp/virtengine/.git"');
   });
 });

@@ -57,6 +57,50 @@ function resolveCopilotTransport() {
   return "auto";
 }
 
+function normalizeProfileKey(name) {
+  return String(name || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "_");
+}
+
+function parseMcpServersValue(raw) {
+  if (!raw) return null;
+  const parsed = safeJsonParse(raw);
+  if (!parsed) return null;
+  if (parsed.mcpServers && typeof parsed.mcpServers === "object") {
+    return parsed.mcpServers;
+  }
+  if (parsed["github.copilot.mcpServers"]) {
+    return parsed["github.copilot.mcpServers"];
+  }
+  if (parsed.mcp && parsed.mcp.servers && typeof parsed.mcp.servers === "object") {
+    return parsed.mcp.servers;
+  }
+  if (typeof parsed === "object") return parsed;
+  return null;
+}
+
+function resolveCopilotProfile(env = process.env) {
+  const name = String(env.COPILOT_PROFILE || "").trim();
+  if (!name) {
+    return { name: "", model: "", reasoningEffort: "", mcpConfig: "", mcpServers: null };
+  }
+  const key = normalizeProfileKey(name);
+  const prefix = `COPILOT_PROFILE_${key}_`;
+  const model = String(env[`${prefix}MODEL`] || "").trim();
+  const reasoningEffort = String(env[`${prefix}REASONING_EFFORT`] || "").trim();
+  const mcpConfig = String(env[`${prefix}MCP_CONFIG`] || "").trim();
+  const mcpServers = parseMcpServersValue(env[`${prefix}MCP_SERVERS`]);
+  return {
+    name,
+    model,
+    reasoningEffort,
+    mcpConfig,
+    mcpServers,
+  };
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function timestamp() {
@@ -487,14 +531,14 @@ function loadMcpServersFromFile(path) {
   return null;
 }
 
-function loadMcpServers() {
+function loadMcpServers(profile = null) {
+  if (profile?.mcpServers) return profile.mcpServers;
+  if (profile?.mcpConfig) {
+    return loadMcpServersFromFile(profile.mcpConfig);
+  }
   if (process.env.COPILOT_MCP_SERVERS) {
-    const parsed = safeJsonParse(process.env.COPILOT_MCP_SERVERS);
-    if (parsed && typeof parsed === "object") {
-      return parsed.mcpServers && typeof parsed.mcpServers === "object"
-        ? parsed.mcpServers
-        : parsed;
-    }
+    const parsed = parseMcpServersValue(process.env.COPILOT_MCP_SERVERS);
+    if (parsed) return parsed;
   }
   const configPath =
     process.env.COPILOT_MCP_CONFIG || resolve(REPO_ROOT, ".vscode", "mcp.json");
@@ -502,6 +546,7 @@ function loadMcpServers() {
 }
 
 function buildSessionConfig() {
+  const profile = resolveCopilotProfile();
   const config = {
     streaming: true,
     systemMessage: {
@@ -519,11 +564,15 @@ function buildSessionConfig() {
     workingDirectory: REPO_ROOT,
   };
   const model =
-    process.env.COPILOT_MODEL || process.env.COPILOT_SDK_MODEL || "";
+    profile.model ||
+    process.env.COPILOT_MODEL ||
+    process.env.COPILOT_SDK_MODEL ||
+    "";
   if (model) config.model = model;
 
   // Reasoning effort: low | medium | high | xhigh
   const effort =
+    profile.reasoningEffort ||
     process.env.COPILOT_REASONING_EFFORT ||
     process.env.COPILOT_SDK_REASONING_EFFORT ||
     "";
@@ -531,7 +580,7 @@ function buildSessionConfig() {
     config.reasoningEffort = effort.toLowerCase();
   }
 
-  const mcpServers = loadMcpServers();
+  const mcpServers = loadMcpServers(profile);
   if (mcpServers) config.mcpServers = mcpServers;
   return config;
 }

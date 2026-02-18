@@ -284,14 +284,27 @@ export function ensureFeatureFlags(toml, envOverrides = process.env) {
 
   for (const [key, meta] of Object.entries(RECOMMENDED_FEATURES)) {
     const keyRegex = new RegExp(`^${escapeRegex(key)}\\s*=`, "m");
+    const hasEnvOverride =
+      meta.envVar && envOverrides[meta.envVar] !== undefined;
+    const envValue = hasEnvOverride
+      ? parseBoolEnv(envOverrides[meta.envVar])
+      : null;
+
     if (!keyRegex.test(section)) {
-      let enabled = meta.default;
-      if (meta.envVar && envOverrides[meta.envVar] !== undefined) {
-        enabled = parseBoolEnv(envOverrides[meta.envVar]);
-      }
+      const enabled = hasEnvOverride ? envValue : meta.default;
       section = section.trimEnd() + `\n${key} = ${enabled}\n`;
       added.push(key);
       continue;
+    }
+
+    if (hasEnvOverride) {
+      const valueRegex = new RegExp(
+        `^(${escapeRegex(key)}\\s*=\\s*)(true|false)\\b.*$`,
+        "m",
+      );
+      if (valueRegex.test(section)) {
+        section = section.replace(valueRegex, `$1${envValue}`);
+      }
     }
 
     if (CRITICAL_ALWAYS_ON_FEATURES.has(key)) {
@@ -311,7 +324,7 @@ export function ensureFeatureFlags(toml, envOverrides = process.env) {
 
 /**
  * Build the sandbox_permissions top-level key.
- * Default: ["disk-full-read-access"] for agentic workloads.
+ * Default: ["disk-full-write-access"] for agentic workloads.
  *
  * @param {string} [envValue]  CODEX_SANDBOX_PERMISSIONS env var value
  * @returns {string}  TOML line(s)
@@ -319,8 +332,151 @@ export function ensureFeatureFlags(toml, envOverrides = process.env) {
 export function buildSandboxPermissions(envValue) {
   const perms = envValue
     ? envValue.split(",").map((s) => `"${s.trim()}"`)
-    : ['"disk-full-read-access"'];
+    : ['"disk-full-write-access"'];
   return `\n# Sandbox permissions (added by codex-monitor)\nsandbox_permissions = [${perms.join(", ")}]\n`;
+}
+
+function parseTomlArrayLiteral(raw) {
+  if (!raw) return [];
+  const inner = raw.trim().replace(/^\[/, "").replace(/\]$/, "");
+  if (!inner.trim()) return [];
+  return inner
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => item.replace(/^"(.*)"$/, "$1"));
+}
+
+function formatTomlArray(values) {
+  return `[${values.map((value) => `"${String(value).replace(/"/g, '\\"')}"`).join(", ")}]`;
+}
+
+function normalizeWritableRoots(input, { repoRoot } = {}) {
+  const roots = new Set();
+  const addRoot = (value) => {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return;
+    roots.add(trimmed);
+  };
+  if (Array.isArray(input)) {
+    input.forEach(addRoot);
+  } else if (typeof input === "string") {
+    input
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .forEach(addRoot);
+  }
+
+  if (repoRoot) {
+    const repo = String(repoRoot);
+    if (repo) {
+      addRoot(repo);
+      addRoot(resolve(repo, ".git"));
+      const parent = dirname(repo);
+      if (parent && parent !== repo) addRoot(parent);
+    }
+  }
+
+  return Array.from(roots);
+}
+
+export function hasSandboxWorkspaceWrite(toml) {
+  return /^\[sandbox_workspace_write\]/m.test(toml);
+}
+
+export function ensureSandboxWorkspaceWrite(toml, options = {}) {
+  const {
+    writableRoots = [],
+    repoRoot,
+    networkAccess = true,
+    excludeTmpdirEnvVar = false,
+    excludeSlashTmp = false,
+  } = options;
+
+  const desiredRoots = normalizeWritableRoots(writableRoots, { repoRoot });
+  if (!hasSandboxWorkspaceWrite(toml)) {
+    if (desiredRoots.length === 0) {
+      return { toml, changed: false, added: false, rootsAdded: [] };
+    }
+    const block = [
+      "",
+      "# ── Workspace-write sandbox defaults (added by codex-monitor) ──",
+      "[sandbox_workspace_write]",
+      `network_access = ${networkAccess}`,
+      `exclude_tmpdir_env_var = ${excludeTmpdirEnvVar}`,
+      `exclude_slash_tmp = ${excludeSlashTmp}`,
+      `writable_roots = ${formatTomlArray(desiredRoots)}`,
+      "",
+    ].join("\n");
+    return {
+      toml: toml.trimEnd() + "\n" + block,
+      changed: true,
+      added: true,
+      rootsAdded: desiredRoots,
+    };
+  }
+
+  const header = "[sandbox_workspace_write]";
+  const headerIdx = toml.indexOf(header);
+  if (headerIdx === -1) {
+    return { toml, changed: false, added: false, rootsAdded: [] };
+  }
+
+  const afterHeader = headerIdx + header.length;
+  const nextSection = toml.indexOf("\n[", afterHeader);
+  const sectionEnd = nextSection === -1 ? toml.length : nextSection;
+  let section = toml.substring(afterHeader, sectionEnd);
+  let changed = false;
+  let rootsAdded = [];
+
+  const ensureFlag = (key, value) => {
+    const keyRegex = new RegExp(`^${escapeRegex(key)}\\s*=`, "m");
+    if (!keyRegex.test(section)) {
+      section = section.trimEnd() + `\n${key} = ${value}\n`;
+      changed = true;
+    }
+  };
+
+  ensureFlag("network_access", networkAccess);
+  ensureFlag("exclude_tmpdir_env_var", excludeTmpdirEnvVar);
+  ensureFlag("exclude_slash_tmp", excludeSlashTmp);
+
+  const rootsRegex = /^writable_roots\s*=\s*(\[[^\]]*\])\s*$/m;
+  const match = section.match(rootsRegex);
+  if (match) {
+    const existingRoots = parseTomlArrayLiteral(match[1]);
+    const merged = normalizeWritableRoots(existingRoots, { repoRoot });
+    for (const root of desiredRoots) {
+      if (!merged.includes(root)) {
+        merged.push(root);
+        rootsAdded.push(root);
+      }
+    }
+    const formatted = formatTomlArray(merged);
+    if (formatted !== match[1]) {
+      section = section.replace(rootsRegex, `writable_roots = ${formatted}`);
+      changed = true;
+    }
+  } else if (desiredRoots.length > 0) {
+    section = section.trimEnd() + `\nwritable_roots = ${formatTomlArray(desiredRoots)}\n`;
+    rootsAdded = desiredRoots;
+    changed = true;
+  }
+
+  if (!changed) {
+    return { toml, changed: false, added: false, rootsAdded: [] };
+  }
+
+  const updatedToml =
+    toml.substring(0, afterHeader) + section + toml.substring(sectionEnd);
+
+  return {
+    toml: updatedToml,
+    changed: true,
+    added: false,
+    rootsAdded,
+  };
 }
 
 /**
@@ -753,6 +909,9 @@ export function ensureCodexConfig({
     agentMaxThreads: null,
     agentMaxThreadsSkipped: null,
     sandboxAdded: false,
+    sandboxWorkspaceAdded: false,
+    sandboxWorkspaceUpdated: false,
+    sandboxWorkspaceRootsAdded: [],
     shellEnvAdded: false,
     commonMcpAdded: false,
     profileProvidersAdded: [],
@@ -876,7 +1035,22 @@ export function ensureCodexConfig({
     result.sandboxAdded = true;
   }
 
-  // ── 1e. Ensure shell environment policy ───────────────────
+  // ── 1f. Ensure sandbox workspace-write defaults ───────────
+
+  {
+    const ensured = ensureSandboxWorkspaceWrite(toml, {
+      writableRoots: env.CODEX_SANDBOX_WRITABLE_ROOTS || "",
+      repoRoot: env.REPO_ROOT || "",
+    });
+    if (ensured.changed) {
+      toml = ensured.toml;
+      result.sandboxWorkspaceAdded = ensured.added;
+      result.sandboxWorkspaceUpdated = !ensured.added;
+      result.sandboxWorkspaceRootsAdded = ensured.rootsAdded || [];
+    }
+  }
+
+  // ── 1g. Ensure shell environment policy ───────────────────
 
   if (!hasShellEnvPolicy(toml)) {
     const policy = env.CODEX_SHELL_ENV_POLICY || "all";
@@ -1026,7 +1200,19 @@ export function printConfigSummary(result, log = console.log) {
   }
 
   if (result.sandboxAdded) {
-    log("  ✅ Added sandbox permissions (disk-full-read-access)");
+    log("  ✅ Added sandbox permissions (disk-full-write-access)");
+  }
+
+  if (result.sandboxWorkspaceAdded) {
+    log("  ✅ Added sandbox workspace-write defaults");
+  } else if (result.sandboxWorkspaceUpdated) {
+    log("  ✅ Updated sandbox workspace-write defaults");
+  }
+
+  if (result.sandboxWorkspaceRootsAdded && result.sandboxWorkspaceRootsAdded.length > 0) {
+    log(
+      `     Writable roots: ${result.sandboxWorkspaceRootsAdded.join(", ")}`,
+    );
   }
 
   if (result.shellEnvAdded) {
