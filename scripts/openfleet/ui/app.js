@@ -45,6 +45,15 @@ import {
 import { activeTab, navigateTo, TAB_CONFIG } from "./modules/router.js";
 import { formatRelative } from "./modules/utils.js";
 
+function getNavHint() {
+  if (typeof globalThis === "undefined") return "";
+  const isCoarse = globalThis.matchMedia?.("(pointer: coarse)")?.matches;
+  if (isCoarse) return "Swipe left/right to switch tabs";
+  const isHover = globalThis.matchMedia?.("(hover: hover)")?.matches;
+  if (isHover) return "Press 1-8 to switch tabs";
+  return "";
+}
+
 /* ── Component imports ── */
 import { ToastContainer } from "./components/shared.js";
 import { PullToRefresh } from "./components/forms.js";
@@ -202,6 +211,7 @@ function Header() {
   const latency = wsLatency.value;
   const reconnect = wsReconnectIn.value;
   const freshnessRaw = dataFreshness.value;
+  const navHint = getNavHint();
   let freshness = null;
   if (typeof freshnessRaw === "number") {
     freshness = Number.isFinite(freshnessRaw) ? freshnessRaw : null;
@@ -242,6 +252,9 @@ function Header() {
           <div class="app-header-subtitle">
             ${TAB_CONFIG.find((tab) => tab.id === activeTab.value)?.label || "Control Center"}
           </div>
+          ${navHint
+            ? html`<div class="app-header-hint">${navHint}</div>`
+            : null}
         </div>
       </div>
       <div class="header-actions">
@@ -548,6 +561,8 @@ function App() {
   useBackendHealth();
   const { open: paletteOpen, onClose: paletteClose } = useCommandPalette();
   const mainRef = useRef(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollVisibilityRef = useRef(false);
   const resizeRef = useRef(null);
   const [isDesktop, setIsDesktop] = useState(() => {
     if (typeof window === "undefined" || !window.matchMedia) return false;
@@ -700,6 +715,21 @@ function App() {
   useEffect(() => {
     const el = mainRef.current;
     if (!el) return;
+    const handleScroll = () => {
+      const shouldShow = el.scrollTop > 280;
+      if (shouldShow !== scrollVisibilityRef.current) {
+        scrollVisibilityRef.current = shouldShow;
+        setShowScrollTop(shouldShow);
+      }
+    };
+    handleScroll();
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
     const swipeTabs = TAB_CONFIG.filter((t) => t.id !== "settings");
     let startX = 0;
     let startY = 0;
@@ -807,6 +837,18 @@ function App() {
               <${CurrentTab} />
             </main>
           <//>
+          ${showScrollTop &&
+          html`
+            <button
+              class="scroll-top"
+              title="Back to top"
+              onClick=${() => {
+                mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+            >
+              Top
+            </button>
+          `}
         </div>
       </div>
       ${showInspector

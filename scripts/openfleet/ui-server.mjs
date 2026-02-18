@@ -74,6 +74,12 @@ const CONFIG_SCHEMA_PATH = resolve(__dirname, "openfleet.schema.json");
 let _configSchema = null;
 let _configValidator = null;
 
+function resolveConfigPath() {
+  return process.env.CODEX_MONITOR_CONFIG_PATH
+    ? resolve(process.env.CODEX_MONITOR_CONFIG_PATH)
+    : resolve(__dirname, "openfleet.config.json");
+}
+
 function getConfigSchema() {
   if (_configSchema) return _configSchema;
   try {
@@ -98,6 +104,12 @@ function getConfigValidator() {
   return _configValidator;
 }
 
+function isUnsetValue(value) {
+  if (value == null) return true;
+  if (Array.isArray(value)) return false;
+  return typeof value === "string" && value === "";
+}
+
 function toCamelCaseFromEnv(key) {
   const parts = String(key || "").toLowerCase().split("_").filter(Boolean);
   return parts
@@ -105,13 +117,49 @@ function toCamelCaseFromEnv(key) {
     .join("");
 }
 
-function coerceSettingValue(def, value) {
-  if (!def) return value;
-  if (def.type === "number") {
+function coerceSettingValue(def, value, propSchema) {
+  if (value == null) return value;
+  const types = [];
+  if (propSchema?.type) {
+    if (Array.isArray(propSchema.type)) types.push(...propSchema.type);
+    else types.push(propSchema.type);
+  }
+
+  if (types.includes("array")) {
+    if (Array.isArray(value)) return value;
+    let parts = String(value)
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (def?.key === "CODEX_MONITOR_HOOK_TARGETS") {
+      parts = parts.map((part) => part.toLowerCase());
+      if (parts.includes("all")) {
+        const allowed = Array.isArray(propSchema?.items?.enum)
+          ? propSchema.items.enum
+          : ["codex", "claude", "copilot"];
+        parts = [...allowed];
+      }
+    }
+    return parts;
+  }
+
+  if (types.includes("boolean")) {
+    if (typeof value === "boolean") return value;
+    const normalized = String(value).toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+  }
+
+  if (types.includes("number") || types.includes("integer")) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+
+  if (def?.type === "number") {
     const n = Number(value);
     return Number.isFinite(n) ? n : value;
   }
-  if (def.type === "boolean") {
+  if (def?.type === "boolean") {
     if (typeof value === "boolean") return value;
     const normalized = String(value).toLowerCase();
     if (["1", "true", "yes", "on"].includes(normalized)) return true;
@@ -134,9 +182,27 @@ function mapEnvKeyToConfigPath(key, schema) {
   const envKey = String(key || "").toUpperCase();
   const rootOverrideMap = {
     CODEX_MONITOR_MODE: "mode",
+    TASK_PLANNER_MODE: "plannerMode",
+    EXECUTOR_DISTRIBUTION: "distribution",
   };
   if (rootOverrideMap[envKey] && schema.properties[rootOverrideMap[envKey]]) {
     return [rootOverrideMap[envKey]];
+  }
+  if (envKey.startsWith("FAILOVER_") && schema.properties.failover?.properties) {
+    const rest = envKey.slice("FAILOVER_".length);
+    const sub = toCamelCaseFromEnv(rest);
+    if (schema.properties.failover.properties[sub]) return ["failover", sub];
+  }
+  const hookProfileMap = {
+    CODEX_MONITOR_HOOK_PROFILE: ["hookProfiles", "profile"],
+    CODEX_MONITOR_HOOK_TARGETS: ["hookProfiles", "targets"],
+    CODEX_MONITOR_HOOKS_ENABLED: ["hookProfiles", "enabled"],
+    CODEX_MONITOR_HOOKS_OVERWRITE: ["hookProfiles", "overwriteExisting"],
+  };
+  if (hookProfileMap[envKey]) {
+    const pathParts = hookProfileMap[envKey];
+    const propSchema = getSchemaProperty(schema, pathParts);
+    if (propSchema) return pathParts;
   }
   const rootKey = toCamelCaseFromEnv(envKey);
   if (schema.properties[rootKey]) return [rootKey];
@@ -194,6 +260,33 @@ function setConfigPathValue(obj, pathParts, value) {
     }
     if (!cursor[part] || typeof cursor[part] !== "object") cursor[part] = {};
     cursor = cursor[part];
+  }
+}
+
+function unsetConfigPathValue(obj, pathParts) {
+  let cursor = obj;
+  const stack = [];
+  for (let i = 0; i < pathParts.length; i += 1) {
+    const part = pathParts[i];
+    if (!cursor || typeof cursor !== "object") return;
+    if (i === pathParts.length - 1) {
+      delete cursor[part];
+      break;
+    }
+    stack.push({ parent: cursor, key: part });
+    cursor = cursor[part];
+  }
+  for (let i = stack.length - 1; i >= 0; i -= 1) {
+    const { parent, key } = stack[i];
+    if (
+      parent[key] &&
+      typeof parent[key] === "object" &&
+      Object.keys(parent[key]).length === 0
+    ) {
+      delete parent[key];
+    } else {
+      break;
+    }
   }
 }
 
@@ -345,10 +438,8 @@ function updateEnvFile(changes) {
 
 function updateConfigFile(changes) {
   const schema = getConfigSchema();
-  if (!schema) return { updated: [], path: null };
-  const configPath = process.env.CODEX_MONITOR_CONFIG_PATH
-    ? resolve(process.env.CODEX_MONITOR_CONFIG_PATH)
-    : resolve(__dirname, "openfleet.config.json");
+  const configPath = resolveConfigPath();
+  if (!schema) return { updated: [], path: configPath };
   let configData = { $schema: "./openfleet.schema.json" };
   if (existsSync(configPath)) {
     try {
@@ -365,8 +456,13 @@ function updateConfigFile(changes) {
     if (!pathParts) continue;
     const propSchema = getSchemaProperty(schema, pathParts);
     if (!propSchema) continue;
+    if (isUnsetValue(value)) {
+      unsetConfigPathValue(configData, pathParts);
+      updated.add(key);
+      continue;
+    }
     const def = SETTINGS_SCHEMA.find((s) => s.key === key);
-    const coerced = coerceSettingValue(def, value);
+    const coerced = coerceSettingValue(def, value, propSchema);
     setConfigPathValue(configData, pathParts, coerced);
     updated.add(key);
   }
@@ -388,9 +484,7 @@ function validateConfigSchemaChanges(changes) {
     const validator = getConfigValidator();
     if (!schema || !validator) return {};
 
-    const configPath = process.env.CODEX_MONITOR_CONFIG_PATH
-      ? resolve(process.env.CODEX_MONITOR_CONFIG_PATH)
-      : resolve(__dirname, "openfleet.config.json");
+    const configPath = resolveConfigPath();
     let configData = {};
     if (existsSync(configPath)) {
       try {
@@ -408,8 +502,13 @@ function validateConfigSchemaChanges(changes) {
       if (!pathParts) continue;
       const propSchema = getSchemaProperty(schema, pathParts);
       if (!propSchema) continue;
+      if (isUnsetValue(value)) {
+        unsetConfigPathValue(candidate, pathParts);
+        pathMap.set(pathParts.join("."), key);
+        continue;
+      }
       const def = SETTINGS_SCHEMA.find((s) => s.key === key);
-      const coerced = coerceSettingValue(def, value);
+      const coerced = coerceSettingValue(def, value, propSchema);
       setConfigPathValue(candidate, pathParts, coerced);
       pathMap.set(pathParts.join("."), key);
     }
@@ -421,7 +520,15 @@ function validateConfigSchemaChanges(changes) {
     const fieldErrors = {};
     const errors = validator.errors || [];
     for (const err of errors) {
-      const path = String(err.instancePath || "").replace(/^\//, "");
+      let path = String(err.instancePath || "").replace(/^\//, "");
+      if (!path && err.params?.missingProperty) {
+        const missing = String(err.params.missingProperty);
+        path = path ? `${path}/${missing}` : missing;
+      }
+      if (!path && err.params?.additionalProperty) {
+        const extra = String(err.params.additionalProperty);
+        path = path ? `${path}/${extra}` : extra;
+      }
       if (!path) continue;
       const parts = path.split("/").filter(Boolean);
       let envKey = pathMap.get(parts.join("."));
@@ -3035,16 +3142,19 @@ async function handleApi(req, res, url) {
         }
       }
       const envPath = resolve(__dirname, ".env");
-      const configPath = process.env.CODEX_MONITOR_CONFIG_PATH
-        ? resolve(process.env.CODEX_MONITOR_CONFIG_PATH)
-        : resolve(__dirname, "openfleet.config.json");
+      const configPath = resolveConfigPath();
+      const configExists = existsSync(configPath);
+      const configSchema = getConfigSchema();
       jsonResponse(res, 200, {
         ok: true,
         data,
         meta: {
           envPath,
           configPath,
-          configDir: __dirname,
+          configDir: dirname(configPath),
+          configExists,
+          configSchemaPath: CONFIG_SCHEMA_PATH,
+          configSchemaLoaded: Boolean(configSchema),
         },
       });
     } catch (err) {

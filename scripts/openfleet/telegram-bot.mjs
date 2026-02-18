@@ -2790,11 +2790,14 @@ const UI_INPUT_HANDLERS = {
     buildCommand: (input) => `/plan ${input}`,
   },
   starttask: {
-    prompt: "Enter the task ID to start manually.",
+    prompt:
+      "Enter the task ID to start manually.\nNext you'll pick executor → SDK → model.",
     buildCommand: (input) => `/starttask ${input}`,
   },
   starttask_model: {
-    prompt: (ctx) => `Model for ${ctx.sdk || "selected"} SDK:`,
+    prompt: (ctx) =>
+      `Model for ${ctx.sdk || "selected"} (${ctx.executor || "executor"}). ` +
+      "Type a model name or 'default' to use the standard route.",
     buildCommand: () => null,
   },
   retry_reason: {
@@ -3033,10 +3036,11 @@ async function handleUiInput(chatId, request, text) {
     return;
   }
   if (request.key === "starttask_model") {
+    const normalizedModel = normalizeStartTaskModelInput(trimmed);
     await promptStartTaskConfirm(chatId, {
       taskId: request.taskId,
       sdk: request.sdk,
-      model: trimmed,
+      model: normalizedModel,
       executor: request.executor,
     });
     return;
@@ -3078,6 +3082,14 @@ function normalizeStartTaskExecutor(value) {
   if (["internal", "local", "agent", "pool"].includes(raw)) return "internal";
   if (["vk", "vibe", "kanban", "cloud"].includes(raw)) return "vk";
   return "";
+}
+
+function normalizeStartTaskModelInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const lowered = raw.toLowerCase();
+  if (["default", "auto", "none"].includes(lowered)) return "";
+  return raw;
 }
 
 function resolveStartTaskExecutorMode() {
@@ -3131,14 +3143,22 @@ async function promptStartTaskConfirm(chatId, details = {}) {
   const model = !isVk && details.model ? String(details.model).trim() : "";
   const command = buildStartTaskCommand(taskId, sdk, model, executor);
   const token = issueUiToken({ type: "cmd", command });
+  const executorLabel = executor || "auto";
+  const sdkLabel = isVk ? "n/a" : sdk || "auto";
+  const modelLabel = isVk ? "n/a" : model || "default";
   const lines = [
     "🚀 *Confirm Manual Start*",
     "",
+    "This will enqueue the task immediately.",
+    "",
     `Task: \`${taskId}\``,
-    executor ? `Executor: \`${executor}\`` : "Executor: `auto`",
-    isVk ? "SDK: `n/a`" : sdk ? `SDK: \`${sdk}\`` : "SDK: `auto`",
-    isVk ? "Model: `n/a`" : model ? `Model: \`${model}\`` : "Model: `default`",
+    `Executor: \`${executorLabel}\``,
+    `SDK: \`${sdkLabel}\``,
+    `Model: \`${modelLabel}\``,
   ];
+  if (isVk) {
+    lines.push("Note: VK executor ignores SDK/model overrides.");
+  }
   const keyboard = buildKeyboard([
     [
       uiButton("✅ Start", uiTokenAction(token)),
@@ -3160,6 +3180,12 @@ async function showStartTaskExecutorPicker(chatId, taskId) {
   const mode = resolveStartTaskExecutorMode();
   const availability = getStartTaskExecutorAvailability(mode);
   const buttons = [];
+  if (availability.internal || availability.vk) {
+    buttons.push({
+      label: "✨ Auto (recommended)",
+      executor: "auto",
+    });
+  }
   if (availability.internal) {
     buttons.push({
       label: availability.vk ? "🧠 Internal" : "🧠 Internal (only)",
@@ -3195,10 +3221,14 @@ async function showStartTaskExecutorPicker(chatId, taskId) {
     [uiButton("❌ Cancel", "cancel")],
   ];
   const lines = [
-    "Select executor for manual start:",
+    "Step 1/3 • Choose executor",
     "",
     `Task: \`${safeId}\``,
     `Mode: \`${mode}\``,
+    availability.internal ? "🧠 Internal executor available" : "🧠 Internal executor unavailable",
+    availability.vk ? "☁️ VK executor available" : "☁️ VK executor unavailable",
+    "",
+    "Auto picks internal if available, otherwise VK.",
   ];
   await sendReply(chatId, lines.join("\n"), {
     parseMode: "Markdown",
@@ -3234,10 +3264,11 @@ async function showStartTaskSdkPicker(chatId, taskId, executor) {
     taskId: safeId,
   });
   const lines = [
-    "Select the SDK for manual start:",
+    "Step 2/3 • Choose SDK",
     "",
     `Task: \`${safeId}\``,
     `Executor: \`${safeExecutor}\``,
+    "Auto uses the current pool SDK.",
   ];
   const rows = [
     [uiButton("🤖 Auto", uiTokenAction(tokenAuto))],
@@ -3286,11 +3317,12 @@ async function showStartTaskModelPicker(chatId, taskId, sdk, executor) {
     executor: safeExecutor,
   });
   const lines = [
-    "Choose a model option:",
+    "Step 3/3 • Choose model",
     "",
     `Task: \`${safeId}\``,
     `Executor: \`${safeExecutor}\``,
     `SDK: \`${safeSdk}\``,
+    "Default uses the standard routing policy.",
   ];
   const rows = [[uiButton("Default Model", uiTokenAction(tokenDefault))]];
   if (modelOptions.length > 0) {
@@ -3543,7 +3575,8 @@ Object.assign(UI_SCREENS, {
   tasks: {
     title: "Task Operations",
     parent: "home",
-    body: () => "Pause/resume, plan, retry, and cleanup workflows.",
+    body: () =>
+      "Pause/resume, plan, retry, cleanup, and guided manual starts.",
     keyboard: () =>
       buildKeyboard([
         [
@@ -3561,7 +3594,7 @@ Object.assign(UI_SCREENS, {
           uiButton("🔁 Retry", uiGoAction("retry")),
           uiButton("⚙️ Executor", uiGoAction("executor")),
         ],
-        [uiButton("▶️ Manual Start", uiInputAction("starttask"))],
+        [uiButton("▶️ Start Task (guided)", uiInputAction("starttask"))],
         uiNavRow("home"),
       ]),
   },
@@ -4571,7 +4604,16 @@ async function handleUiAction({ chatId, messageId, data }) {
       return;
     }
     if (payload.type === "starttask_executor") {
-      const executor = normalizeStartTaskExecutor(payload.executor);
+      const mode = resolveStartTaskExecutorMode();
+      const executor = resolveStartTaskExecutor(payload.executor, mode);
+      if (!executor) {
+        await sendReply(
+          chatId,
+          `⚠️ Executor "${payload.executor || "auto"}" not available (mode: ${mode}).`,
+        );
+        await showStartTaskExecutorPicker(chatId, payload.taskId);
+        return;
+      }
       if (executor === "vk") {
         await promptStartTaskConfirm(chatId, {
           taskId: payload.taskId,
@@ -4651,6 +4693,21 @@ function splitArgs(input) {
     tokens.push(match[1] ?? match[2] ?? match[3]);
   }
   return tokens;
+}
+
+function stripLeadingConfirmFlag(rawArgs) {
+  const trimmed = String(rawArgs || "").trim();
+  if (!trimmed) return { confirmed: false, args: "" };
+  const match = trimmed.match(/^--confirm\b\s*/i);
+  if (!match) return { confirmed: false, args: trimmed };
+  return { confirmed: true, args: trimmed.slice(match[0].length).trim() };
+}
+
+function matchesAnyPattern(value, patterns) {
+  const lower = String(value || "").toLowerCase();
+  return patterns.some((pattern) =>
+    pattern instanceof RegExp ? pattern.test(lower) : lower.includes(pattern),
+  );
 }
 
 function parseSharedWorkspaceArgs(args) {
@@ -6024,31 +6081,53 @@ async function cmdGit(chatId, gitArgs) {
     return;
   }
 
-  // Safety: block destructive commands
-  const dangerous = ["push", "reset --hard", "clean -fd", "checkout -f"];
-  const lower = gitArgs.toLowerCase();
-  if (dangerous.some((d) => lower.startsWith(d))) {
+  const { confirmed, args } = stripLeadingConfirmFlag(gitArgs);
+  if (!args) {
     await sendReply(
       chatId,
-      `⚠️ Blocked: 'git ${gitArgs}' is a destructive command. Use the agent shell for that.`,
+      "Usage: /git <command>\nExample: /git log --oneline -10",
     );
+    return;
+  }
+  const destructiveGit = [
+    /^push\b/i,
+    /^reset\b.*--hard\b/i,
+    /^clean\b.*-f\b/i,
+    /^checkout\b.*-f\b/i,
+  ];
+  if (!confirmed && matchesAnyPattern(args, destructiveGit)) {
+    const token = issueUiToken({
+      type: "confirm_cmd",
+      command: `/git --confirm ${args}`,
+      title: "Run Destructive Git Command",
+      confirmLabel: "Run Git",
+      detailLines: [`Command: \`git ${shortSnippet(args, 120)}\``],
+      hint: "This may rewrite history or delete files.",
+    });
+    await promptActionConfirm(chatId, token, {
+      type: "confirm_cmd",
+      title: "Run Destructive Git Command",
+      confirmLabel: "Run Git",
+      detailLines: [`Command: \`git ${shortSnippet(args, 120)}\``],
+      hint: "This may rewrite history or delete files.",
+    });
     return;
   }
 
   try {
-    const result = execSync(`git ${gitArgs}`, {
+    const result = execSync(`git ${args}`, {
       cwd: repoRoot,
       encoding: "utf8",
       timeout: 15000,
     });
     await sendReply(
       chatId,
-      `$ git ${gitArgs}\n\n${result.slice(0, 3800) || "(no output)"}`,
+      `$ git ${args}\n\n${result.slice(0, 3800) || "(no output)"}`,
     );
   } catch (err) {
     await sendReply(
       chatId,
-      `$ git ${gitArgs}\n\n❌ ${err.message?.slice(0, 1500) || err}`,
+      `$ git ${args}\n\n❌ ${err.message?.slice(0, 1500) || err}`,
     );
   }
 }
@@ -6062,17 +6141,51 @@ async function cmdShell(chatId, shellArgs) {
     return;
   }
 
-  // Safety: block very destructive patterns
-  const dangerous = ["rm -rf /", "format", "del /f /s", "shutdown", "reboot"];
-  const lower = shellArgs.toLowerCase();
-  if (dangerous.some((d) => lower.includes(d))) {
-    await sendReply(chatId, `⚠️ Blocked: '${shellArgs}' looks destructive.`);
+  const { confirmed, args } = stripLeadingConfirmFlag(shellArgs);
+  if (!args) {
+    await sendReply(
+      chatId,
+      "Usage: /shell <command>\nExample: /shell ls -la scripts/",
+    );
+    return;
+  }
+
+  const blockedShell = [/rm\s+-rf\s+\/(\s|$)/i];
+  if (matchesAnyPattern(args, blockedShell)) {
+    await sendReply(chatId, `⛔ Blocked: '${args}' is too destructive.`);
+    return;
+  }
+
+  const confirmShell = [
+    /rm\s+-rf\b/i,
+    /rm\s+-r\b/i,
+    "format",
+    "del /f /s",
+    "shutdown",
+    "reboot",
+  ];
+  if (!confirmed && matchesAnyPattern(args, confirmShell)) {
+    const token = issueUiToken({
+      type: "confirm_cmd",
+      command: `/shell --confirm ${args}`,
+      title: "Run Destructive Shell Command",
+      confirmLabel: "Run Shell",
+      detailLines: [`Command: \`${shortSnippet(args, 120)}\``],
+      hint: "This may delete data or stop services.",
+    });
+    await promptActionConfirm(chatId, token, {
+      type: "confirm_cmd",
+      title: "Run Destructive Shell Command",
+      confirmLabel: "Run Shell",
+      detailLines: [`Command: \`${shortSnippet(args, 120)}\``],
+      hint: "This may delete data or stop services.",
+    });
     return;
   }
 
   try {
     const isWin = process.platform === "win32";
-    const result = execSync(shellArgs, {
+    const result = execSync(args, {
       cwd: repoRoot,
       encoding: "utf8",
       timeout: 30000,
@@ -6080,14 +6193,14 @@ async function cmdShell(chatId, shellArgs) {
     });
     await sendReply(
       chatId,
-      `$ ${shellArgs}\n\n${result.slice(0, 3800) || "(no output)"}`,
+      `$ ${args}\n\n${result.slice(0, 3800) || "(no output)"}`,
     );
   } catch (err) {
     const stderr = err.stderr ? err.stderr.toString().slice(0, 1000) : "";
     const stdout = err.stdout ? err.stdout.toString().slice(0, 1000) : "";
     await sendReply(
       chatId,
-      `$ ${shellArgs}\n\n❌ ${stderr || stdout || err.message}`,
+      `$ ${args}\n\n❌ ${stderr || stdout || err.message}`,
     );
   }
 }

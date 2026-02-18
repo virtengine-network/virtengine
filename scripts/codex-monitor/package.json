@@ -1,0 +1,43 @@
+{
+  "name": "codex-monitor",
+  "version": "0.24.0",
+  "description": "Deprecated legacy shim. Renamed to @virtengine/openfleet; this package forwards CLI commands to openfleet.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "VirtEngine <dev@virtengine.com>",
+  "homepage": "https://github.com/virtengine/virtengine/tree/main/scripts/codex-monitor",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/virtengine/virtengine.git",
+    "directory": "scripts/codex-monitor"
+  },
+  "bugs": {
+    "url": "https://github.com/virtengine/virtengine/issues"
+  },
+  "keywords": [
+    "openfleet",
+    "codex",
+    "monitor",
+    "orchestrator",
+    "automation",
+    "deprecated",
+    "shim"
+  ],
+  "bin": {
+    "codex-monitor": "bin/codex-monitor.mjs",
+    "codex-monitor-setup": "bin/codex-monitor.mjs",
+    "codex-monitor-chat-id": "bin/codex-monitor.mjs",
+    "codex-monitor-shared-workspaces": "bin/codex-monitor.mjs"
+  },
+  "files": [
+    "bin/codex-monitor.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@virtengine/openfleet": "latest"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

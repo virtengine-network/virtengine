@@ -70,12 +70,15 @@ export function ControlTab() {
   const [quickCmdInput, setQuickCmdInput] = useState("");
   const [quickCmdPrefix, setQuickCmdPrefix] = useState("shell");
   const [quickCmdFeedback, setQuickCmdFeedback] = useState("");
+  const [quickCmdFeedbackTone, setQuickCmdFeedbackTone] = useState("info");
   const [maxParallel, setMaxParallel] = useState(execData?.maxParallel ?? 0);
   const [cmdHistory, setCmdHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [backlogTasks, setBacklogTasks] = useState([]);
   const [retryTasks, setRetryTasks] = useState([]);
   const [tasksLoading, setTasksLoading] = useState(false);
+  const [startTaskError, setStartTaskError] = useState("");
+  const [retryTaskError, setRetryTaskError] = useState("");
   const startTaskIdRef = useRef("");
   const retryTaskIdRef = useRef("");
 
@@ -93,6 +96,14 @@ export function ControlTab() {
   const [runningCmd, setRunningCmd] = useState(null);
   const [expandedOutputs, setExpandedOutputs] = useState({});
   const pollRef = useRef(null);
+  const isPaused = Boolean(executor?.paused || execData?.paused);
+  const slotsLabel = `${execData?.activeSlots ?? 0}/${execData?.maxParallel ?? "—"}`;
+  const pollLabel = execData?.pollIntervalMs
+    ? `${Math.round(execData.pollIntervalMs / 1000)}s`
+    : "—";
+  const timeoutLabel = execData?.taskTimeoutMs
+    ? `${Math.round(execData.taskTimeoutMs / 60000)}m`
+    : "—";
 
   /* ── Load persistent history on mount ── */
   useEffect(() => {
@@ -338,10 +349,15 @@ export function ControlTab() {
   /* ── Quick command submit ── */
   const handleQuickCmd = useCallback(() => {
     const input = quickCmdInput.trim();
-    if (!input) return;
+    if (!input) {
+      setQuickCmdFeedbackTone("error");
+      setQuickCmdFeedback("Enter a command to run.");
+      return;
+    }
     const cmd = `/${quickCmdPrefix} ${input}`;
     sendCmd(cmd);
     setQuickCmdInput("");
+    setQuickCmdFeedbackTone("success");
     setQuickCmdFeedback("✓ Command sent to monitor");
     setTimeout(() => setQuickCmdFeedback(""), 4000);
   }, [quickCmdInput, quickCmdPrefix, sendCmd]);
@@ -421,9 +437,11 @@ export function ControlTab() {
   const handleStartTask = useCallback(async () => {
     const taskId = String(startTaskId || "").trim();
     if (!taskId) {
+      setStartTaskError("Select a backlog task to start.");
       showToast("Select a backlog task to start", "error");
       return;
     }
+    setStartTaskError("");
     haptic("medium");
     try {
       await apiFetch("/api/tasks/start", {
@@ -441,9 +459,11 @@ export function ControlTab() {
   const handleRetryTask = useCallback(async () => {
     const taskId = String(retryTaskId || "").trim();
     if (!taskId) {
+      setRetryTaskError("Select a task to retry.");
       showToast("Select a task to retry", "error");
       return;
     }
+    setRetryTaskError("");
     haptic("medium");
     try {
       await apiFetch("/api/tasks/retry", {
@@ -466,25 +486,25 @@ export function ControlTab() {
     <!-- Loading skeleton -->
     ${!executor && !config && html`<${Card} title="Loading…"><${SkeletonCard} /><//>`}
 
-    <!-- ── Executor Controls ── -->
-    <${Card} title="Executor Controls">
-      <div class="sticky-controls">
-        <div class="meta-text mb-sm">
-          Mode: <strong>${mode}</strong> · Slots:
-          ${execData?.activeSlots ?? 0}/${execData?.maxParallel ?? "—"} ·
-          ${executor?.paused
-            ? html`<${Badge} status="error" text="Paused" />`
-            : html`<${Badge} status="done" text="Running" />`}
+    <!-- ── Control Unit ── -->
+    <${Card}
+      title="Control Unit"
+      subtitle="Executor status and quick actions"
+      className="control-unit-card"
+    >
+      <div class="control-unit-body">
+        <div class="control-unit-meta">
+          <span>Mode <strong>${mode}</strong></span>
+          <span>Slots <strong>${slotsLabel}</strong></span>
+          <span>Poll <strong>${pollLabel}</strong></span>
+          <span>Timeout <strong>${timeoutLabel}</strong></span>
+          <span>Status ${
+            isPaused
+              ? html`<${Badge} status="error" text="Paused" />`
+              : html`<${Badge} status="done" text="Running" />`
+          }</span>
         </div>
-        <div class="meta-text mb-sm">
-          Poll:
-          ${execData?.pollIntervalMs ? execData.pollIntervalMs / 1000 : "—"}s ·
-          Timeout:
-          ${execData?.taskTimeoutMs
-            ? Math.round(execData.taskTimeoutMs / 60000)
-            : "—"}m
-        </div>
-        <div class="btn-row">
+        <div class="control-unit-actions">
           <button class="btn btn-primary btn-sm" onClick=${handlePause}>
             Pause Executor
           </button>
@@ -494,12 +514,14 @@ export function ControlTab() {
           <button
             class="btn btn-ghost btn-sm"
             onClick=${() => sendCmd("/executor")}
+            title="Open executor menu"
           >
             /executor
           </button>
         </div>
       </div>
 
+      <div class="form-label mt-sm">Max parallel tasks</div>
       <div class="range-row mb-md">
         <input
           type="range"
@@ -507,6 +529,7 @@ export function ControlTab() {
           max="20"
           step="1"
           value=${maxParallel}
+          aria-label="Max parallel tasks"
           onInput=${(e) => setMaxParallel(Number(e.target.value))}
           onChange=${(e) => handleMaxParallel(Number(e.target.value))}
         />

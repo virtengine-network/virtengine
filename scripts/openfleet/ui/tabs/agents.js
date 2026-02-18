@@ -144,6 +144,15 @@ function WorkspaceViewer({ agent, onClose }) {
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    setStreamPaused(false);
+    setStreamFilter("all");
+    setStreamSearch("");
+    setFileFilter("all");
+    setFileSearch("");
+    setStreamSnapshot({ events: [], fileAccess: null, capturedAt: null });
+  }, [query]);
+
   const handleStop = async () => {
     if (agent.index == null) return;
     const ok = await showConfirm(`Force-stop agent on "${truncate(agent.taskTitle || agent.taskId || "task", 40)}"?`);
