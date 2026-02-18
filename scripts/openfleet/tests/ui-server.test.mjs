@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { createServer as createNetServer } from "node:net";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,11 +9,26 @@ describe("ui-server mini app", () => {
   const ENV_KEYS = [
     "TELEGRAM_UI_TLS_DISABLE",
     "TELEGRAM_UI_ALLOW_UNSAFE",
+    "TELEGRAM_UI_PORT",
+    "TELEGRAM_INTERVAL_MIN",
     "CODEX_MONITOR_CONFIG_PATH",
+    "KANBAN_BACKEND",
+    "GITHUB_PROJECT_MODE",
     "GITHUB_PROJECT_WEBHOOK_SECRET",
     "GITHUB_PROJECT_WEBHOOK_REQUIRE_SIGNATURE",
     "GITHUB_PROJECT_WEBHOOK_PATH",
     "GITHUB_PROJECT_SYNC_ALERT_FAILURE_THRESHOLD",
+    "EXECUTOR_MODE",
+    "INTERNAL_EXECUTOR_PARALLEL",
+    "INTERNAL_EXECUTOR_REVIEW_AGENT_ENABLED",
+    "INTERNAL_EXECUTOR_REPLENISH_ENABLED",
+    "PROJECT_REQUIREMENTS_PROFILE",
+    "TASK_PLANNER_DEDUP_HOURS",
+    "EXECUTORS",
+    "CODEX_MONITOR_PROMPT_PLANNER",
+    "FLEET_ENABLED",
+    "FLEET_SYNC_INTERVAL_MS",
+    "OPENAI_API_KEY",
   ];
   let envSnapshot = {};
 
@@ -250,6 +265,18 @@ describe("ui-server mini app", () => {
           GITHUB_PROJECT_MODE: "kanban",
           GITHUB_PROJECT_WEBHOOK_PATH: "/api/webhooks/github/project-sync",
           GITHUB_PROJECT_SYNC_ALERT_FAILURE_THRESHOLD: "5",
+          EXECUTOR_MODE: "internal",
+          INTERNAL_EXECUTOR_PARALLEL: "5",
+          INTERNAL_EXECUTOR_REVIEW_AGENT_ENABLED: "false",
+          INTERNAL_EXECUTOR_REPLENISH_ENABLED: "true",
+          PROJECT_REQUIREMENTS_PROFILE: "system",
+          TASK_PLANNER_DEDUP_HOURS: "12",
+          TELEGRAM_UI_PORT: "4400",
+          TELEGRAM_INTERVAL_MIN: "15",
+          FLEET_ENABLED: "false",
+          FLEET_SYNC_INTERVAL_MS: "90000",
+          EXECUTORS: "CODEX:DEFAULT:70,COPILOT:DEFAULT:30",
+          CODEX_MONITOR_PROMPT_PLANNER: ".openfleet/agents/task-planner.md",
         },
       }),
     });
@@ -262,6 +289,18 @@ describe("ui-server mini app", () => {
         "GITHUB_PROJECT_MODE",
         "GITHUB_PROJECT_WEBHOOK_PATH",
         "GITHUB_PROJECT_SYNC_ALERT_FAILURE_THRESHOLD",
+        "EXECUTOR_MODE",
+        "INTERNAL_EXECUTOR_PARALLEL",
+        "INTERNAL_EXECUTOR_REVIEW_AGENT_ENABLED",
+        "INTERNAL_EXECUTOR_REPLENISH_ENABLED",
+        "PROJECT_REQUIREMENTS_PROFILE",
+        "TASK_PLANNER_DEDUP_HOURS",
+        "TELEGRAM_UI_PORT",
+        "TELEGRAM_INTERVAL_MIN",
+        "FLEET_ENABLED",
+        "FLEET_SYNC_INTERVAL_MS",
+        "EXECUTORS",
+        "CODEX_MONITOR_PROMPT_PLANNER",
       ]),
     );
     expect(json.configPath).toBe(configPath);
@@ -273,6 +312,23 @@ describe("ui-server mini app", () => {
     expect(config.kanban?.github?.project?.mode).toBe("kanban");
     expect(config.kanban?.github?.project?.webhook?.path).toBe("/api/webhooks/github/project-sync");
     expect(config.kanban?.github?.project?.syncMonitoring?.alertFailureThreshold).toBe(5);
+    expect(config.internalExecutor?.mode).toBe("internal");
+    expect(config.internalExecutor?.maxParallel).toBe(5);
+    expect(config.internalExecutor?.reviewAgentEnabled).toBe(false);
+    expect(config.internalExecutor?.backlogReplenishment?.enabled).toBe(true);
+    expect(config.projectRequirements?.profile).toBe("system");
+    expect(config.plannerDedupHours).toBe(12);
+    expect(config.telegramUiPort).toBe(4400);
+    expect(config.telegramIntervalMin).toBe(15);
+    expect(config.fleetEnabled).toBe(false);
+    expect(config.fleetSyncIntervalMs).toBe(90000);
+    expect(config.executors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ executor: "CODEX", variant: "DEFAULT", weight: 70 }),
+        expect.objectContaining({ executor: "COPILOT", variant: "DEFAULT", weight: 30 }),
+      ]),
+    );
+    expect(config.agentPrompts?.planner).toBe(".openfleet/agents/task-planner.md");
 
     rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -288,13 +344,14 @@ describe("ui-server mini app", () => {
       host: "127.0.0.1",
     });
     const port = server.address().port;
+    await new Promise((resolve) => setTimeout(resolve, 2100));
 
     const response = await fetch(`http://127.0.0.1:${port}/api/settings/update`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         changes: {
-          EXECUTORS: "CODEX:DEFAULT:100",
+          OPENAI_API_KEY: "sk-test-value",
         },
       }),
     });
@@ -303,9 +360,13 @@ describe("ui-server mini app", () => {
     expect(json.ok).toBe(true);
     expect(json.updatedConfig).toEqual([]);
 
-    const raw = readFileSync(configPath, "utf8");
-    const config = JSON.parse(raw);
-    expect(config.executors).toBeUndefined();
+    if (existsSync(configPath)) {
+      const raw = readFileSync(configPath, "utf8");
+      const config = JSON.parse(raw);
+      expect(config.openaiApiKey).toBeUndefined();
+    } else {
+      expect(existsSync(configPath)).toBe(false);
+    }
 
     rmSync(tmpDir, { recursive: true, force: true });
   });

@@ -20,14 +20,31 @@ const SESSIONS_DIR = resolve(__dirname, "logs", "sessions");
 
 const TAG = "[session-tracker]";
 
-/** Default: keep last 10 messages per session. */
+/** Default: keep last 10 messages per task session. */
 const DEFAULT_MAX_MESSAGES = 10;
+
+/** Default: keep a larger history for manual/primary chat sessions. */
+const DEFAULT_CHAT_MAX_MESSAGES = 2000;
 
 /** Maximum characters per message entry to prevent memory bloat. */
 const MAX_MESSAGE_CHARS = 2000;
 
 /** Maximum total sessions to keep in memory. */
 const MAX_SESSIONS = 50;
+
+function resolveSessionMaxMessages(type, metadata, explicitMax, fallbackMax) {
+  if (Number.isFinite(explicitMax)) {
+    return explicitMax > 0 ? explicitMax : 0;
+  }
+  if (Number.isFinite(metadata?.maxMessages)) {
+    return metadata.maxMessages > 0 ? metadata.maxMessages : 0;
+  }
+  const normalizedType = String(type || "").toLowerCase();
+  if (["primary", "manual", "chat"].includes(normalizedType)) {
+    return DEFAULT_CHAT_MAX_MESSAGES;
+  }
+  return fallbackMax;
+}
 
 // ── Message Types ───────────────────────────────────────────────────────────
 
@@ -117,6 +134,7 @@ export class SessionTracker {
       taskTitle,
       id: taskId,
       type: "task",
+      maxMessages: this.#maxMessages,
       startedAt: Date.now(),
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
@@ -163,6 +181,11 @@ export class SessionTracker {
     session.lastActivityAt = Date.now();
     session.lastActiveAt = new Date().toISOString();
 
+    const maxMessages =
+      session.maxMessages === null || session.maxMessages === undefined
+        ? this.#maxMessages
+        : session.maxMessages;
+
     // Direct message format (role/content)
     if (event && event.role && event.content !== undefined) {
       const msg = {
@@ -173,8 +196,8 @@ export class SessionTracker {
       };
       session.turnCount++;
       session.messages.push(msg);
-      if (session.messages.length > this.#maxMessages) {
-        session.messages.shift();
+      if (Number.isFinite(maxMessages) && maxMessages > 0) {
+        while (session.messages.length > maxMessages) session.messages.shift();
       }
       this.#markDirty(taskId);
       return;
@@ -188,8 +211,8 @@ export class SessionTracker {
 
     // Push to ring buffer (keep only last N)
     session.messages.push(msg);
-    if (session.messages.length > this.#maxMessages) {
-      session.messages.shift();
+    if (Number.isFinite(maxMessages) && maxMessages > 0) {
+      while (session.messages.length > maxMessages) session.messages.shift();
     }
     this.#markDirty(taskId);
   }
@@ -392,8 +415,14 @@ export class SessionTracker {
    * Create a new session with explicit options.
    * @param {{ id: string, type?: string, taskId?: string, metadata?: Object }} opts
    */
-  createSession({ id, type = "manual", taskId, metadata = {} }) {
+  createSession({ id, type = "manual", taskId, metadata = {}, maxMessages }) {
     const now = new Date().toISOString();
+    const resolvedMax = resolveSessionMaxMessages(
+      type,
+      metadata,
+      maxMessages,
+      this.#maxMessages,
+    );
     const session = {
       id,
       taskId: taskId || id,
@@ -409,6 +438,7 @@ export class SessionTracker {
       turnCount: 0,
       lastActivityAt: Date.now(),
       metadata,
+      maxMessages: resolvedMax,
     };
     this.#sessions.set(id, session);
     this.#markDirty(id);

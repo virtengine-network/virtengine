@@ -135,6 +135,12 @@ export const SETTINGS_SCHEMA = [
   { key: "VE_INSTANCE_LABEL",              label: "Instance Label",             category: "network", type: "string", description: "Human-friendly name for this instance in multi-instance setups." },
   { key: "VE_COORDINATOR_ELIGIBLE",        label: "Coordinator Eligible",       category: "network", type: "boolean", defaultVal: true, description: "Whether this instance can be elected as coordinator in multi-instance mode." },
   { key: "VE_COORDINATOR_PRIORITY",        label: "Coordinator Priority",       category: "network", type: "number", defaultVal: 10, min: 1, max: 100, description: "Lower value = higher priority in coordinator election." },
+  { key: "FLEET_ENABLED",                  label: "Fleet Enabled",              category: "network", type: "boolean", defaultVal: true, description: "Enable multi-workstation fleet coordination.", advanced: true },
+  { key: "FLEET_BUFFER_MULTIPLIER",        label: "Fleet Buffer Multiplier",    category: "network", type: "number", defaultVal: 3, min: 1, unit: "x", description: "Scale the planning buffer when coordinating across instances.", advanced: true },
+  { key: "FLEET_SYNC_INTERVAL_MS",         label: "Fleet Sync Interval",        category: "network", type: "number", defaultVal: 120000, min: 10000, max: 3600000, unit: "ms", description: "How often fleet state is synced across instances.", advanced: true },
+  { key: "FLEET_PRESENCE_TTL_MS",          label: "Fleet Presence TTL",         category: "network", type: "number", defaultVal: 300000, min: 60000, max: 3600000, unit: "ms", description: "Time before a fleet instance is considered offline.", advanced: true },
+  { key: "FLEET_KNOWLEDGE_ENABLED",        label: "Fleet Knowledge Enabled",    category: "network", type: "boolean", defaultVal: true, description: "Share local knowledge files across the fleet.", advanced: true },
+  { key: "FLEET_KNOWLEDGE_FILE",           label: "Fleet Knowledge File",       category: "network", type: "string", defaultVal: "AGENTS.md", description: "Knowledge file name to share across fleet members.", advanced: true },
 
   // ── Security / Sandbox ────────────────────────────────────
   { key: "CODEX_SANDBOX",                  label: "Sandbox Mode",               category: "security", type: "select", defaultVal: "workspace-write", options: ["workspace-write", "danger-full-access", "read-only"], description: "Agent filesystem access level. 'workspace-write' is permissive within workspace while avoiding full host access." },

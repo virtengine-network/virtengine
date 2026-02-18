@@ -117,6 +117,37 @@ function toCamelCaseFromEnv(key) {
     .join("");
 }
 
+function parseExecutorsValue(value) {
+  if (Array.isArray(value)) return value;
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  if (raw.startsWith("[") || raw.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : value;
+    } catch {
+      return value;
+    }
+  }
+  const entries = raw.split(",").map((entry) => entry.trim()).filter(Boolean);
+  const roles = ["primary", "backup", "tertiary"];
+  const executors = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const parts = entries[i].split(":").map((part) => part.trim());
+    if (parts.length < 2) continue;
+    const weight = parts[2] ? Number(parts[2]) : Math.floor(100 / entries.length);
+    executors.push({
+      name: `${parts[0].toLowerCase()}-${parts[1].toLowerCase()}`,
+      executor: parts[0].toUpperCase(),
+      variant: parts[1],
+      weight: Number.isFinite(weight) ? weight : 0,
+      role: roles[i] || `executor-${i + 1}`,
+      enabled: true,
+    });
+  }
+  return executors.length ? executors : value;
+}
+
 function coerceSettingValue(def, value, propSchema) {
   if (value == null) return value;
   const types = [];
@@ -126,6 +157,9 @@ function coerceSettingValue(def, value, propSchema) {
   }
 
   if (types.includes("array")) {
+    if (def?.key === "EXECUTORS") {
+      return parseExecutorsValue(value);
+    }
     if (Array.isArray(value)) return value;
     let parts = String(value)
       .split(",")
@@ -177,25 +211,86 @@ function getSchemaProperty(schema, pathParts) {
   return current || null;
 }
 
+const ROOT_SKIP_ENV_KEYS = new Set([]);
+const ROOT_OVERRIDE_MAP = {
+  CODEX_MONITOR_MODE: "mode",
+  TASK_PLANNER_MODE: "plannerMode",
+  EXECUTOR_DISTRIBUTION: "distribution",
+};
+const INTERNAL_EXECUTOR_MAP = {
+  PARALLEL: ["internalExecutor", "maxParallel"],
+  SDK: ["internalExecutor", "sdk"],
+  TIMEOUT_MS: ["internalExecutor", "taskTimeoutMs"],
+  MAX_RETRIES: ["internalExecutor", "maxRetries"],
+  POLL_MS: ["internalExecutor", "pollIntervalMs"],
+  REVIEW_AGENT_ENABLED: ["internalExecutor", "reviewAgentEnabled"],
+  REPLENISH_ENABLED: ["internalExecutor", "backlogReplenishment", "enabled"],
+};
+const CONFIG_PATH_OVERRIDES = {
+  EXECUTOR_MODE: ["internalExecutor", "mode"],
+  PROJECT_REQUIREMENTS_PROFILE: ["projectRequirements", "profile"],
+  TASK_PLANNER_DEDUP_HOURS: ["plannerDedupHours"],
+};
+const ROOT_PREFIX_ALLOWLIST = [
+  "TELEGRAM_",
+  "FLEET_",
+  "VE_",
+];
+
+const AUTH_ENV_PREFIX_MAP = {
+  CODEX: "codex",
+  CLAUDE: "claude",
+  COPILOT: "copilot",
+};
+
+function buildConfigPath(pathParts, allowUnknownSchema = false) {
+  return { pathParts, allowUnknownSchema };
+}
+
 function mapEnvKeyToConfigPath(key, schema) {
   if (!schema?.properties) return null;
   const envKey = String(key || "").toUpperCase();
-  const rootSkipSet = new Set([
-    "EXECUTORS",
-  ]);
-  if (rootSkipSet.has(envKey)) return null;
-  const rootOverrideMap = {
-    CODEX_MONITOR_MODE: "mode",
-    TASK_PLANNER_MODE: "plannerMode",
-    EXECUTOR_DISTRIBUTION: "distribution",
-  };
-  if (rootOverrideMap[envKey] && schema.properties[rootOverrideMap[envKey]]) {
-    return [rootOverrideMap[envKey]];
+
+  if (ROOT_SKIP_ENV_KEYS.has(envKey)) return null;
+
+  const overridePath = CONFIG_PATH_OVERRIDES[envKey];
+  if (overridePath) {
+    return buildConfigPath(overridePath, true);
+  }
+
+  if (envKey.startsWith("INTERNAL_EXECUTOR_")) {
+    const rest = envKey.slice("INTERNAL_EXECUTOR_".length);
+    const internalPath = INTERNAL_EXECUTOR_MAP[rest];
+    if (internalPath) {
+      return buildConfigPath(internalPath, true);
+    }
+  }
+
+  if (ROOT_OVERRIDE_MAP[envKey] && schema.properties[ROOT_OVERRIDE_MAP[envKey]]) {
+    return buildConfigPath([ROOT_OVERRIDE_MAP[envKey]]);
   }
   if (envKey.startsWith("FAILOVER_") && schema.properties.failover?.properties) {
     const rest = envKey.slice("FAILOVER_".length);
     const sub = toCamelCaseFromEnv(rest);
-    if (schema.properties.failover.properties[sub]) return ["failover", sub];
+    if (schema.properties.failover.properties[sub]) return buildConfigPath(["failover", sub]);
+  }
+  if (envKey.startsWith("CODEX_MONITOR_PROMPT_") && schema.properties.agentPrompts?.properties) {
+    const rest = envKey.slice("CODEX_MONITOR_PROMPT_".length);
+    const sub = toCamelCaseFromEnv(rest);
+    if (schema.properties.agentPrompts.properties[sub]) {
+      return buildConfigPath(["agentPrompts", sub]);
+    }
+  }
+  if (envKey.endsWith("_AUTH_SOURCES") || envKey.endsWith("_AUTH_FALLBACK_INTERACTIVE")) {
+    const match = envKey.match(/^(CODEX|CLAUDE|COPILOT)_AUTH_(SOURCES|FALLBACK_INTERACTIVE)$/);
+    if (match && schema.properties.auth?.properties) {
+      const provider = AUTH_ENV_PREFIX_MAP[match[1]];
+      const sub = match[2] === "SOURCES" ? "sources" : "fallbackToInteractive";
+      const propSchema = schema.properties.auth?.properties?.[provider]?.properties;
+      if (propSchema?.[sub]) {
+        return buildConfigPath(["auth", provider, sub]);
+      }
+    }
   }
   const hookProfileMap = {
     CODEX_MONITOR_HOOK_PROFILE: ["hookProfiles", "profile"],
@@ -206,50 +301,53 @@ function mapEnvKeyToConfigPath(key, schema) {
   if (hookProfileMap[envKey]) {
     const pathParts = hookProfileMap[envKey];
     const propSchema = getSchemaProperty(schema, pathParts);
-    if (propSchema) return pathParts;
+    if (propSchema) return buildConfigPath(pathParts);
   }
   const rootKey = toCamelCaseFromEnv(envKey);
-  if (schema.properties[rootKey]) return [rootKey];
+  if (schema.properties[rootKey]) return buildConfigPath([rootKey]);
+  if (ROOT_PREFIX_ALLOWLIST.some((prefix) => envKey.startsWith(prefix))) {
+    return buildConfigPath([rootKey], true);
+  }
   if (envKey.startsWith("KANBAN_") && schema.properties.kanban?.properties) {
     const rest = envKey.slice("KANBAN_".length);
     const sub = toCamelCaseFromEnv(rest);
-    if (schema.properties.kanban.properties[sub]) return ["kanban", sub];
+    if (schema.properties.kanban.properties[sub]) return buildConfigPath(["kanban", sub]);
   }
   if (envKey.startsWith("JIRA_STATUS_")) {
     const jiraSchema = schema.properties.kanban?.properties?.jira?.properties?.statusMapping?.properties;
     const rest = envKey.slice("JIRA_STATUS_".length);
     const sub = toCamelCaseFromEnv(rest);
-    if (jiraSchema?.[sub]) return ["kanban", "jira", "statusMapping", sub];
+    if (jiraSchema?.[sub]) return buildConfigPath(["kanban", "jira", "statusMapping", sub]);
   }
   if (envKey.startsWith("JIRA_LABEL_")) {
     const jiraSchema = schema.properties.kanban?.properties?.jira?.properties?.labels?.properties;
     const rest = envKey.slice("JIRA_LABEL_".length);
     const sub = toCamelCaseFromEnv(rest);
-    if (jiraSchema?.[sub]) return ["kanban", "jira", "labels", sub];
+    if (jiraSchema?.[sub]) return buildConfigPath(["kanban", "jira", "labels", sub]);
   }
   if (envKey.startsWith("JIRA_")) {
     const jiraSchema = schema.properties.kanban?.properties?.jira?.properties;
     const rest = envKey.slice("JIRA_".length);
     const sub = toCamelCaseFromEnv(rest);
-    if (jiraSchema?.[sub]) return ["kanban", "jira", sub];
+    if (jiraSchema?.[sub]) return buildConfigPath(["kanban", "jira", sub]);
   }
   if (envKey.startsWith("GITHUB_PROJECT_")) {
     const projectSchema = schema.properties.kanban?.properties?.github?.properties?.project?.properties;
     const rest = envKey.slice("GITHUB_PROJECT_".length);
     const sub = toCamelCaseFromEnv(rest);
-    if (projectSchema?.[sub]) return ["kanban", "github", "project", sub];
+    if (projectSchema?.[sub]) return buildConfigPath(["kanban", "github", "project", sub]);
   }
   if (envKey.startsWith("GITHUB_PROJECT_WEBHOOK_")) {
     const webhookSchema = schema.properties.kanban?.properties?.github?.properties?.project?.properties?.webhook?.properties;
     const rest = envKey.slice("GITHUB_PROJECT_WEBHOOK_".length);
     const sub = toCamelCaseFromEnv(rest);
-    if (webhookSchema?.[sub]) return ["kanban", "github", "project", "webhook", sub];
+    if (webhookSchema?.[sub]) return buildConfigPath(["kanban", "github", "project", "webhook", sub]);
   }
   if (envKey.startsWith("GITHUB_PROJECT_SYNC_")) {
     const syncSchema = schema.properties.kanban?.properties?.github?.properties?.project?.properties?.syncMonitoring?.properties;
     const rest = envKey.slice("GITHUB_PROJECT_SYNC_".length);
     const sub = toCamelCaseFromEnv(rest);
-    if (syncSchema?.[sub]) return ["kanban", "github", "project", "syncMonitoring", sub];
+    if (syncSchema?.[sub]) return buildConfigPath(["kanban", "github", "project", "syncMonitoring", sub]);
   }
   return null;
 }
@@ -384,6 +482,8 @@ const SETTINGS_KNOWN_KEYS = [
   "CLOUDFLARE_TUNNEL_NAME", "CLOUDFLARE_TUNNEL_CREDENTIALS",
   "TELEGRAM_PRESENCE_INTERVAL_SEC", "TELEGRAM_PRESENCE_DISABLED",
   "VE_INSTANCE_LABEL", "VE_COORDINATOR_ELIGIBLE", "VE_COORDINATOR_PRIORITY",
+  "FLEET_ENABLED", "FLEET_BUFFER_MULTIPLIER", "FLEET_SYNC_INTERVAL_MS",
+  "FLEET_PRESENCE_TTL_MS", "FLEET_KNOWLEDGE_ENABLED", "FLEET_KNOWLEDGE_FILE",
   "CODEX_SANDBOX", "CODEX_FEATURES_BWRAP", "CODEX_SANDBOX_PERMISSIONS", "CODEX_SANDBOX_WRITABLE_ROOTS",
   "CONTAINER_ENABLED", "CONTAINER_RUNTIME", "CONTAINER_IMAGE",
   "CONTAINER_TIMEOUT_MS", "MAX_CONCURRENT_CONTAINERS", "CONTAINER_MEMORY_LIMIT", "CONTAINER_CPU_LIMIT",
@@ -456,10 +556,11 @@ function updateConfigFile(changes) {
 
   const updated = new Set();
   for (const [key, value] of Object.entries(changes)) {
-    const pathParts = mapEnvKeyToConfigPath(key, schema);
-    if (!pathParts) continue;
+    const pathInfo = mapEnvKeyToConfigPath(key, schema);
+    if (!pathInfo) continue;
+    const { pathParts, allowUnknownSchema } = pathInfo;
     const propSchema = getSchemaProperty(schema, pathParts);
-    if (!propSchema) continue;
+    if (!propSchema && !allowUnknownSchema) continue;
     if (isUnsetValue(value)) {
       unsetConfigPathValue(configData, pathParts);
       updated.add(key);
@@ -502,10 +603,11 @@ function validateConfigSchemaChanges(changes) {
     const candidate = JSON.parse(JSON.stringify(configData || {}));
     const pathMap = new Map();
     for (const [key, value] of Object.entries(changes)) {
-      const pathParts = mapEnvKeyToConfigPath(key, schema);
-      if (!pathParts) continue;
+      const pathInfo = mapEnvKeyToConfigPath(key, schema);
+      if (!pathInfo) continue;
+      const { pathParts, allowUnknownSchema } = pathInfo;
       const propSchema = getSchemaProperty(schema, pathParts);
-      if (!propSchema) continue;
+      if (!propSchema && !allowUnknownSchema) continue;
       if (isUnsetValue(value)) {
         unsetConfigPathValue(candidate, pathParts);
         pathMap.set(pathParts.join("."), key);

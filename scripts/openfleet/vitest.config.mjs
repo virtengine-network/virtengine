@@ -8,5 +8,6 @@ export default defineConfig({
     exclude: ["**/node_modules/**", "**/.cache/**"],
     testTimeout: 5000,
     pool: "threads",
+    setupFiles: ["tests/setup.mjs"],
   },
 });
