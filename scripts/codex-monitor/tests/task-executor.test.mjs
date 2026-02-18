@@ -53,6 +53,17 @@ vi.mock("../config.mjs", () => ({
 
 vi.mock("../git-safety.mjs", () => ({
   evaluateBranchSafetyForPush: vi.fn(() => ({ safe: true })),
+  normalizeBaseBranch: vi.fn((baseBranch = "main", remote = "origin") => {
+    let branch = String(baseBranch || "main").trim();
+    if (!branch) branch = "main";
+    branch = branch.replace(/^refs\/heads\//, "");
+    branch = branch.replace(/^refs\/remotes\//, "");
+    while (branch.startsWith(`${remote}/`)) {
+      branch = branch.slice(remote.length + 1);
+    }
+    if (!branch) branch = "main";
+    return { branch, remoteRef: `${remote}/${branch}` };
+  }),
 }));
 
 vi.mock("node:child_process", () => ({

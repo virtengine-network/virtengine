@@ -69,7 +69,7 @@ import {
   executorToSdk,
   formatComplexityDecision,
 } from "./task-complexity.mjs";
-import { evaluateBranchSafetyForPush } from "./git-safety.mjs";
+import { evaluateBranchSafetyForPush, normalizeBaseBranch } from "./git-safety.mjs";
 import {
   loadHooks,
   registerBuiltinHooks,
@@ -187,6 +187,235 @@ function normalizePriority(value) {
     return key;
   }
   return "medium";
+}
+
+const UPSTREAM_LABEL_REGEX =
+  /^(?:upstream|base|target)(?:_branch)?[:=]\s*([A-Za-z0-9._/-]+)$/i;
+
+function normalizeBranchName(value) {
+  if (!value) return null;
+  const trimmed = String(value || "").trim();
+  return trimmed ? trimmed : null;
+}
+
+function extractScopeFromTitle(title) {
+  if (!title) return null;
+  const match = String(title).match(
+    /(?:^\[P\d+\]\s*)?(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)\(([^)]+)\)/i,
+  );
+  return match ? match[1].toLowerCase().trim() : null;
+}
+
+function collectTaskLabels(task) {
+  const labels = [];
+  if (!task) return labels;
+  for (const field of [
+    "labels",
+    "label",
+    "tags",
+    "tag",
+    "categories",
+    "category",
+  ]) {
+    const value = task[field];
+    if (!value) continue;
+    if (typeof value === "string") {
+      labels.push(value);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (!item) continue;
+        if (typeof item === "string") labels.push(item);
+        else if (item.name) labels.push(item.name);
+        else if (item.label) labels.push(item.label);
+        else if (item.title) labels.push(item.title);
+      }
+    }
+  }
+  if (task.metadata) {
+    for (const field of ["labels", "tags"]) {
+      const value = task.metadata[field];
+      if (!value) continue;
+      if (typeof value === "string") labels.push(value);
+      else if (Array.isArray(value)) labels.push(...value);
+    }
+  }
+  if (task.meta) {
+    for (const field of ["labels", "tags"]) {
+      const value = task.meta[field];
+      if (!value) continue;
+      if (typeof value === "string") labels.push(value);
+      else if (Array.isArray(value)) labels.push(...value);
+    }
+  }
+  return labels;
+}
+
+function getTaskTextBlob(task) {
+  const parts = [];
+  if (!task) return "";
+  for (const field of [
+    "title",
+    "name",
+    "description",
+    "body",
+    "details",
+    "content",
+  ]) {
+    const value = task[field];
+    if (value) parts.push(value);
+  }
+  const labels = collectTaskLabels(task);
+  if (labels.length) parts.push(labels.join(" "));
+  return parts.join("\n");
+}
+
+function extractUpstreamFromText(text) {
+  if (!text) return null;
+  const match = String(text).match(
+    /\b(?:upstream|base|target)(?:_branch| branch)?\s*[:=]\s*([A-Za-z0-9._/-]+)/i,
+  );
+  if (!match) return null;
+  return normalizeBranchName(match[1]);
+}
+
+function resolveUpstreamFromConfig(task, branchRouting) {
+  if (!task || !branchRouting?.scopeMap) return null;
+
+  const scope = extractScopeFromTitle(task.title || task.name);
+  if (scope) {
+    const exactMatch = branchRouting.scopeMap[scope];
+    if (exactMatch) return exactMatch;
+    for (const [key, branch] of Object.entries(branchRouting.scopeMap)) {
+      if (scope.includes(key) || key.includes(scope)) return branch;
+    }
+  }
+
+  const text = getTaskTextBlob(task).toLowerCase();
+  for (const [key, branch] of Object.entries(branchRouting.scopeMap)) {
+    if (text.includes(String(key).toLowerCase())) return branch;
+  }
+
+  return null;
+}
+
+function resolveTaskBaseBranch(task, branchRouting, defaultTargetBranch) {
+  if (!task) return normalizeBranchName(defaultTargetBranch);
+
+  const directFields = [
+    "target_branch",
+    "base_branch",
+    "upstream_branch",
+    "upstream",
+    "target",
+    "base",
+    "targetBranch",
+    "baseBranch",
+    "upstreamBranch",
+  ];
+  for (const field of directFields) {
+    if (task[field]) return normalizeBranchName(task[field]);
+  }
+  if (task.metadata) {
+    for (const field of directFields) {
+      if (task.metadata[field]) return normalizeBranchName(task.metadata[field]);
+    }
+  }
+  if (task.meta) {
+    for (const field of directFields) {
+      if (task.meta[field]) return normalizeBranchName(task.meta[field]);
+    }
+  }
+
+  for (const label of collectTaskLabels(task)) {
+    const match = String(label).match(UPSTREAM_LABEL_REGEX);
+    if (match?.[1]) return normalizeBranchName(match[1]);
+  }
+
+  const fromText = extractUpstreamFromText(getTaskTextBlob(task));
+  if (fromText) return fromText;
+
+  const fromConfig = resolveUpstreamFromConfig(task, branchRouting);
+  if (fromConfig) return normalizeBranchName(fromConfig);
+
+  return normalizeBranchName(defaultTargetBranch);
+}
+
+function ensureBaseBranchAvailable(repoRoot, baseBranch, defaultTargetBranch) {
+  const fallback = normalizeBranchName(defaultTargetBranch) || "origin/main";
+  let candidate = normalizeBranchName(baseBranch) || fallback;
+  let normalized;
+  try {
+    normalized = normalizeBaseBranch(candidate, "origin");
+  } catch {
+    normalized = normalizeBaseBranch(fallback, "origin");
+    candidate = fallback;
+  }
+  const { branch, remoteRef } = normalized;
+
+  const localRef = `refs/heads/${branch}`;
+  const localCheck = spawnSync("git", ["show-ref", "--verify", localRef], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  if (localCheck.status === 0) {
+    return branch;
+  }
+
+  let remoteExists = false;
+  try {
+    const remoteCheck = spawnSync(
+      "git",
+      ["ls-remote", "--heads", "origin", branch],
+      { cwd: repoRoot, encoding: "utf8", timeout: 8000 },
+    );
+    remoteExists =
+      remoteCheck.status === 0 && (remoteCheck.stdout || "").trim().length > 0;
+  } catch {
+    remoteExists = false;
+  }
+
+  if (remoteExists) {
+    spawnSync("git", ["branch", branch, remoteRef], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 8000,
+    });
+    return branch;
+  }
+
+  const fallbackNorm = normalizeBaseBranch(fallback, "origin");
+  try {
+    spawnSync("git", ["fetch", "origin", fallbackNorm.branch, "--quiet"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 15000,
+    });
+  } catch {
+    /* best-effort */
+  }
+
+  const createRes = spawnSync(
+    "git",
+    ["branch", branch, fallbackNorm.remoteRef],
+    { cwd: repoRoot, encoding: "utf8", timeout: 8000 },
+  );
+  if (createRes.status !== 0) {
+    const stderr = (createRes.stderr || "").trim();
+    console.warn(
+      `${TAG} failed to create base branch ${branch} from ${fallbackNorm.remoteRef}: ${stderr}`,
+    );
+    return fallbackNorm.remoteRef;
+  }
+
+  spawnSync("git", ["push", "-u", "origin", branch], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  return branch;
 }
 
 function writeOrchestratorPauseState(paused, reason, extra = {}) {
@@ -608,6 +837,8 @@ async function commentOnIssue(task, commentBody) {
  * @property {string}   projectId       - VK project ID to poll (null = auto-detect first project)
  * @property {string}   repoRoot        - Repository root path
  * @property {string}   repoSlug        - "owner/repo" for gh CLI
+ * @property {Object}   branchRouting   - Branch routing config (scopeMap/defaultBranch)
+ * @property {string}   defaultTargetBranch - Default upstream branch
  * @property {Function} onTaskStarted   - callback(task, slotInfo)
  * @property {Function} onTaskCompleted - callback(task, result)
  * @property {Function} onTaskFailed    - callback(task, error)
@@ -651,6 +882,8 @@ class TaskExecutor {
       projectId: null,
       repoRoot: process.cwd(),
       repoSlug: "",
+      branchRouting: null,
+      defaultTargetBranch: null,
       onTaskStarted: null,
       onTaskCompleted: null,
       onTaskFailed: null,
@@ -670,6 +903,12 @@ class TaskExecutor {
     this.projectId = merged.projectId;
     this.repoRoot = merged.repoRoot;
     this.repoSlug = merged.repoSlug;
+    this.branchRouting = merged.branchRouting || null;
+    this.defaultTargetBranch =
+      merged.defaultTargetBranch ||
+      merged.branchRouting?.defaultBranch ||
+      process.env.VK_TARGET_BRANCH ||
+      "origin/main";
     this.onTaskStarted = merged.onTaskStarted;
     this.onTaskCompleted = merged.onTaskCompleted;
     this.onTaskFailed = merged.onTaskFailed;
@@ -1581,6 +1820,10 @@ class TaskExecutor {
       }
 
       if (!branch || !branch.startsWith("ve/")) continue;
+      const baseInfo = normalizeBaseBranch(
+        this.defaultTargetBranch || "origin/main",
+        "origin",
+      );
 
       // Check if we already created a PR for this branch
       if (this._prCreatedForBranch.has(taskIdPrefix)) {
@@ -1591,12 +1834,15 @@ class TaskExecutor {
       // Check for uncommitted changes OR unpushed commits
       let hasUnpushed = false;
       try {
-        const unpushed = execSync(`git log origin/main..HEAD --oneline`, {
+        const unpushed = execSync(
+          `git log ${baseInfo.remoteRef}..HEAD --oneline`,
+          {
           cwd: wtPath,
           encoding: "utf8",
           stdio: "pipe",
           timeout: 10000,
-        }).trim();
+        },
+        ).trim();
         hasUnpushed = unpushed.length > 0;
       } catch {
         // No upstream tracking, that's ok
@@ -1639,15 +1885,18 @@ class TaskExecutor {
       // Verify branches actually has meaningful diff vs main BEFORE creating a PR
       // This prevents empty PRs from being created when worktrees have merge artifacts.
       try {
-        const diffCheck = execSync("git diff --name-only origin/main...HEAD", {
+        const diffCheck = execSync(
+          `git diff --name-only ${baseInfo.remoteRef}...HEAD`,
+          {
           cwd: wtPath,
           encoding: "utf8",
           stdio: "pipe",
           timeout: 15000,
-        }).trim();
+        },
+        ).trim();
         if (diffCheck.length === 0) {
           console.log(
-            `${TAG} [orphan-recovery] Skipping ${dirName} — 0 file changes vs main (would create empty PR)`,
+            `${TAG} [orphan-recovery] Skipping ${dirName} — 0 file changes vs ${baseInfo.branch} (would create empty PR)`,
           );
           skipped++;
           continue;
@@ -1677,6 +1926,11 @@ class TaskExecutor {
       try {
         const prResult = await this._createPR(taskObj, wtPath, {
           agentMadeNewCommits: true,
+          baseBranch: resolveTaskBaseBranch(
+            taskObj,
+            this.branchRouting,
+            this.defaultTargetBranch,
+          ),
         });
         if (prResult) {
           console.log(
@@ -2615,6 +2869,9 @@ class TaskExecutor {
           `|-------|-------|`,
           `| **Started** | ${new Date().toISOString()} |`,
           `| **Branch** | \`${branch}\` |`,
+          task?.baseBranch || task?.base_branch || task?.meta?.base_branch
+            ? `| **Base Branch** | \`${task.baseBranch || task.base_branch || task.meta?.base_branch}\` |`
+            : "",
           `| **SDK** | ${resolvedSdk} |`,
           selectedModel ? `| **Model** | ${selectedModel} |` : "",
           `| **Executor** | codex-monitor (internal) |`,
@@ -2629,9 +2886,19 @@ class TaskExecutor {
       // 3. Acquire worktree
       let wt;
       try {
+        const taskBaseBranch = resolveTaskBaseBranch(
+          task,
+          this.branchRouting,
+          this.defaultTargetBranch,
+        );
+        const worktreeBaseBranch = ensureBaseBranchAvailable(
+          this.repoRoot,
+          taskBaseBranch,
+          this.defaultTargetBranch,
+        );
         wt = await acquireWorktree(branch, taskId, {
           owner: "task-executor",
-          baseBranch: "main",
+          baseBranch: worktreeBaseBranch,
         });
       } catch (err) {
         console.error(
@@ -3301,6 +3568,11 @@ class TaskExecutor {
   async _handleTaskResult(task, result, worktreePath, execInfo = {}) {
     const taskTitle = (task.title || "").slice(0, 50);
     const tag = `${TAG} task "${taskTitle}"`;
+    const baseBranch = resolveTaskBaseBranch(
+      task,
+      this.branchRouting,
+      this.defaultTargetBranch,
+    );
 
     // Fire SessionStop hook
     executeHooks("SessionStop", {
@@ -3321,7 +3593,7 @@ class TaskExecutor {
 
       // Use HEAD tracking to determine if agent made NEW commits (not old leftovers)
       const agentMadeNewCommits = execInfo.agentMadeNewCommits === true;
-      const hasAnyCommits = this._hasUnpushedCommits(worktreePath);
+      const hasAnyCommits = this._hasUnpushedCommits(worktreePath, baseBranch);
 
       // If already completed+PR'd, skip re-processing
       if (this._completedWithPR.has(task.id)) {
@@ -3430,6 +3702,7 @@ class TaskExecutor {
 
         const pr = await this._createPR(task, worktreePath, {
           agentMadeNewCommits,
+          baseBranch,
         });
         if (pr) {
           // Mark as completed with PR — prevents re-dispatch
@@ -3909,8 +4182,9 @@ class TaskExecutor {
    * @returns {boolean}
    * @private
    */
-  _hasUnpushedCommits(worktreePath) {
+  _hasUnpushedCommits(worktreePath, baseBranch = "main") {
     try {
+      const baseInfo = normalizeBaseBranch(baseBranch, "origin");
       // Method 1: Check vs upstream tracking branch
       const result = spawnSync("git", ["log", "@{u}..HEAD", "--oneline"], {
         cwd: worktreePath,
@@ -3921,9 +4195,9 @@ class TaskExecutor {
         return true;
       }
 
-      // Method 2: Check vs origin/main (fetch first to be current)
+      // Method 2: Check vs base remote ref (fetch first to be current)
       try {
-        spawnSync("git", ["fetch", "origin", "main", "--quiet"], {
+        spawnSync("git", ["fetch", "origin", baseInfo.branch, "--quiet"], {
           cwd: worktreePath,
           encoding: "utf8",
           timeout: 15_000,
@@ -3932,21 +4206,29 @@ class TaskExecutor {
         /* best-effort */
       }
 
-      const diff = spawnSync("git", ["log", "origin/main..HEAD", "--oneline"], {
-        cwd: worktreePath,
-        encoding: "utf8",
-        timeout: 10_000,
-      });
+      const diff = spawnSync(
+        "git",
+        [`log`, `${baseInfo.remoteRef}..HEAD`, "--oneline"],
+        {
+          cwd: worktreePath,
+          encoding: "utf8",
+          timeout: 10_000,
+        },
+      );
       if (diff.status === 0 && (diff.stdout || "").trim().length > 0) {
         return true;
       }
 
-      // Method 3: Fallback — check if there are ANY commits not in main
-      const diff2 = spawnSync("git", ["log", "main..HEAD", "--oneline"], {
-        cwd: worktreePath,
-        encoding: "utf8",
-        timeout: 10_000,
-      });
+      // Method 3: Fallback — check if there are ANY commits not in base
+      const diff2 = spawnSync(
+        "git",
+        [`log`, `${baseInfo.branch}..HEAD`, "--oneline"],
+        {
+          cwd: worktreePath,
+          encoding: "utf8",
+          timeout: 10_000,
+        },
+      );
       return diff2.status === 0 && (diff2.stdout || "").trim().length > 0;
     } catch {
       return false;
@@ -3962,8 +4244,9 @@ class TaskExecutor {
    * @returns {{ success: boolean, error?: string }}
    * @private
    */
-  _pushBranch(worktreePath, branch) {
+  _pushBranch(worktreePath, branch, baseBranch = "main") {
     try {
+      const baseInfo = normalizeBaseBranch(baseBranch, "origin");
       // Execute PrePush hook (blocking — can abort push)
       // Note: executeBlockingHooks is async but _pushBranch is sync.
       // We fire-and-forget here since blocking would require refactoring to async.
@@ -3976,13 +4259,13 @@ class TaskExecutor {
       // We use rebase instead of merge to avoid polluting the branch with merge commits
       // that can wipe out agent work (as --strategy-option=theirs did before).
       try {
-        spawnSync("git", ["fetch", "origin", "main", "--quiet"], {
+        spawnSync("git", ["fetch", "origin", baseInfo.branch, "--quiet"], {
           cwd: worktreePath,
           encoding: "utf8",
           timeout: 30_000,
         });
         // Try rebase — this keeps agent's commits on top of latest main
-        const rebaseResult = spawnSync("git", ["rebase", "origin/main"], {
+        const rebaseResult = spawnSync("git", ["rebase", baseInfo.remoteRef], {
           cwd: worktreePath,
           encoding: "utf8",
           timeout: 60_000,
@@ -4003,7 +4286,7 @@ class TaskExecutor {
       }
 
       const safety = evaluateBranchSafetyForPush(worktreePath, {
-        baseBranch: "main",
+        baseBranch,
         remote: "origin",
       });
       if (!safety.safe) {
@@ -4250,6 +4533,13 @@ class TaskExecutor {
   async _createPR(task, worktreePath, opts = {}) {
     const { agentMadeNewCommits = false } = opts;
     try {
+      const resolvedBase = normalizeBranchName(opts.baseBranch)
+        ? opts.baseBranch
+        : this.defaultTargetBranch;
+      const baseInfo = normalizeBaseBranch(
+        resolvedBase || "main",
+        "origin",
+      );
       const branch =
         task.branchName ||
         spawnSync("git", ["branch", "--show-current"], {
@@ -4283,7 +4573,7 @@ class TaskExecutor {
       }
 
       const safety = evaluateBranchSafetyForPush(worktreePath, {
-        baseBranch: "main",
+        baseBranch: baseInfo.branch,
         remote: "origin",
       });
       if (!safety.safe) {
@@ -4358,7 +4648,7 @@ class TaskExecutor {
               console.log(
                 `${TAG} Open PR #${existingPrNumber} already exists for branch ${branch}`,
               );
-              this._pushBranch(worktreePath, branch);
+              this._pushBranch(worktreePath, branch, baseInfo.branch);
               this._enableAutoMerge(existingPrNumber, worktreePath, task);
               return { url: existingPrUrl, branch, prNumber: existingPrNumber };
             }
@@ -4369,7 +4659,11 @@ class TaskExecutor {
       }
 
       // ── Step 1: Push branch to origin ──────────────────────────────────
-      const pushResult = this._pushBranch(worktreePath, branch);
+      const pushResult = this._pushBranch(
+        worktreePath,
+        branch,
+        baseInfo.branch,
+      );
       if (!pushResult.success) {
         console.warn(
           `${TAG} cannot create PR — push failed: ${pushResult.error}`,
@@ -4377,25 +4671,25 @@ class TaskExecutor {
         // Still try to create PR in case agent already pushed
       }
 
-      // ── Step 1.5: Verify branch actually has a diff vs main ────────────
-      // If the branch is identical to main (0 file changes), skip PR creation.
+      // ── Step 1.5: Verify branch actually has a diff vs base ────────────
+      // If the branch is identical to base (0 file changes), skip PR creation.
       // This prevents empty PRs from being created when merge/rebase wiped changes.
       try {
         const diffResult = spawnSync(
           "git",
-          ["diff", "--name-only", "origin/main...HEAD"],
+          ["diff", "--name-only", `${baseInfo.remoteRef}...HEAD`],
           { cwd: worktreePath, encoding: "utf8", timeout: 15_000 },
         );
         const changedFiles = (diffResult.stdout || "").trim();
         if (diffResult.status === 0 && changedFiles.length === 0) {
           console.warn(
-            `${TAG} branch ${branch} has 0 file changes vs main — skipping PR creation (would be empty)`,
+            `${TAG} branch ${branch} has 0 file changes vs ${baseInfo.branch} — skipping PR creation (would be empty)`,
           );
           return null;
         }
         const fileCount = changedFiles.split("\n").filter(Boolean).length;
         console.log(
-          `${TAG} branch ${branch} has ${fileCount} changed file(s) vs main`,
+          `${TAG} branch ${branch} has ${fileCount} changed file(s) vs ${baseInfo.branch}`,
         );
       } catch {
         // If diff check fails, continue with PR creation anyway
@@ -4447,7 +4741,7 @@ class TaskExecutor {
           "--head",
           branch,
           "--base",
-          "main",
+          baseInfo.branch,
         ],
         {
           cwd: worktreePath,
@@ -4638,6 +4932,11 @@ export function loadExecutorOptionsFromConfig() {
     },
     repoRoot: config.repoRoot || process.cwd(),
     repoSlug: config.repoSlug || "",
+    branchRouting: config.branchRouting || null,
+    defaultTargetBranch:
+      config.branchRouting?.defaultBranch ||
+      process.env.VK_TARGET_BRANCH ||
+      "origin/main",
     agentPrompts: config.agentPrompts || {},
   };
 }

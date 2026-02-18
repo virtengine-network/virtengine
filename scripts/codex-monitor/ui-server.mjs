@@ -10,6 +10,7 @@ import { connect as netConnect } from "node:net";
 import { resolve, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { arch as osArch, platform as osPlatform } from "node:os";
+import Ajv2020 from "ajv/dist/2020.js";
 
 function getLocalLanIp() {
   const nets = networkInterfaces();
@@ -69,6 +70,96 @@ const uiRoot = resolve(__dirname, "ui");
 const statusPath = resolve(repoRoot, ".cache", "ve-orchestrator-status.json");
 const logsDir = resolve(__dirname, "logs");
 const agentLogsDir = resolve(repoRoot, ".cache", "agent-logs");
+const CONFIG_SCHEMA_PATH = resolve(__dirname, "codex-monitor.schema.json");
+let _configSchema = null;
+let _configValidator = null;
+
+function getConfigSchema() {
+  if (_configSchema) return _configSchema;
+  try {
+    const raw = readFileSync(CONFIG_SCHEMA_PATH, "utf8");
+    _configSchema = JSON.parse(raw);
+  } catch {
+    _configSchema = null;
+  }
+  return _configSchema;
+}
+
+function getConfigValidator() {
+  if (_configValidator) return _configValidator;
+  const schema = getConfigSchema();
+  if (!schema) return null;
+  try {
+    const ajv = new Ajv2020({ allErrors: true, strict: false, allowUnionTypes: true });
+    _configValidator = ajv.compile(schema);
+  } catch {
+    _configValidator = null;
+  }
+  return _configValidator;
+}
+
+function toCamelCaseFromEnv(key) {
+  const parts = String(key || "").toLowerCase().split("_").filter(Boolean);
+  return parts
+    .map((part, idx) => (idx === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join("");
+}
+
+function coerceSettingValue(def, value) {
+  if (!def) return value;
+  if (def.type === "number") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : value;
+  }
+  if (def.type === "boolean") {
+    if (typeof value === "boolean") return value;
+    const normalized = String(value).toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+  }
+  return value;
+}
+
+function getSchemaProperty(schema, pathParts) {
+  let current = schema;
+  for (const part of pathParts) {
+    if (!current || !current.properties) return null;
+    current = current.properties[part];
+  }
+  return current || null;
+}
+
+function mapEnvKeyToConfigPath(key, schema) {
+  if (!schema?.properties) return null;
+  const envKey = String(key || "").toUpperCase();
+  const rootKey = toCamelCaseFromEnv(envKey);
+  if (schema.properties[rootKey]) return [rootKey];
+  if (envKey.startsWith("KANBAN_") && schema.properties.kanban?.properties) {
+    const rest = envKey.slice("KANBAN_".length);
+    const sub = toCamelCaseFromEnv(rest);
+    if (schema.properties.kanban.properties[sub]) return ["kanban", sub];
+  }
+  if (envKey.startsWith("GITHUB_PROJECT_")) {
+    const projectSchema = schema.properties.kanban?.properties?.github?.properties?.project?.properties;
+    const rest = envKey.slice("GITHUB_PROJECT_".length);
+    const sub = toCamelCaseFromEnv(rest);
+    if (projectSchema?.[sub]) return ["kanban", "github", "project", sub];
+  }
+  return null;
+}
+
+function setConfigPathValue(obj, pathParts, value) {
+  let cursor = obj;
+  for (let i = 0; i < pathParts.length; i += 1) {
+    const part = pathParts[i];
+    if (i === pathParts.length - 1) {
+      cursor[part] = value;
+      return;
+    }
+    if (!cursor[part] || typeof cursor[part] !== "object") cursor[part] = {};
+    cursor = cursor[part];
+  }
+}
 
 // Read port lazily — .env may not be loaded at module import time
 function getDefaultPort() {
@@ -212,6 +303,71 @@ function updateEnvFile(changes) {
 
   writeFileSync(envPath, lines.join('\n'), 'utf8');
   return Array.from(updated);
+}
+
+function validateConfigSchemaChanges(changes) {
+  try {
+    const schema = getConfigSchema();
+    const validator = getConfigValidator();
+    if (!schema || !validator) return {};
+
+    const configPath = resolve(__dirname, "codex-monitor.config.json");
+    let configData = {};
+    if (existsSync(configPath)) {
+      try {
+        const raw = readFileSync(configPath, "utf8");
+        configData = JSON.parse(raw);
+      } catch {
+        configData = {};
+      }
+    }
+
+    const candidate = JSON.parse(JSON.stringify(configData || {}));
+    const pathMap = new Map();
+    for (const [key, value] of Object.entries(changes)) {
+      const pathParts = mapEnvKeyToConfigPath(key, schema);
+      if (!pathParts) continue;
+      const propSchema = getSchemaProperty(schema, pathParts);
+      if (!propSchema) continue;
+      const def = SETTINGS_SCHEMA.find((s) => s.key === key);
+      const coerced = coerceSettingValue(def, value);
+      setConfigPathValue(candidate, pathParts, coerced);
+      pathMap.set(pathParts.join("."), key);
+    }
+
+    if (pathMap.size === 0) return {};
+    const valid = validator(candidate);
+    if (valid) return {};
+
+    const fieldErrors = {};
+    const errors = validator.errors || [];
+    for (const err of errors) {
+      const path = String(err.instancePath || "").replace(/^\//, "");
+      if (!path) continue;
+      const parts = path.split("/").filter(Boolean);
+      let envKey = pathMap.get(parts.join("."));
+      if (!envKey) {
+        for (let i = parts.length; i > 0; i -= 1) {
+          const candidatePath = parts.slice(0, i).join(".");
+          if (pathMap.has(candidatePath)) {
+            envKey = pathMap.get(candidatePath);
+            break;
+          }
+        }
+      }
+      if (envKey && !fieldErrors[envKey]) {
+        fieldErrors[envKey] = err.message || "Invalid value";
+      }
+    }
+    if (Object.keys(fieldErrors).length === 0) {
+      for (const envKey of pathMap.values()) {
+        fieldErrors[envKey] = "Invalid value (config schema)";
+      }
+    }
+    return fieldErrors;
+  } catch {
+    return {};
+  }
 }
 
 // ── Simple rate limiter for mutation endpoints ──
@@ -1497,6 +1653,11 @@ function normalizeTagsInput(input) {
   return tags;
 }
 
+function normalizeBranchInput(input) {
+  const trimmed = String(input ?? "").trim();
+  return trimmed ? trimmed : null;
+}
+
 async function getLatestLogTail(lineCount) {
   const files = await readdir(logsDir).catch(() => []);
   const logFile = files
@@ -1831,6 +1992,13 @@ async function handleApi(req, res, url) {
       const tagsProvided = body && Object.prototype.hasOwnProperty.call(body, "tags");
       const tags = tagsProvided ? normalizeTagsInput(body?.tags) : undefined;
       const draftProvided = body && Object.prototype.hasOwnProperty.call(body, "draft");
+      const baseBranchProvided =
+        body &&
+        (Object.prototype.hasOwnProperty.call(body, "baseBranch") ||
+          Object.prototype.hasOwnProperty.call(body, "base_branch"));
+      const baseBranch = baseBranchProvided
+        ? normalizeBranchInput(body?.baseBranch ?? body?.base_branch)
+        : undefined;
       const patch = {
         status: body?.status,
         title: body?.title,
@@ -1838,13 +2006,15 @@ async function handleApi(req, res, url) {
         priority: body?.priority,
         ...(tagsProvided ? { tags } : {}),
         ...(draftProvided ? { draft: Boolean(body?.draft) } : {}),
+        ...(baseBranchProvided ? { baseBranch } : {}),
       };
       const hasPatch = Object.values(patch).some(
         (value) => typeof value === "string" && value.trim(),
       );
       const hasTags = Array.isArray(patch.tags);
       const hasDraft = typeof patch.draft === "boolean";
-      if (!hasPatch && !hasTags && !hasDraft) {
+      const hasBaseBranch = baseBranchProvided;
+      if (!hasPatch && !hasTags && !hasDraft && !hasBaseBranch) {
         jsonResponse(res, 400, {
           ok: false,
           error: "No update fields provided",
@@ -1879,6 +2049,13 @@ async function handleApi(req, res, url) {
       const tagsProvided = body && Object.prototype.hasOwnProperty.call(body, "tags");
       const tags = tagsProvided ? normalizeTagsInput(body?.tags) : undefined;
       const draftProvided = body && Object.prototype.hasOwnProperty.call(body, "draft");
+      const baseBranchProvided =
+        body &&
+        (Object.prototype.hasOwnProperty.call(body, "baseBranch") ||
+          Object.prototype.hasOwnProperty.call(body, "base_branch"));
+      const baseBranch = baseBranchProvided
+        ? normalizeBranchInput(body?.baseBranch ?? body?.base_branch)
+        : undefined;
       const patch = {
         title: body?.title,
         description: body?.description,
@@ -1886,13 +2063,15 @@ async function handleApi(req, res, url) {
         status: body?.status,
         ...(tagsProvided ? { tags } : {}),
         ...(draftProvided ? { draft: Boolean(body?.draft) } : {}),
+        ...(baseBranchProvided ? { baseBranch } : {}),
       };
       const hasPatch = Object.values(patch).some(
         (value) => typeof value === "string" && value.trim(),
       );
       const hasTags = Array.isArray(patch.tags);
       const hasDraft = typeof patch.draft === "boolean";
-      if (!hasPatch && !hasTags && !hasDraft) {
+      const hasBaseBranch = baseBranchProvided;
+      if (!hasPatch && !hasTags && !hasDraft && !hasBaseBranch) {
         jsonResponse(res, 400, {
           ok: false,
           error: "No edit fields provided",
@@ -1927,6 +2106,7 @@ async function handleApi(req, res, url) {
       const adapter = getKanbanAdapter();
       const tags = normalizeTagsInput(body?.tags);
       const wantsDraft = Boolean(body?.draft) || body?.status === "draft";
+      const baseBranch = normalizeBranchInput(body?.baseBranch ?? body?.base_branch);
       const taskData = {
         title: String(title).trim(),
         description: body?.description || "",
@@ -1934,9 +2114,11 @@ async function handleApi(req, res, url) {
         priority: body?.priority || undefined,
         ...(tags.length ? { tags } : {}),
         ...(tags.length ? { labels: tags } : {}),
+        ...(baseBranch ? { baseBranch } : {}),
         meta: {
           ...(tags.length ? { tags } : {}),
           ...(wantsDraft ? { draft: true } : {}),
+          ...(baseBranch ? { base_branch: baseBranch, baseBranch } : {}),
         },
       };
       const created = await adapter.createTask(projectId, taskData);
@@ -2807,6 +2989,10 @@ async function handleApi(req, res, url) {
         if (!result.valid) {
           fieldErrors[key] = result.error || "Invalid value";
         }
+      }
+      const schemaFieldErrors = validateConfigSchemaChanges(changes);
+      for (const [key, error] of Object.entries(schemaFieldErrors)) {
+        if (!fieldErrors[key]) fieldErrors[key] = error;
       }
       if (Object.keys(fieldErrors).length > 0) {
         jsonResponse(res, 400, {

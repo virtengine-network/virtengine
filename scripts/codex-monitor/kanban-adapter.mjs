@@ -77,6 +77,7 @@ const TAG = "[kanban]";
  * @property {string|null} assignee    Assigned user/agent.
  * @property {string|null} priority    "low"|"medium"|"high"|"critical".
  * @property {string|null} projectId   Parent project identifier.
+ * @property {string|null} baseBranch  Base/epic branch for PRs.
  * @property {string|null} branchName  Associated git branch.
  * @property {string|null} prNumber    Associated PR number.
  * @property {object}      meta        Backend-specific metadata.
@@ -274,6 +275,19 @@ class InternalAdapter {
     if (!task) return null;
     const tags = normalizeTags(task.tags || task.meta?.tags || []);
     const draft = Boolean(task.draft || task.meta?.draft || task.status === "draft");
+    const labelBag = []
+      .concat(Array.isArray(task.labels) ? task.labels : [])
+      .concat(Array.isArray(task.tags) ? task.tags : [])
+      .concat(Array.isArray(task.meta?.labels) ? task.meta.labels : [])
+      .concat(Array.isArray(task.meta?.tags) ? task.meta.tags : []);
+    const baseBranch = normalizeBranchName(
+      task.baseBranch ||
+        task.base_branch ||
+        task.meta?.baseBranch ||
+        task.meta?.base_branch ||
+        extractBaseBranchFromLabels(labelBag) ||
+        extractBaseBranchFromText(task.description || task.body || ""),
+    );
     return {
       id: String(task.id || ""),
       title: task.title || "",
@@ -284,6 +298,7 @@ class InternalAdapter {
       tags,
       draft,
       projectId: task.projectId || "internal",
+      baseBranch,
       branchName: task.branchName || null,
       prNumber: task.prNumber || null,
       prUrl: task.prUrl || null,
@@ -355,6 +370,7 @@ class InternalAdapter {
       throw new Error("[kanban] internal updateTask requires taskId");
     }
     const updates = {};
+    const baseBranch = resolveBaseBranchInput(patch);
     if (typeof patch.title === "string") updates.title = patch.title;
     if (typeof patch.description === "string") updates.description = patch.description;
     if (typeof patch.status === "string" && patch.status.trim()) {
@@ -370,11 +386,21 @@ class InternalAdapter {
         updates.status = patch.draft ? "draft" : "todo";
       }
     }
+    const current = getInternalTask(normalizedId);
+    if (baseBranch) {
+      updates.baseBranch = baseBranch;
+    }
     if (patch.meta && typeof patch.meta === "object") {
-      const current = getInternalTask(normalizedId);
       updates.meta = {
         ...(current?.meta || {}),
         ...patch.meta,
+        ...(baseBranch ? { base_branch: baseBranch, baseBranch } : {}),
+      };
+    } else if (baseBranch) {
+      updates.meta = {
+        ...(current?.meta || {}),
+        base_branch: baseBranch,
+        baseBranch,
       };
     }
     const updated = patchInternalTask(normalizedId, updates);
@@ -388,6 +414,7 @@ class InternalAdapter {
     const id = String(taskData.id || randomUUID());
     const tags = normalizeTags(taskData.tags || taskData.labels || []);
     const draft = Boolean(taskData.draft || taskData.status === "draft");
+    const baseBranch = resolveBaseBranchInput(taskData);
     const created = addInternalTask({
       id,
       title: taskData.title || "Untitled task",
@@ -398,10 +425,12 @@ class InternalAdapter {
       tags,
       draft,
       projectId: taskData.projectId || projectId || "internal",
+      baseBranch,
       meta: {
         ...(taskData.meta || {}),
         ...(tags.length ? { tags } : {}),
         ...(draft ? { draft: true } : {}),
+        ...(baseBranch ? { base_branch: baseBranch, baseBranch } : {}),
       },
     });
     if (!created) {
@@ -466,10 +495,75 @@ function normalizeTags(raw) {
   return normalizeLabels(raw);
 }
 
+const UPSTREAM_LABEL_REGEX =
+  /^(?:upstream|base|target)(?:_branch)?[:=]\s*([A-Za-z0-9._/-]+)$/i;
+
+function normalizeBranchName(value) {
+  if (!value) return null;
+  const trimmed = String(value || "").trim();
+  return trimmed ? trimmed : null;
+}
+
+function isUpstreamLabel(label) {
+  if (!label) return false;
+  return UPSTREAM_LABEL_REGEX.test(String(label || "").trim());
+}
+
+function extractBaseBranchFromLabels(labels) {
+  if (!Array.isArray(labels)) return null;
+  for (const label of labels) {
+    const match = String(label || "").trim().match(UPSTREAM_LABEL_REGEX);
+    if (match?.[1]) return normalizeBranchName(match[1]);
+  }
+  return null;
+}
+
+function extractBaseBranchFromText(text) {
+  if (!text) return null;
+  const match = String(text || "").match(
+    /\b(?:upstream|base|target)(?:_branch| branch)?\s*[:=]\s*([A-Za-z0-9._/-]+)/i,
+  );
+  if (!match?.[1]) return null;
+  return normalizeBranchName(match[1]);
+}
+
+function resolveBaseBranchInput(payload) {
+  if (!payload) return null;
+  const candidate =
+    payload.base_branch ||
+    payload.baseBranch ||
+    payload.upstream_branch ||
+    payload.upstreamBranch ||
+    payload.upstream ||
+    payload.target_branch ||
+    payload.targetBranch ||
+    payload.base ||
+    payload.target;
+  return normalizeBranchName(candidate);
+}
+
+function upsertBaseBranchMarker(text, baseBranch) {
+  const branch = normalizeBranchName(baseBranch);
+  if (!branch) return String(text || "");
+  const source = String(text || "");
+  const pattern =
+    /\b(?:upstream|base|target)(?:_branch| branch)?\s*[:=]\s*([A-Za-z0-9._/-]+)/i;
+  if (pattern.test(source)) {
+    return source.replace(pattern, `base_branch: ${branch}`);
+  }
+  const separator = source.trim().length ? "\n\n" : "";
+  return `${source}${separator}base_branch: ${branch}`.trim();
+}
+
 function extractTagsFromLabels(labels, extraSystem = []) {
   const normalized = normalizeLabels(labels);
   const extra = new Set(normalizeLabels(extraSystem));
-  return normalized.filter((label) => !SYSTEM_LABEL_KEYS.has(label) && !extra.has(label));
+  return normalized.filter(
+    (label) =>
+      !SYSTEM_LABEL_KEYS.has(label) &&
+      !extra.has(label) &&
+      !isUpstreamLabel(label),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -631,6 +725,7 @@ class VKAdapter {
   async updateTask(taskId, patch = {}) {
     const fetchVk = await this._getFetchVk();
     const body = {};
+    const baseBranch = resolveBaseBranchInput(patch);
     if (typeof patch.status === "string" && patch.status.trim()) {
       body.status = patch.status.trim();
     }
@@ -650,6 +745,9 @@ class VKAdapter {
       body.draft = patch.draft;
       if (!patch.status) body.status = patch.draft ? "draft" : "todo";
     }
+    if (baseBranch) {
+      body.base_branch = baseBranch;
+    }
     if (Object.keys(body).length === 0) {
       return this.getTask(taskId);
     }
@@ -665,11 +763,13 @@ class VKAdapter {
     const fetchVk = await this._getFetchVk();
     const tags = normalizeTags(taskData?.tags || taskData?.labels || []);
     const draft = Boolean(taskData?.draft || taskData?.status === "draft");
+    const baseBranch = resolveBaseBranchInput(taskData);
     const payload = {
       ...taskData,
       status: draft ? "draft" : taskData?.status,
       ...(tags.length ? { tags } : {}),
       ...(draft ? { draft: true } : {}),
+      ...(baseBranch ? { base_branch: baseBranch } : {}),
     };
     // Use /api/tasks with project_id in body instead of
     // /api/projects/:id/tasks which gets caught by the SPA catch-all.
@@ -695,6 +795,16 @@ class VKAdapter {
     if (!raw) return null;
     const tags = normalizeTags(raw.tags || raw.labels || raw.meta?.tags || []);
     const draft = Boolean(raw.draft || raw.isDraft || raw.status === "draft");
+    const baseBranch = normalizeBranchName(
+      raw.base_branch ||
+        raw.baseBranch ||
+        raw.upstream_branch ||
+        raw.upstream ||
+        raw.target_branch ||
+        raw.targetBranch ||
+        raw.meta?.base_branch ||
+        raw.meta?.baseBranch,
+    );
     return {
       id: raw.id || raw.task_id || "",
       title: raw.title || raw.name || "",
@@ -705,6 +815,7 @@ class VKAdapter {
       tags,
       draft,
       projectId: raw.project_id || projectId,
+      baseBranch,
       branchName: raw.branch_name || raw.branchName || null,
       prNumber: raw.pr_number || raw.prNumber || null,
       meta: raw,
@@ -1032,6 +1143,10 @@ class GitHubIssuesAdapter {
     );
     const labelStatus = statusFromLabels(labels);
     const tags = extractTagsFromLabels(labels, this._taskScopeLabels || []);
+    const body = content.body || "";
+    const baseBranch = normalizeBranchName(
+      extractBaseBranchFromLabels(labels) || extractBaseBranchFromText(body),
+    );
 
     // Determine status from project Status field value
     const projectStatus =
@@ -1060,7 +1175,6 @@ class GitHubIssuesAdapter {
     };
 
     // Extract branch/PR from body if available
-    const body = content.body || "";
     const branchMatch = body.match(/branch:\s*`?([^\s`]+)`?/i);
     const prMatch = body.match(/pr:\s*#?(\d+)/i);
 
@@ -1091,6 +1205,7 @@ class GitHubIssuesAdapter {
       tags,
       draft: labelSet.has("draft") || status === "draft",
       projectId: `${this._owner}/${this._repo}`,
+      baseBranch,
       branchName: branchMatch?.[1] || null,
       prNumber: prMatch?.[1] || null,
       meta: {
@@ -1103,6 +1218,7 @@ class GitHubIssuesAdapter {
         assignees,
         task_url: issueUrl,
         tags,
+        ...(baseBranch ? { base_branch: baseBranch, baseBranch } : {}),
         codex: codexMeta,
         projectNumber: null, // set by caller
         projectItemId: projectItem.id || null,
@@ -2001,12 +2117,12 @@ class GitHubIssuesAdapter {
     if (hasEditArgs) {
       await this._gh(editArgs, { parseJson: false });
     }
-    if (
+    const baseBranch = resolveBaseBranchInput(patch);
+    const wantsTags =
       Array.isArray(patch.tags) ||
       Array.isArray(patch.labels) ||
-      typeof patch.tags === "string"
-    ) {
-      const desired = normalizeTags(patch.tags ?? patch.labels);
+      typeof patch.tags === "string";
+    if (wantsTags || baseBranch) {
       const issue = await this._gh([
         "issue",
         "view",
@@ -2023,10 +2139,31 @@ class GitHubIssuesAdapter {
         ...SYSTEM_LABEL_KEYS,
         ...normalizeLabels(this._taskScopeLabels || []),
       ]);
-      const currentTags = currentLabels.filter((label) => !systemLabels.has(label));
+      const currentTags = currentLabels.filter(
+        (label) => !systemLabels.has(label) && !isUpstreamLabel(label),
+      );
+      const desiredTags = wantsTags
+        ? normalizeTags(patch.tags ?? patch.labels)
+        : currentTags;
+      const nextLabels = new Set(
+        currentLabels.filter(
+          (label) => systemLabels.has(label) || isUpstreamLabel(label),
+        ),
+      );
+      for (const label of desiredTags) nextLabels.add(label);
+      if (baseBranch) {
+        const upstreamLabel = `base:${baseBranch}`.toLowerCase();
+        for (const label of [...nextLabels]) {
+          if (isUpstreamLabel(label)) nextLabels.delete(label);
+        }
+        nextLabels.add(upstreamLabel);
+      }
+      const desired = [...nextLabels];
       const desiredSet = new Set(desired);
-      const toAdd = desired.filter((label) => !currentTags.includes(label));
-      const toRemove = currentTags.filter((label) => !desiredSet.has(label));
+      const toAdd = desired.filter((label) => !currentLabels.includes(label));
+      const toRemove = currentLabels.filter(
+        (label) => !desiredSet.has(label),
+      );
       if (toAdd.length || toRemove.length) {
         const labelArgs = [
           "issue",
@@ -2166,6 +2303,7 @@ class GitHubIssuesAdapter {
       ...(taskData.labels || []),
       ...(taskData.tags || []),
     ]);
+    const baseBranch = resolveBaseBranchInput(taskData);
     const labelsToApply = new Set(requestedLabels);
     labelsToApply.add(
       String(this._canonicalTaskLabel || "codex-monitor").toLowerCase(),
@@ -2174,6 +2312,7 @@ class GitHubIssuesAdapter {
     if (requestedStatus === "inprogress") labelsToApply.add("inprogress");
     if (requestedStatus === "inreview") labelsToApply.add("inreview");
     if (requestedStatus === "blocked") labelsToApply.add("blocked");
+    if (baseBranch) labelsToApply.add(`base:${baseBranch}`.toLowerCase());
       for (const label of labelsToApply) {
         await this._ensureLabelExists(label);
       }
@@ -2201,6 +2340,7 @@ class GitHubIssuesAdapter {
       ...(taskData.labels || []),
       ...(taskData.tags || []),
     ]);
+    const baseBranch = resolveBaseBranchInput(taskData);
     const labelsToApply = new Set(requestedLabels);
     labelsToApply.add(
       String(this._canonicalTaskLabel || "codex-monitor").toLowerCase(),
@@ -2210,6 +2350,7 @@ class GitHubIssuesAdapter {
     if (requestedStatus === "inprogress") labelsToApply.add("inprogress");
     if (requestedStatus === "inreview") labelsToApply.add("inreview");
     if (requestedStatus === "blocked") labelsToApply.add("blocked");
+    if (baseBranch) labelsToApply.add(`base:${baseBranch}`.toLowerCase());
 
     for (const label of labelsToApply) {
       await this._ensureLabelExists(label);
@@ -2808,6 +2949,10 @@ To re-enable codex-monitor for this task, remove the \`${this._codexLabels.ignor
     // Extract branch name from issue body if present
     const branchMatch = (issue.body || "").match(/branch:\s*`?([^\s`]+)`?/i);
     const prMatch = (issue.body || "").match(/pr:\s*#?(\d+)/i);
+    const baseBranch = normalizeBranchName(
+      extractBaseBranchFromLabels(labels) ||
+        extractBaseBranchFromText(issue.body || ""),
+    );
 
     return {
       id: String(issue.number || ""),
@@ -2823,12 +2968,14 @@ To re-enable codex-monitor for this task, remove the \`${this._codexLabels.ignor
       tags,
       draft: labelSet.has("draft") || status === "draft",
       projectId: `${this._owner}/${this._repo}`,
+      baseBranch,
       branchName: branchMatch?.[1] || null,
       prNumber: prMatch?.[1] || null,
       meta: {
         ...issue,
         task_url: issue.url || null,
         tags,
+        ...(baseBranch ? { base_branch: baseBranch, baseBranch } : {}),
         codex: codexMeta,
       },
       taskUrl: issue.url || null,
@@ -3099,6 +3246,9 @@ class JiraAdapter {
     const description = this._commentToText(fields.description);
     const branchMatch = description.match(/branch:\s*`?([^\s`]+)`?/i);
     const prMatch = description.match(/pr:\s*#?(\d+)/i);
+    const baseBranch = normalizeBranchName(
+      extractBaseBranchFromLabels(labels) || extractBaseBranchFromText(description),
+    );
     const issueKey = String(issue?.key || "");
     let status = this._normalizeJiraStatus(fields.status);
     if (labelSet.has("draft")) status = "draft";
@@ -3136,6 +3286,7 @@ class JiraAdapter {
       tags,
       draft: labelSet.has("draft") || status === "draft",
       projectId: fields.project?.key || null,
+      baseBranch,
       branchName: branchMatch?.[1] || null,
       prNumber: prMatch?.[1] || null,
       taskUrl: issueKey ? `${this._baseUrl}/browse/${issueKey}` : null,
@@ -3146,6 +3297,7 @@ class JiraAdapter {
         labels,
         fields: normalizedFieldValues,
         tags,
+        ...(baseBranch ? { base_branch: baseBranch, baseBranch } : {}),
         codex: codexMeta,
       },
       backend: "jira",
@@ -3588,6 +3740,7 @@ class JiraAdapter {
   async updateTask(taskId, patch = {}) {
     const issueKey = this._validateIssueKey(taskId);
     const fields = {};
+    const baseBranch = resolveBaseBranchInput(patch);
     if (typeof patch.title === "string") {
       fields.summary = patch.title;
     }
@@ -3601,18 +3754,25 @@ class JiraAdapter {
       Array.isArray(patch.tags) ||
       Array.isArray(patch.labels) ||
       typeof patch.tags === "string";
+    let fetchedIssue = null;
+    if (wantsTags || typeof patch.draft === "boolean" || baseBranch) {
+      fetchedIssue = await this._fetchIssue(issueKey);
+    }
     if (wantsTags || typeof patch.draft === "boolean") {
-      const issue = await this._fetchIssue(issueKey);
-      const currentLabels = normalizeLabels(issue?.fields?.labels || []);
+      const currentLabels = normalizeLabels(fetchedIssue?.fields?.labels || []);
       const systemLabels = new Set([
         ...SYSTEM_LABEL_KEYS,
         ...normalizeLabels(this._taskScopeLabels || []),
       ]);
       const desiredTags = wantsTags
         ? normalizeTags(patch.tags ?? patch.labels)
-        : currentLabels.filter((label) => !systemLabels.has(label));
+        : currentLabels.filter(
+            (label) => !systemLabels.has(label) && !isUpstreamLabel(label),
+          );
       const nextLabels = new Set(
-        currentLabels.filter((label) => systemLabels.has(label)),
+        currentLabels.filter(
+          (label) => systemLabels.has(label) || isUpstreamLabel(label),
+        ),
       );
       for (const label of desiredTags) nextLabels.add(label);
       if (typeof patch.draft === "boolean") {
@@ -3620,6 +3780,11 @@ class JiraAdapter {
         else nextLabels.delete("draft");
       }
       fields.labels = [...nextLabels].map((label) => this._sanitizeJiraLabel(label));
+    }
+    if (baseBranch && !patch.description) {
+      const currentDesc = this._commentToText(fetchedIssue?.fields?.description);
+      const nextDesc = upsertBaseBranchMarker(currentDesc, baseBranch);
+      fields.description = this._textToAdf(nextDesc);
     }
     if (patch.assignee) {
       fields.assignee = { accountId: String(patch.assignee) };
@@ -3650,6 +3815,7 @@ class JiraAdapter {
       );
     }
     const requestedStatus = normaliseStatus(taskData.status || "todo");
+    const baseBranch = resolveBaseBranchInput(taskData);
     const issueTypeName =
       taskData.issueType ||
       taskData.issue_type ||
@@ -3680,10 +3846,14 @@ class JiraAdapter {
     if (requestedStatus === "draft" && !labels.includes("draft")) {
       labels.push("draft");
     }
+    const descriptionText = upsertBaseBranchMarker(
+      taskData.description || "",
+      baseBranch,
+    );
     const fields = {
       project: { key: projectKey },
       summary: taskData.title || "New task",
-      description: this._textToAdf(taskData.description || ""),
+      description: this._textToAdf(descriptionText),
       issuetype: {
         name: issueTypeName,
       },

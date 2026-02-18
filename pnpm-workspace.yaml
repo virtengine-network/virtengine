@@ -3,3 +3,9 @@ packages:
   - 'lib/capture'
   - 'lib/admin'
   - 'portal'
+
+onlyBuiltDependencies:
+  - esbuild
+  - msw
+  - sharp
+  - unrs-resolver

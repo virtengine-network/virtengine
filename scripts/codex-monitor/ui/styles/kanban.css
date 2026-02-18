@@ -172,6 +172,18 @@
   text-overflow: ellipsis;
 }
 
+.kanban-card-base {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  opacity: 0.8;
+}
+
+.kanban-card-base code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+
 .kanban-card-tags {
   display: flex;
   flex-wrap: wrap;

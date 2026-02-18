@@ -144,6 +144,7 @@ function defaultTask(overrides = {}) {
     tags: [],
     draft: false,
     projectId: null,
+    baseBranch: null,
     branchName: null,
     prNumber: null,
     prUrl: null,

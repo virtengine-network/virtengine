@@ -69,6 +69,17 @@ function getTaskTags(task) {
   return raw.filter((tag) => String(tag || "").trim().toLowerCase() !== "draft");
 }
 
+function getTaskBaseBranch(task) {
+  if (!task) return "";
+  return (
+    task.baseBranch ||
+    task.base_branch ||
+    task.meta?.baseBranch ||
+    task.meta?.base_branch ||
+    ""
+  );
+}
+
 /* ─── Derived column data ─── */
 const columnData = computed(() => {
   const tasks = tasksData.value || [];
@@ -267,6 +278,7 @@ function KanbanCard({ task, onOpen }) {
   const priorityColor = PRIORITY_COLORS[task.priority] || null;
   const priorityLabel = PRIORITY_LABELS[task.priority] || null;
   const tags = getTaskTags(task);
+  const baseBranch = getTaskBaseBranch(task);
 
   return html`
     <div
@@ -286,6 +298,9 @@ function KanbanCard({ task, onOpen }) {
       <div class="kanban-card-title">${truncate(task.title || "(untitled)", 80)}</div>
       ${task.description && html`
         <div class="kanban-card-desc">${truncate(task.description, 72)}</div>
+      `}
+      ${baseBranch && html`
+        <div class="kanban-card-base">Base: <code>${truncate(baseBranch, 24)}</code></div>
       `}
       ${tags.length > 0 && html`
         <div class="kanban-card-tags">

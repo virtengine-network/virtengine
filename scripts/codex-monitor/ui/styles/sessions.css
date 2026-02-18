@@ -89,8 +89,8 @@
 /* ═══ Session List ═══ */
 .session-list {
   background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   display: flex;
@@ -222,13 +222,20 @@
   display: flex;
   flex-direction: column;
   background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   min-height: 400px;
   max-height: 600px;
   overflow: hidden;
+}
+
+@media (min-width: 1024px) {
+  .chat-view {
+    max-height: none;
+    min-height: 560px;
+  }
 }
 
 .chat-view.chat-empty-state {
@@ -327,7 +334,7 @@
   background: rgba(56, 189, 248, 0.08);
   border: 1px dashed rgba(56, 189, 248, 0.3);
   color: var(--text-primary);
-  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-family: var(--font-mono);
 }
 
 .chat-system-text {
@@ -374,7 +381,7 @@
 }
 
 .chat-code-block code {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   color: #e2e8f0;
 }
 
@@ -691,4 +698,18 @@ ul.md-list li::before {
 
 .diff-line-text {
   display: inline;
+}
+
+@media (min-width: 1024px) {
+  .app-shell[data-has-rail="true"] .session-split {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell[data-has-rail="true"] .session-split > .session-list {
+    display: none;
+  }
+
+  .app-shell[data-has-rail="true"] .session-detail {
+    min-height: 520px;
+  }
 }

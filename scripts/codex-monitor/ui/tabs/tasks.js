@@ -121,6 +121,7 @@ function normalizeTagInput(input) {
       .trim()
       .toLowerCase();
     if (!normalized || seen.has(normalized) || SYSTEM_TAGS.has(normalized)) continue;
+    if (/^(?:upstream|base|target)(?:_branch)?[:=]/i.test(normalized)) continue;
     seen.add(normalized);
     tags.push(normalized);
   }
@@ -139,6 +140,17 @@ function getTaskTags(task) {
       )
     : [];
   return normalizeTagInput(metaLabels);
+}
+
+function getTaskBaseBranch(task) {
+  if (!task) return "";
+  return (
+    task.baseBranch ||
+    task.base_branch ||
+    task.meta?.baseBranch ||
+    task.meta?.base_branch ||
+    ""
+  );
 }
 
 export function StartTaskModal({
@@ -230,6 +242,7 @@ export function StartTaskModal({
 export function TaskDetailModal({ task, onClose, onStart }) {
   const [title, setTitle] = useState(task?.title || "");
   const [description, setDescription] = useState(task?.description || "");
+  const [baseBranch, setBaseBranch] = useState(getTaskBaseBranch(task));
   const [status, setStatus] = useState(task?.status || "todo");
   const [priority, setPriority] = useState(task?.priority || "");
   const [tagsInput, setTagsInput] = useState(
@@ -243,6 +256,7 @@ export function TaskDetailModal({ task, onClose, onStart }) {
   useEffect(() => {
     setTitle(task?.title || "");
     setDescription(task?.description || "");
+    setBaseBranch(getTaskBaseBranch(task));
     setStatus(task?.status || "todo");
     setPriority(task?.priority || "");
     setTagsInput(getTaskTags(task).join(", "));
@@ -265,6 +279,7 @@ export function TaskDetailModal({ task, onClose, onStart }) {
                   ...t,
                   title,
                   description,
+                  baseBranch,
                   status: nextStatus,
                   priority: priority || null,
                   tags,
@@ -280,6 +295,7 @@ export function TaskDetailModal({ task, onClose, onStart }) {
               taskId: task.id,
               title,
               description,
+              baseBranch,
               status: nextStatus,
               priority,
               tags,
@@ -394,6 +410,12 @@ export function TaskDetailModal({ task, onClose, onStart }) {
           value=${description}
           onInput=${(e) => setDescription(e.target.value)}
         ></textarea>
+        <input
+          class="input"
+          placeholder="Base branch (optional, e.g. feature/xyz)"
+          value=${baseBranch}
+          onInput=${(e) => setBaseBranch(e.target.value)}
+        />
         <input
           class="input"
           placeholder="Tags (comma-separated)"
@@ -577,7 +599,7 @@ export function TasksTab() {
   const searchLower = searchVal.trim().toLowerCase();
   const visible = searchLower
     ? tasks.filter((t) =>
-        `${t.title || ""} ${t.description || ""} ${t.id || ""} ${getTaskTags(t).join(" ")}`
+        `${t.title || ""} ${t.description || ""} ${t.id || ""} ${getTaskBaseBranch(t)} ${getTaskTags(t).join(" ")}`
           .toLowerCase()
           .includes(searchLower),
       )
@@ -785,6 +807,7 @@ export function TasksTab() {
         "Title",
         "Status",
         "Priority",
+        "Base Branch",
         "Tags",
         "Draft",
         "Created",
@@ -796,6 +819,7 @@ export function TasksTab() {
         t.title || "",
         t.status || "",
         t.priority || "",
+        getTaskBaseBranch(t),
         getTaskTags(t).join(", "),
         t.draft || t.status === "draft" ? "true" : "false",
         t.created_at || "",
@@ -1070,6 +1094,12 @@ export function TasksTab() {
               ? truncate(task.description, 120)
               : "No description."}
           </div>
+          ${getTaskBaseBranch(task) &&
+          html`
+            <div class="meta-text">
+              Base: <code>${getTaskBaseBranch(task)}</code>
+            </div>
+          `}
           ${getTaskTags(task).length > 0 &&
           html`
             <div class="tag-row">
@@ -1171,6 +1201,7 @@ export function TasksTab() {
 function CreateTaskModalInline({ onClose }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
   const [priority, setPriority] = useState("medium");
   const [tagsInput, setTagsInput] = useState("");
   const [draft, setDraft] = useState(false);
@@ -1190,6 +1221,7 @@ function CreateTaskModalInline({ onClose }) {
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim(),
+          baseBranch: baseBranch.trim() || undefined,
           priority,
           tags,
           draft,
@@ -1216,7 +1248,7 @@ function CreateTaskModalInline({ onClose }) {
         tg.MainButton.offClick(handleSubmit);
       };
     }
-  }, [title, description, priority, tagsInput, draft]);
+  }, [title, description, baseBranch, priority, tagsInput, draft]);
 
   return html`
     <${Modal} title="New Task" onClose=${onClose}>
@@ -1234,6 +1266,12 @@ function CreateTaskModalInline({ onClose }) {
           value=${description}
           onInput=${(e) => setDescription(e.target.value)}
         ></textarea>
+        <input
+          class="input"
+          placeholder="Base branch (optional, e.g. feature/xyz)"
+          value=${baseBranch}
+          onInput=${(e) => setBaseBranch(e.target.value)}
+        />
         <input
           class="input"
           placeholder="Tags (comma-separated)"

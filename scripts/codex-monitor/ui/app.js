@@ -47,6 +47,13 @@ import { formatRelative } from "./modules/utils.js";
 import { ToastContainer } from "./components/shared.js";
 import { PullToRefresh } from "./components/forms.js";
 import {
+  SessionList,
+  loadSessions,
+  createSession,
+  selectedSessionId,
+  sessionsData,
+} from "./components/session-list.js";
+import {
   CommandPalette,
   useCommandPalette,
 } from "./components/command-palette.js";
@@ -228,14 +235,12 @@ function Header() {
   return html`
     <header class="app-header">
       <div class="app-header-left">
-        <div class="app-header-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        </div>
-        <div>
+        <div class="app-header-logo">${ICONS.zap}</div>
+        <div class="app-header-titles">
           <div class="app-header-title">VirtEngine</div>
-          ${user
-            ? html`<div class="app-header-user">${user.first_name}</div>`
-            : null}
+          <div class="app-header-subtitle">
+            ${TAB_CONFIG.find((tab) => tab.id === activeTab.value)?.label || "Control Center"}
+          </div>
         </div>
       </div>
       <div class="header-actions">
@@ -246,8 +251,111 @@ function Header() {
         ${freshnessLabel
           ? html`<div class="header-freshness" style="font-size:11px;opacity:0.55;margin-top:2px">${freshnessLabel}</div>`
           : null}
+        ${user
+          ? html`<div class="app-header-user">@${user.username || user.first_name}</div>`
+          : null}
       </div>
     </header>
+  `;
+}
+
+/* ═══════════════════════════════════════════════
+ *  Desktop Sidebar + Session Rail
+ * ═══════════════════════════════════════════════ */
+function SidebarNav() {
+  const user = getTelegramUser();
+  const isConn = connected.value;
+  return html`
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-logo">${ICONS.zap}</div>
+        <div>
+          <div class="sidebar-title">VirtEngine</div>
+          <div class="sidebar-subtitle">Control Center</div>
+        </div>
+      </div>
+      <div class="sidebar-actions">
+        <button class="btn btn-primary btn-block" onClick=${() => createSession({ type: "primary" })}>
+          + New Session
+        </button>
+        <button class="btn btn-ghost btn-block" onClick=${() => navigateTo("tasks")}>
+          View Tasks
+        </button>
+      </div>
+      <nav class="sidebar-nav">
+        ${TAB_CONFIG.map((tab) => {
+          const isActive = activeTab.value === tab.id;
+          const isHome = tab.id === "dashboard";
+          return html`
+            <button
+              key=${tab.id}
+              class="sidebar-nav-item ${isActive ? "active" : ""}"
+              onClick=${() =>
+                navigateTo(tab.id, {
+                  resetHistory: isHome,
+                  forceRefresh: isHome && isActive,
+                })}
+            >
+              ${ICONS[tab.icon]}
+              <span>${tab.label}</span>
+            </button>
+          `;
+        })}
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-status ${isConn ? "online" : "offline"}">
+          <span class="sidebar-status-dot"></span>
+          ${isConn ? "Connected" : "Offline"}
+        </div>
+        ${user
+          ? html`<div class="sidebar-user">@${user.username || user.first_name || "operator"}</div>`
+          : html`<div class="sidebar-user">Operator Console</div>`}
+      </div>
+    </aside>
+  `;
+}
+
+function SessionRail() {
+  const [showArchived, setShowArchived] = useState(false);
+  const sessions = sessionsData.value || [];
+  const activeCount = sessions.filter(
+    (s) => s.status === "active" || s.status === "running",
+  ).length;
+
+  useEffect(() => {
+    let mounted = true;
+    loadSessions();
+    const interval = setInterval(() => {
+      if (mounted) loadSessions();
+    }, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (selectedSessionId.value || sessions.length === 0) return;
+    const next =
+      sessions.find((s) => s.status === "active" || s.status === "running") ||
+      sessions[0];
+    if (next?.id) selectedSessionId.value = next.id;
+  }, [sessionsData.value, selectedSessionId.value]);
+
+  return html`
+    <aside class="session-rail">
+      <div class="rail-header">
+        <div class="rail-title">Sessions</div>
+        <div class="rail-meta">
+          ${activeCount} active · ${sessions.length} total
+        </div>
+      </div>
+      <${SessionList}
+        showArchived=${showArchived}
+        onToggleArchived=${setShowArchived}
+        defaultType="primary"
+      />
+    </aside>
   `;
 }
 
@@ -415,17 +523,24 @@ function App() {
   }, []);
 
   const CurrentTab = TAB_COMPONENTS[activeTab.value] || DashboardTab;
+  const showSessionRail = activeTab.value === "chat" || activeTab.value === "agents";
 
   return html`
-    <${Header} />
-    ${backendDown.value ? html`<${OfflineBanner} />` : null}
-    <${ToastContainer} />
-    <${CommandPalette} open=${paletteOpen} onClose=${paletteClose} />
-    <${PullToRefresh} onRefresh=${() => refreshTab(activeTab.value)}>
-      <main class="main-content" ref=${mainRef}>
-        <${CurrentTab} />
-      </main>
-    <//>
+    <div class="app-shell" data-tab=${activeTab.value} data-has-rail=${showSessionRail ? "true" : "false"}>
+      <${SidebarNav} />
+      ${showSessionRail ? html`<${SessionRail} />` : null}
+      <div class="app-main">
+        <${Header} />
+        ${backendDown.value ? html`<${OfflineBanner} />` : null}
+        <${ToastContainer} />
+        <${CommandPalette} open=${paletteOpen} onClose=${paletteClose} />
+        <${PullToRefresh} onRefresh=${() => refreshTab(activeTab.value)}>
+          <main class="main-content" ref=${mainRef}>
+            <${CurrentTab} />
+          </main>
+        <//>
+      </div>
+    </div>
     <${BottomNav} />
   `;
 }

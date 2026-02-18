@@ -3689,12 +3689,6 @@ async function isBranchMerged(branch, baseBranch) {
   try {
     const target = normalizeBranchName(baseBranch) || DEFAULT_TARGET_BRANCH;
 
-    const splitRemoteRef = (ref, defaultRemote = "origin") => {
-      const match = String(ref || "").match(/^([^/]+)\/(.+)$/);
-      if (match) return { remote: match[1], name: match[2] };
-      return { remote: defaultRemote, name: ref };
-    };
-
     const branchInfo = splitRemoteRef(normalizeBranchName(branch), "origin");
     const baseInfo = splitRemoteRef(target, "origin");
     const branchRef = `${branchInfo.remote}/${branchInfo.name}`;
@@ -3848,6 +3842,74 @@ function saveMergedTaskCache() {
 
 // Load cache on startup
 loadMergedTaskCache();
+
+/**
+ * Persistent cache for epic merge orchestration state.
+ * Keyed by `${head}::${base}` where head/base are normalized.
+ * @type {Map<string, object>}
+ */
+const epicMergeCache = new Map();
+
+const epicMergeCachePath = resolve(
+  config.cacheDir || resolve(config.repoRoot, ".cache"),
+  "epic-merge-cache.json",
+);
+
+let epicMergeCacheSaveTimer = null;
+
+function loadEpicMergeCache() {
+  try {
+    if (!existsSync(epicMergeCachePath)) return;
+    const raw = readFileSync(epicMergeCachePath, "utf8");
+    const parsed = JSON.parse(raw);
+    const entries = parsed?.entries || parsed || {};
+    for (const [key, value] of Object.entries(entries)) {
+      epicMergeCache.set(key, value || {});
+    }
+    if (epicMergeCache.size > 0) {
+      console.log(
+        `[monitor] Restored ${epicMergeCache.size} epic merge records`,
+      );
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+function saveEpicMergeCache() {
+  try {
+    const entries = {};
+    for (const [key, value] of epicMergeCache.entries()) {
+      entries[key] = value;
+    }
+    const payload = { entries };
+    writeFileSync(epicMergeCachePath, JSON.stringify(payload, null, 2), "utf8");
+  } catch {
+    /* best-effort */
+  }
+}
+
+function scheduleEpicMergeCacheSave() {
+  if (epicMergeCacheSaveTimer) return;
+  epicMergeCacheSaveTimer = setTimeout(() => {
+    epicMergeCacheSaveTimer = null;
+    saveEpicMergeCache();
+  }, 2000);
+}
+
+function updateEpicMergeCache(key, patch = {}) {
+  if (!key) return;
+  const existing = epicMergeCache.get(key) || {};
+  const next = {
+    ...existing,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  epicMergeCache.set(key, next);
+  scheduleEpicMergeCacheSave();
+}
+
+loadEpicMergeCache();
 
 // ── Recovery/Idle caches (persistent) ───────────────────────────────────────
 
@@ -4875,6 +4937,610 @@ async function reconcileTaskStatuses(reason = "manual") {
   return await checkMergedPRsAndUpdateTasks();
 }
 
+// ── Epic Branch Orchestration ───────────────────────────────────────────────
+
+const EPIC_COMPLETE_STATUSES = new Set(["done", "cancelled"]);
+
+function normalizeTaskStatusForEpic(status) {
+  return String(status || "").trim().toLowerCase();
+}
+
+function isEpicTaskComplete(task) {
+  const status = normalizeTaskStatusForEpic(task?.status);
+  if (!status) return false;
+  return EPIC_COMPLETE_STATUSES.has(status);
+}
+
+function buildEpicCacheKey(headBranch, baseBranch) {
+  const head = normalizeBranchName(headBranch) || "";
+  const base = normalizeBranchName(baseBranch) || "";
+  return `${head}::${base}`;
+}
+
+async function listTasksForEpicCheck(projectId) {
+  const backend = getActiveKanbanBackend();
+  const seen = new Map();
+
+  const addTasks = (tasks = []) => {
+    for (const task of tasks) {
+      const id = String(task?.id || task?.task_id || "");
+      if (!id) continue;
+      if (!seen.has(id)) seen.set(id, task);
+    }
+  };
+
+  try {
+    const primary = await listKanbanTasks(projectId, {});
+    addTasks(Array.isArray(primary) ? primary : []);
+  } catch (err) {
+    console.warn(
+      `[monitor] epic check failed to list tasks: ${err.message || err}`,
+    );
+  }
+
+  if (backend === "github") {
+    try {
+      const closed = await listKanbanTasks(projectId, { status: "done" });
+      addTasks(Array.isArray(closed) ? closed : []);
+    } catch (err) {
+      console.warn(
+        `[monitor] epic check failed to list closed tasks: ${err.message || err}`,
+      );
+    }
+  }
+
+  return [...seen.values()];
+}
+
+function groupTasksByEpicBranch(tasks) {
+  const groups = new Map();
+  for (const task of tasks) {
+    const resolved =
+      resolveUpstreamFromTask(task) ||
+      normalizeBranchName(task?.baseBranch || task?.base_branch) ||
+      DEFAULT_TARGET_BRANCH;
+    const baseBranch = normalizeBranchName(resolved) || DEFAULT_TARGET_BRANCH;
+    const key = normalizeBranchForCompare(baseBranch);
+    if (!key) continue;
+    if (!groups.has(key)) {
+      groups.set(key, { baseBranch, tasks: [] });
+    }
+    groups.get(key).tasks.push(task);
+  }
+  return groups;
+}
+
+function getRepoSlugForEpic() {
+  return (
+    repoSlug ||
+    process.env.GITHUB_REPOSITORY ||
+    (process.env.GITHUB_REPO_OWNER && process.env.GITHUB_REPO_NAME
+      ? `${process.env.GITHUB_REPO_OWNER}/${process.env.GITHUB_REPO_NAME}`
+      : null)
+  );
+}
+
+function createEpicMergeTitle(headName, baseName) {
+  return `Epic Merge: ${headName} → ${baseName}`;
+}
+
+function buildEpicMergeBody(tasks, headName, baseName) {
+  const lines = [
+    "## Epic Merge",
+    "",
+    `Epic branch: \`${headName}\``,
+    `Target branch: \`${baseName}\``,
+    "",
+    "Completed tasks:",
+  ];
+  const safeTasks = Array.isArray(tasks) ? tasks : [];
+  const maxList = 25;
+  const slice = safeTasks.slice(0, maxList);
+  for (const task of slice) {
+    const title = String(task?.title || task?.name || "Untitled task").trim();
+    const id = task?.id ? ` (${task.id})` : "";
+    lines.push(`- ${title}${id}`);
+  }
+  if (safeTasks.length > maxList) {
+    lines.push(`- ...and ${safeTasks.length - maxList} more`);
+  }
+  return lines.join("\n");
+}
+
+function summarizeEpicBranch(headBranch, baseBranch) {
+  const headInfo = splitRemoteRef(headBranch, "origin");
+  const baseInfo = splitRemoteRef(baseBranch, "origin");
+  return { headInfo, baseInfo };
+}
+
+function parseGhJsonResult(raw, fallback = []) {
+  try {
+    return JSON.parse(raw || "[]");
+  } catch {
+    return fallback;
+  }
+}
+
+function readEpicPrInfo(headBranch, baseBranch) {
+  const slug = getRepoSlugForEpic();
+  if (!slug || !ghAvailable()) return null;
+  const { headInfo, baseInfo } = summarizeEpicBranch(headBranch, baseBranch);
+  try {
+    const listCmd = `gh pr list --repo ${slug} --head "${headInfo.name}" --base "${baseInfo.name}" --state all --json number,state,url,mergedAt`;
+    const listResult = execSync(listCmd, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 20_000,
+      stdio: ["pipe", "pipe", "ignore"],
+    }).trim();
+    const entries = parseGhJsonResult(listResult, []);
+    if (!entries.length) return null;
+    const pr = entries[0];
+    let detail = {};
+    try {
+      const viewCmd = `gh pr view ${pr.number} --repo ${slug} --json number,state,url,mergeable,mergeable_state,mergeStateStatus,baseRefName,headRefName`;
+      const viewResult = execSync(viewCmd, {
+        cwd: repoRoot,
+        encoding: "utf8",
+        timeout: 20_000,
+        stdio: ["pipe", "pipe", "ignore"],
+      }).trim();
+      detail = parseGhJsonResult(viewResult, {});
+    } catch {
+      /* best-effort */
+    }
+    return { ...pr, ...detail };
+  } catch {
+    return null;
+  }
+}
+
+function detectPrConflicts(prInfo) {
+  if (!prInfo) return false;
+  return (
+    prInfo.mergeable === "CONFLICTING" ||
+    prInfo.mergeable === false ||
+    prInfo.mergeable_state === "dirty" ||
+    prInfo.mergeStateStatus === "DIRTY"
+  );
+}
+
+function detectFailedChecks(checks = []) {
+  return checks.some((check) => {
+    const state = String(check?.state || "").toUpperCase();
+    const conclusion = String(check?.conclusion || "").toUpperCase();
+    return (
+      state === "FAILURE" ||
+      conclusion === "FAILURE" ||
+      conclusion === "CANCELLED" ||
+      conclusion === "TIMED_OUT" ||
+      conclusion === "ACTION_REQUIRED"
+    );
+  });
+}
+
+async function readRequiredChecks(prNumber) {
+  const slug = getRepoSlugForEpic();
+  if (!slug || !ghAvailable() || !prNumber) return [];
+  try {
+    const checksCmd = `gh pr checks ${prNumber} --repo ${slug} --json name,state,conclusion --required`;
+    const checksResult = execSync(checksCmd, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 20_000,
+      stdio: ["pipe", "pipe", "ignore"],
+    }).trim();
+    return parseGhJsonResult(checksResult, []);
+  } catch {
+    return [];
+  }
+}
+
+async function createEpicMergePr(headBranch, baseBranch, tasks) {
+  const slug = getRepoSlugForEpic();
+  if (!slug || !ghAvailable()) return null;
+  const { headInfo, baseInfo } = summarizeEpicBranch(headBranch, baseBranch);
+  const title = createEpicMergeTitle(headInfo.name, baseInfo.name);
+  const body = buildEpicMergeBody(tasks, headInfo.name, baseInfo.name);
+  try {
+    const result = spawnSync(
+      "gh",
+      [
+        "pr",
+        "create",
+        "--repo",
+        slug,
+        "--head",
+        headInfo.name,
+        "--base",
+        baseInfo.name,
+        "--title",
+        title,
+        "--body",
+        body,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
+    if (result.status !== 0) {
+      const msg = result.stderr || result.stdout || "";
+      console.warn(
+        `[monitor] failed to create epic PR for ${headInfo.name}: ${String(msg).slice(0, 200)}`,
+      );
+      return null;
+    }
+    const output = (result.stdout || "").trim();
+    const url =
+      output.split(/\s+/).find((item) => item.startsWith("http")) || output;
+    return {
+      url: url || null,
+      title,
+      head: headInfo.name,
+      base: baseInfo.name,
+    };
+  } catch (err) {
+    const msg = err?.stderr || err?.message || String(err || "");
+    console.warn(
+      `[monitor] failed to create epic PR for ${headInfo.name}: ${msg.slice(0, 200)}`,
+    );
+    return null;
+  }
+}
+
+async function enableEpicAutoMerge(prNumber) {
+  const slug = getRepoSlugForEpic();
+  if (!slug || !ghAvailable() || !prNumber) return false;
+  try {
+    const cmd = `gh pr merge ${prNumber} --repo ${slug} --merge --auto`;
+    execSync(cmd, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 20_000,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureEpicConflictTask(
+  projectId,
+  tasks,
+  epicBranch,
+  baseBranch,
+  reason,
+  prInfo,
+) {
+  const epicName = splitRemoteRef(epicBranch, "origin").name;
+  const existing = (tasks || []).find((task) => {
+    const title = String(task?.title || "").toLowerCase();
+    const status = normalizeTaskStatusForEpic(task?.status);
+    if (EPIC_COMPLETE_STATUSES.has(status)) return false;
+    return (
+      title.includes("epic merge") &&
+      title.includes(epicName.toLowerCase()) &&
+      title.includes("resolve")
+    );
+  });
+  if (existing) return existing;
+
+  const prText = prInfo?.number ? `PR #${prInfo.number}` : "PR";
+  const prUrl = prInfo?.url ? `\n\n${prInfo.url}` : "";
+  const title = `[m] Resolve epic merge for ${epicName}`;
+  const description = [
+    `Epic merge needs manual intervention (${reason}).`,
+    "",
+    `Epic branch: ${epicBranch}`,
+    `Target branch: ${baseBranch}`,
+    `${prText} requires fixes.${prUrl}`,
+    "",
+    "## Implementation Steps",
+    "- Rebase or merge the target branch into the epic branch.",
+    "- Resolve conflicts and run required checks.",
+    "- Push updates to the epic branch and ensure the PR is clean.",
+    "",
+    "## Verification",
+    "- PR shows mergeable and required checks pass.",
+  ].join("\n");
+
+  return await createKanbanTask(projectId, {
+    title,
+    description,
+    status: "todo",
+    baseBranch: epicBranch,
+  });
+}
+
+function ensureEpicBranchAvailable(headBranch, baseBranch) {
+  const headInfo = splitRemoteRef(headBranch, "origin");
+  const baseInfo = splitRemoteRef(baseBranch, "origin");
+  const localRef = `refs/heads/${headInfo.name}`;
+  const localCheck = spawnSync("git", ["show-ref", "--verify", localRef], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  if (localCheck.status === 0) {
+    return headInfo.name;
+  }
+
+  let remoteExists = false;
+  try {
+    const remoteCheck = spawnSync(
+      "git",
+      ["ls-remote", "--heads", headInfo.remote, headInfo.name],
+      { cwd: repoRoot, encoding: "utf8", timeout: 8000 },
+    );
+    remoteExists =
+      remoteCheck.status === 0 && (remoteCheck.stdout || "").trim().length > 0;
+  } catch {
+    remoteExists = false;
+  }
+
+  if (remoteExists) {
+    spawnSync("git", ["fetch", headInfo.remote, headInfo.name, "--quiet"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 15000,
+    });
+    spawnSync("git", ["branch", headInfo.name, `${headInfo.remote}/${headInfo.name}`], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 8000,
+    });
+    return headInfo.name;
+  }
+
+  spawnSync("git", ["fetch", baseInfo.remote, baseInfo.name, "--quiet"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 15000,
+  });
+  const createRes = spawnSync(
+    "git",
+    ["branch", headInfo.name, `${baseInfo.remote}/${baseInfo.name}`],
+    { cwd: repoRoot, encoding: "utf8", timeout: 8000 },
+  );
+  if (createRes.status !== 0) {
+    const stderr = (createRes.stderr || "").trim();
+    console.warn(
+      `[monitor] failed to create epic branch ${headInfo.name} from ${baseInfo.remote}/${baseInfo.name}: ${stderr}`,
+    );
+    return headInfo.name;
+  }
+  spawnSync("git", ["push", "-u", headInfo.remote, headInfo.name], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
+  return headInfo.name;
+}
+
+async function syncEpicBranchWithDefault(epicBranch, defaultBranch) {
+  const headInfo = splitRemoteRef(epicBranch, "origin");
+  const baseInfo = splitRemoteRef(defaultBranch, "origin");
+
+  spawnSync("git", ["fetch", headInfo.remote, headInfo.name, "--quiet"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 15000,
+  });
+  spawnSync("git", ["fetch", baseInfo.remote, baseInfo.name, "--quiet"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 15000,
+  });
+
+  const behindRes = spawnSync(
+    "git",
+    ["rev-list", "--count", `${headInfo.remote}/${headInfo.name}..${baseInfo.remote}/${baseInfo.name}`],
+    { cwd: repoRoot, encoding: "utf8", timeout: 8000 },
+  );
+  const behindCount = Number((behindRes.stdout || "").trim());
+  if (!Number.isFinite(behindCount) || behindCount <= 0) {
+    return { synced: false, behind: 0 };
+  }
+
+  ensureEpicBranchAvailable(epicBranch, defaultBranch);
+  const worktreeKey = `epic-sync:${headInfo.name}`;
+  const worktree = await acquireWorktree(headInfo.name, worktreeKey, {
+    owner: "epic-sync",
+  });
+
+  try {
+    const headBefore = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: worktree.path,
+      encoding: "utf8",
+      timeout: 5000,
+    }).stdout?.trim();
+
+    const mergeRes = spawnSync(
+      "git",
+      ["merge", "--no-edit", `${baseInfo.remote}/${baseInfo.name}`],
+      { cwd: worktree.path, encoding: "utf8", timeout: 120_000 },
+    );
+    if (mergeRes.status !== 0) {
+      spawnSync("git", ["merge", "--abort"], {
+        cwd: worktree.path,
+        encoding: "utf8",
+        timeout: 10_000,
+      });
+      return { synced: false, behind: behindCount, conflict: true };
+    }
+
+    const headAfter = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: worktree.path,
+      encoding: "utf8",
+      timeout: 5000,
+    }).stdout?.trim();
+
+    if (headAfter && headBefore && headAfter !== headBefore) {
+      spawnSync("git", ["push", headInfo.remote, headInfo.name], {
+        cwd: worktree.path,
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      return { synced: true, behind: behindCount };
+    }
+
+    return { synced: false, behind: behindCount };
+  } finally {
+    await releaseWorktree(worktreeKey);
+  }
+}
+
+async function checkEpicBranches(reason = "interval") {
+  const backend = getActiveKanbanBackend();
+  const projectId =
+    backend === "vk"
+      ? await findVkProjectId()
+      : getConfiguredKanbanProjectId(backend);
+  if (!projectId) return;
+
+  const tasks = await listTasksForEpicCheck(projectId);
+  if (!tasks.length) return;
+
+  const groups = groupTasksByEpicBranch(tasks);
+  const defaultKey = normalizeBranchForCompare(DEFAULT_TARGET_BRANCH);
+
+  for (const [key, group] of groups) {
+    if (!group?.tasks?.length) continue;
+    if (defaultKey && key === defaultKey) continue;
+
+    const epicBranch = group.baseBranch;
+    const epicTasks = group.tasks;
+    const incomplete = epicTasks.filter((task) => !isEpicTaskComplete(task));
+    const cacheKey = buildEpicCacheKey(epicBranch, DEFAULT_TARGET_BRANCH);
+
+    if (incomplete.length > 0) {
+      const syncResult = await syncEpicBranchWithDefault(
+        epicBranch,
+        DEFAULT_TARGET_BRANCH,
+      );
+      if (syncResult?.conflict) {
+        updateEpicMergeCache(cacheKey, {
+          status: "sync-conflict",
+          head: epicBranch,
+          base: DEFAULT_TARGET_BRANCH,
+        });
+        await ensureEpicConflictTask(
+          projectId,
+          tasks,
+          epicBranch,
+          DEFAULT_TARGET_BRANCH,
+          "sync conflict",
+          null,
+        );
+        void sendTelegramMessage(
+          `⚠️ Epic sync conflict on ${epicBranch} → ${DEFAULT_TARGET_BRANCH} (${reason})`,
+        );
+      }
+      continue;
+    }
+
+    const merged = await isBranchMerged(epicBranch, DEFAULT_TARGET_BRANCH);
+    if (merged) {
+      updateEpicMergeCache(cacheKey, {
+        status: "merged",
+        head: epicBranch,
+        base: DEFAULT_TARGET_BRANCH,
+      });
+      continue;
+    }
+
+    let prInfo = readEpicPrInfo(epicBranch, DEFAULT_TARGET_BRANCH);
+    if (!prInfo || prInfo.state === "CLOSED") {
+      const created = await createEpicMergePr(
+        epicBranch,
+        DEFAULT_TARGET_BRANCH,
+        epicTasks,
+      );
+      if (created?.url) {
+        updateEpicMergeCache(cacheKey, {
+          status: "open",
+          head: epicBranch,
+          base: DEFAULT_TARGET_BRANCH,
+          prUrl: created.url,
+        });
+        void sendTelegramMessage(
+          `🧩 Epic PR created for ${epicBranch} → ${DEFAULT_TARGET_BRANCH}\n${created.url}`,
+        );
+      }
+      continue;
+    }
+
+    if (prInfo.state === "MERGED") {
+      updateEpicMergeCache(cacheKey, {
+        status: "merged",
+        head: epicBranch,
+        base: DEFAULT_TARGET_BRANCH,
+        prNumber: prInfo.number,
+        prUrl: prInfo.url,
+      });
+      continue;
+    }
+
+    const hasConflicts = detectPrConflicts(prInfo);
+    if (hasConflicts) {
+      updateEpicMergeCache(cacheKey, {
+        status: "conflict",
+        head: epicBranch,
+        base: DEFAULT_TARGET_BRANCH,
+        prNumber: prInfo.number,
+        prUrl: prInfo.url,
+      });
+      await ensureEpicConflictTask(
+        projectId,
+        tasks,
+        epicBranch,
+        DEFAULT_TARGET_BRANCH,
+        "merge conflicts",
+        prInfo,
+      );
+      void sendTelegramMessage(
+        `⚠️ Epic PR conflicts for ${epicBranch} → ${DEFAULT_TARGET_BRANCH} (${prInfo.url || "no url"})`,
+      );
+      continue;
+    }
+
+    const checks = await readRequiredChecks(prInfo.number);
+    if (checks.length && detectFailedChecks(checks)) {
+      updateEpicMergeCache(cacheKey, {
+        status: "checks-failed",
+        head: epicBranch,
+        base: DEFAULT_TARGET_BRANCH,
+        prNumber: prInfo.number,
+        prUrl: prInfo.url,
+      });
+      await ensureEpicConflictTask(
+        projectId,
+        tasks,
+        epicBranch,
+        DEFAULT_TARGET_BRANCH,
+        "failing checks",
+        prInfo,
+      );
+      void sendTelegramMessage(
+        `⚠️ Epic PR checks failing for ${epicBranch} → ${DEFAULT_TARGET_BRANCH} (${prInfo.url || "no url"})`,
+      );
+      continue;
+    }
+
+    const autoMerged = await enableEpicAutoMerge(prInfo.number);
+    updateEpicMergeCache(cacheKey, {
+      status: autoMerged ? "auto-merge-enabled" : "open",
+      head: epicBranch,
+      base: DEFAULT_TARGET_BRANCH,
+      prNumber: prInfo.number,
+      prUrl: prInfo.url,
+    });
+  }
+}
+
 // ── Dependabot / Bot PR Auto-Merge ──────────────────────────────────────────
 
 /** Set of PR numbers we've already attempted to merge this session */
@@ -5507,6 +6173,19 @@ function normalizeBranchName(value) {
   if (!value) return null;
   const trimmed = String(value).trim();
   return trimmed ? trimmed : null;
+}
+
+function splitRemoteRef(ref, defaultRemote = "origin") {
+  const match = String(ref || "").match(/^([^/]+)\/(.+)$/);
+  if (match) return { remote: match[1], name: match[2] };
+  return { remote: defaultRemote, name: ref };
+}
+
+function normalizeBranchForCompare(ref) {
+  const normalized = normalizeBranchName(ref);
+  if (!normalized) return null;
+  const info = splitRemoteRef(normalized, "origin");
+  return info?.name || normalized;
 }
 
 function extractUpstreamFromText(text) {
@@ -6731,6 +7410,7 @@ function buildPlannerTaskDescription({
     "4. Prioritize reliability and unblockers first when errors/review backlog is elevated.",
     "5. Avoid duplicates with existing todo/inprogress/review tasks and open PRs.",
     "6. Prefer task sets that can run in parallel with minimal file overlap.",
+    "7. If a task should target a non-default epic/base branch, include `base_branch` in the JSON task object.",
   ].join("\n");
 }
 
@@ -6799,6 +7479,35 @@ function formatPlannerTaskDescription(task) {
   return description || "Planned by codex-monitor task planner.";
 }
 
+function resolvePlannerTaskBaseBranch(task) {
+  if (!task) return null;
+  const directFields = [
+    "base_branch",
+    "baseBranch",
+    "target_branch",
+    "targetBranch",
+    "upstream_branch",
+    "upstreamBranch",
+    "upstream",
+    "base",
+    "target",
+  ];
+  for (const field of directFields) {
+    if (task[field]) return normalizeBranchName(task[field]);
+  }
+  if (task.metadata) {
+    for (const field of directFields) {
+      if (task.metadata[field]) return normalizeBranchName(task.metadata[field]);
+    }
+  }
+  if (task.meta) {
+    for (const field of directFields) {
+      if (task.meta[field]) return normalizeBranchName(task.meta[field]);
+    }
+  }
+  return null;
+}
+
 function parsePlannerTaskCollection(parsedValue) {
   if (Array.isArray(parsedValue)) return parsedValue;
   if (Array.isArray(parsedValue?.tasks)) return parsedValue.tasks;
@@ -6843,6 +7552,7 @@ function extractPlannerTasksFromOutput(output, maxTasks) {
       normalized.push({
         title,
         description: formatPlannerTaskDescription(task),
+        baseBranch: resolvePlannerTaskBaseBranch(task),
       });
       if (normalized.length >= cap) return normalized;
     }
@@ -6878,6 +7588,7 @@ async function materializePlannerTasksToKanban(projectId, tasks) {
       title: task.title,
       description: task.description,
       status: "todo",
+      ...(task.baseBranch ? { baseBranch: task.baseBranch } : {}),
     });
     if (createdTask?.id) {
       created.push({ id: createdTask.id, title: task.title });
@@ -10660,6 +11371,12 @@ setInterval(() => {
   void checkMergedPRsAndUpdateTasks();
 }, mergedPRCheckIntervalMs);
 
+// ── Periodic epic branch sync/merge: every 15 min ──────────────────────────
+const epicMergeIntervalMs = 15 * 60 * 1000;
+setInterval(() => {
+  void checkEpicBranches("interval");
+}, epicMergeIntervalMs);
+
 // ── Log rotation: truncate oldest logs when folder exceeds size limit ───────
 if (logMaxSizeMb > 0) {
   // Run once at startup (delayed 10s)
@@ -10680,6 +11397,7 @@ if (logMaxSizeMb > 0) {
 // Run once immediately after startup (delayed by 30s to let things settle)
 setTimeout(() => {
   void checkMergedPRsAndUpdateTasks();
+  void checkEpicBranches("startup");
   void checkAndMergeDependabotPRs();
 }, 30 * 1000);
 

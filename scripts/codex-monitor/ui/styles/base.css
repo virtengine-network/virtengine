@@ -15,21 +15,19 @@ body {
 }
 
 body {
-  font-family:
-    "IBM Plex Sans",
-    "Source Sans 3",
-    "Public Sans",
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--font-ui);
   font-size: 15px;
   color: var(--text-primary);
   background: var(--bg-primary);
+  background-image: var(--gradient-mesh);
+  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
   height: var(--viewport-stable-height);
   overflow-x: hidden;
+  position: relative;
 }
 
 #app {
@@ -37,14 +35,46 @@ body {
   display: flex;
   flex-direction: column;
   position: relative;
+  z-index: 1;
 }
 
-/* Ambient background glow removed for GitHub-style flat surfaces */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  inset: auto;
+  opacity: 0.7;
+}
+
+body::before {
+  top: -20%;
+  left: -10%;
+  right: -10%;
+  height: 55%;
+  background: var(--gradient-hero);
+  filter: blur(10px);
+}
+
+body::after {
+  bottom: -25%;
+  left: -20%;
+  right: -20%;
+  height: 60%;
+  background: var(--gradient-radial-glow);
+  filter: blur(20px);
+}
 
 /* Selection styling */
 ::selection {
   background: var(--accent-subtle);
   color: var(--text-bright);
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
 }
 
 /* ─── Scrollbar Styles ─── */
