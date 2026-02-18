@@ -8,6 +8,7 @@ export function generateStaticParams() {
   return [{ address: 'virtengine1demo' }];
 }
 
-export function GET(_req: Request, { params }: { params: { address: string } }) {
-  return NextResponse.json(getConsentSettings(params.address));
+export async function GET(_req: Request, { params }: { params: Promise<{ address: string }> }) {
+  const { address } = await params;
+  return NextResponse.json(getConsentSettings(address));
 }

@@ -7,7 +7,6 @@ export const metadata: Metadata = {
 };
 
 const NewOrderClient = dynamic(() => import('./NewOrderClient'), {
-  ssr: false,
   loading: () => (
     <div className="container py-8">
       <div className="mx-auto max-w-3xl animate-pulse space-y-4">

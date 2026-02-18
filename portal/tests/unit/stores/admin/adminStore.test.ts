@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import {
   useAdminStore,
@@ -8,6 +8,16 @@ import {
   selectUrgentTickets,
 } from '@/stores/adminStore';
 import type { AdminRole } from '@/types/admin';
+
+vi.mock('@/lib/api-client', () => ({
+  apiClient: {
+    get: vi.fn().mockResolvedValue({}),
+    post: vi.fn().mockResolvedValue({}),
+    put: vi.fn().mockResolvedValue({}),
+    delete: vi.fn().mockResolvedValue({}),
+    patch: vi.fn().mockResolvedValue({}),
+  },
+}));
 
 function seedAdminData() {
   const now = new Date();

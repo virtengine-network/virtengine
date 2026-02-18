@@ -11,6 +11,7 @@ export const metadata: Metadata = {
   description: 'View invoice details, line items, and payment history',
 };
 
-export default function InvoiceDetailRoute({ params }: { params: { id: string } }) {
-  return <InvoiceDetailPage invoiceId={params.id} />;
+export default async function InvoiceDetailRoute({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return <InvoiceDetailPage invoiceId={id} />;
 }

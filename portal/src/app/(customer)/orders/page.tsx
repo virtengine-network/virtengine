@@ -9,7 +9,6 @@ export const metadata: Metadata = {
 const OrderListClient = dynamic(
   () => import('@/components/orders/OrderList').then((mod) => ({ default: mod.OrderList })),
   {
-    ssr: false,
     loading: () => (
       <div className="container py-8">
         <div className="mb-8">

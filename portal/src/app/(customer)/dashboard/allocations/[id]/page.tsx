@@ -12,7 +12,6 @@ export const metadata: Metadata = {
 };
 
 const AllocationDetailClient = dynamic(() => import('./AllocationDetailClient'), {
-  ssr: false,
   loading: () => (
     <div className="space-y-6">
       <div className="h-5 w-32 animate-pulse rounded bg-muted" />

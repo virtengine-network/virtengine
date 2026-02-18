@@ -1,7 +1,6 @@
 import dynamic from 'next/dynamic';
 
 const SupportTicketDetailClient = dynamic(() => import('./SupportTicketDetailClient'), {
-  ssr: false,
   loading: () => (
     <div className="container py-10">
       <p>Loading...</p>

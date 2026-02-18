@@ -20,7 +20,11 @@ const mockBilling = {
   changePercent: 23.8,
 } as const;
 
-export default function OrganizationDetailPage({ params: _params }: { params: { id: string } }) {
+export default function OrganizationDetailPage({
+  params: _params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   return (
     <div className="container py-8">
       {/* Header */}

@@ -38,21 +38,22 @@ async function fetchChainJson<T>(path: string, params?: Record<string, string | 
   return (await response.json()) as T;
 }
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params;
     const { searchParams } = request.nextUrl;
     const voter = searchParams.get('voter') ?? undefined;
 
     const proposalResponse = await fetchChainJson<{ proposal: GovernanceProposal }>(
-      `/cosmos/gov/v1/proposals/${params.id}`
+      `/cosmos/gov/v1/proposals/${id}`
     );
 
     const proposal = proposalResponse.proposal;
 
     const [tallyResponse, votesResponse, tallyParamsResponse, votingParamsResponse, poolResponse] =
       await Promise.allSettled([
-        fetchChainJson<{ tally: TallyResult }>(`/cosmos/gov/v1/proposals/${params.id}/tally`),
-        fetchChainJson<{ votes: GovernanceVote[] }>(`/cosmos/gov/v1/proposals/${params.id}/votes`, {
+        fetchChainJson<{ tally: TallyResult }>(`/cosmos/gov/v1/proposals/${id}/tally`),
+        fetchChainJson<{ votes: GovernanceVote[] }>(`/cosmos/gov/v1/proposals/${id}/votes`, {
           'pagination.limit': VOTES_LIMIT,
         }),
         fetchChainJson<{ tally_params: TallyParams }>('/cosmos/gov/v1/params/tallying'),
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     if (voter) {
       try {
         const voteResponse = await fetchChainJson<{ vote: GovernanceVote }>(
-          `/cosmos/gov/v1/proposals/${params.id}/votes/${voter}`
+          `/cosmos/gov/v1/proposals/${id}/votes/${voter}`
         );
         voterVote = voteResponse.vote ?? null;
       } catch {
