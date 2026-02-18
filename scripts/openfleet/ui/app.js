@@ -238,7 +238,7 @@ function Header() {
   let freshnessLabel = "";
   if (freshness != null && Number.isFinite(freshness)) {
     const rel = formatRelative(freshness);
-    if (rel && rel !== "—") {
+    if (rel && rel !== "—" && !rel.includes("NaN")) {
       freshnessLabel = rel === "just now" ? "Updated just now" : `Updated ${rel}`;
     }
   }

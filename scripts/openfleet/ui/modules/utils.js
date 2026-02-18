@@ -49,16 +49,22 @@ export function formatRelative(d) {
     if (!Number.isFinite(diffMs)) return "—";
     if (diffMs < 0) return "just now";
     const seconds = Math.floor(diffMs / 1000);
+    if (!Number.isFinite(seconds)) return "—";
     if (seconds < 60) return `${seconds}s ago`;
     const minutes = Math.floor(seconds / 60);
+    if (!Number.isFinite(minutes)) return "—";
     if (minutes < 60) return `${minutes}m ago`;
     const hours = Math.floor(minutes / 60);
+    if (!Number.isFinite(hours)) return "—";
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
+    if (!Number.isFinite(days)) return "—";
     if (days < 30) return `${days}d ago`;
     const months = Math.floor(days / 30);
+    if (!Number.isFinite(months)) return "—";
     if (months < 12) return `${months}mo ago`;
     const years = Math.floor(months / 12);
+    if (!Number.isFinite(years)) return "—";
     return `${years}y ago`;
   } catch {
     return "—";

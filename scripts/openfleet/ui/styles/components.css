@@ -372,6 +372,11 @@
   box-shadow: 0 0 0 3px var(--accent-subtle), var(--shadow-glow-sm);
 }
 
+.input-error {
+  border-color: rgba(248, 113, 113, 0.6);
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.15);
+}
+
 .input::placeholder {
   color: var(--text-hint);
 }
@@ -394,10 +399,42 @@ select.input {
   display: flex;
   gap: 8px;
   margin-bottom: 10px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .input-row .input {
   flex: 1;
+}
+
+.form-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-hint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.form-hint.error {
+  color: var(--color-error);
+}
+
+.form-hint.success {
+  color: var(--color-done);
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
 }
 
 .range-row {
@@ -1615,6 +1652,47 @@ select.input {
   margin-bottom: 8px;
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(10px);
+}
+
+/* ─── Control Unit (sticky) ─── */
+.control-unit-card {
+  position: sticky;
+  top: 0;
+  z-index: 18;
+  background: var(--bg-card);
+}
+
+.control-unit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-unit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.control-unit-meta strong {
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
+.control-unit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (min-width: 768px) {
+  .control-unit-body {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
 }
 
 /* ─── Toggle Label ─── */

@@ -658,77 +658,98 @@ export function ControlTab() {
 
     <!-- ── Task Ops ── -->
     <${Card} title="Task Ops">
-      <div class="input-row mb-sm">
-        <select
-          class="input"
-          value=${startTaskId}
-          onChange=${(e) => setStartTaskId(e.target.value)}
-        >
-          <option value="">Select backlog task…</option>
-          ${backlogTasks.map(
-            (task) => html`
-              <option key=${task.id} value=${task.id}>
-                ${truncate(task.title || "(untitled)", 48)} · ${task.id}
-              </option>
-            `,
-          )}
-        </select>
-        <button
-          class="btn btn-secondary btn-sm"
-          disabled=${!startTaskId}
-          onClick=${handleStartTask}
-        >
-          Start Task
-        </button>
-        <button
-          class="btn btn-ghost btn-sm"
-          onClick=${refreshTaskOptions}
-          title="Refresh task list"
-        >
-          ↻
-        </button>
+      <div class="field-group">
+        <div class="form-label">Backlog task</div>
+        <div class="input-row">
+          <select
+            class=${startTaskError ? "input input-error" : "input"}
+            value=${startTaskId}
+            aria-label="Backlog task"
+            onChange=${(e) => {
+              setStartTaskId(e.target.value);
+              setStartTaskError("");
+            }}
+          >
+            <option value="">Select backlog task…</option>
+            ${backlogTasks.map(
+              (task) => html`
+                <option key=${task.id} value=${task.id}>
+                  ${truncate(task.title || "(untitled)", 48)} · ${task.id}
+                </option>
+              `,
+            )}
+          </select>
+          <button
+            class="btn btn-secondary btn-sm"
+            disabled=${!startTaskId}
+            onClick=${handleStartTask}
+          >
+            Start Task
+          </button>
+          <button
+            class="btn btn-ghost btn-sm"
+            onClick=${refreshTaskOptions}
+            title="Refresh task list"
+          >
+            ↻
+          </button>
+        </div>
+        ${startTaskError
+          ? html`<div class="form-hint error">${startTaskError}</div>`
+          : null}
       </div>
       <div class="meta-text mb-sm">
         ${tasksLoading
           ? "Loading tasks…"
           : `${backlogTasks.length} backlog · ${retryTasks.length} retryable`}
       </div>
-      <div class="input-row">
-        <select
-          class="input"
-          value=${retryTaskId}
-          onChange=${(e) => setRetryTaskId(e.target.value)}
-        >
-          <option value="">Select task to retry…</option>
-          ${retryTasks.map(
-            (task) => html`
-              <option key=${task.id} value=${task.id}>
-                ${truncate(task.title || "(untitled)", 48)} · ${task.id}
-              </option>
-            `,
-          )}
-        </select>
-        <input
-          class="input"
-          placeholder="Retry reason (passed to agent)"
-          value=${retryReason}
-          onInput=${(e) => setRetryReason(e.target.value)}
-        />
-        <button
-          class="btn btn-secondary btn-sm"
-          disabled=${!retryTaskId}
-          onClick=${handleRetryTask}
-        >
-          Retry Task
-        </button>
-        <button class="btn btn-ghost btn-sm" onClick=${() => sendCmd("/plan")}>
-          📋 Plan
-        </button>
+      <div class="field-group">
+        <div class="form-label">Retry task</div>
+        <div class="input-row">
+          <select
+            class=${retryTaskError ? "input input-error" : "input"}
+            value=${retryTaskId}
+            aria-label="Retry task"
+            onChange=${(e) => {
+              setRetryTaskId(e.target.value);
+              setRetryTaskError("");
+            }}
+          >
+            <option value="">Select task to retry…</option>
+            ${retryTasks.map(
+              (task) => html`
+                <option key=${task.id} value=${task.id}>
+                  ${truncate(task.title || "(untitled)", 48)} · ${task.id}
+                </option>
+              `,
+            )}
+          </select>
+          <input
+            class="input"
+            placeholder="Retry reason (optional)"
+            value=${retryReason}
+            onInput=${(e) => setRetryReason(e.target.value)}
+          />
+          <button
+            class="btn btn-secondary btn-sm"
+            disabled=${!retryTaskId}
+            onClick=${handleRetryTask}
+          >
+            Retry Task
+          </button>
+          <button class="btn btn-ghost btn-sm" onClick=${() => sendCmd("/plan")}>
+            📋 Plan
+          </button>
+        </div>
+        ${retryTaskError
+          ? html`<div class="form-hint error">${retryTaskError}</div>`
+          : null}
       </div>
     <//>
 
     <!-- ── Agent Control ── -->
     <${Card} title="Agent Control">
+      <div class="form-label">Ask agent</div>
       <textarea
         class="input mb-sm"
         rows="2"
@@ -749,7 +770,8 @@ export function ControlTab() {
           💬 Ask
         </button>
       </div>
-      <div class="input-row">
+      <div class="form-label">Steer prompt</div>
+      <div class="input-row mb-sm">
         <input
           class="input"
           placeholder="Steer prompt (focus on…)"
@@ -805,6 +827,7 @@ export function ControlTab() {
 
     <!-- ── Quick Commands ── -->
     <${Card} title="Quick Commands">
+      <div class="form-label">Command</div>
       <div class="input-row mb-sm">
         <select
           class="input"
@@ -819,7 +842,10 @@ export function ControlTab() {
           class="input"
           placeholder=${quickCmdPrefix === "shell" ? "ls -la" : "status --short"}
           value=${quickCmdInput}
-          onInput=${(e) => setQuickCmdInput(e.target.value)}
+          onInput=${(e) => {
+            setQuickCmdInput(e.target.value);
+            if (quickCmdFeedbackTone === "error") setQuickCmdFeedback("");
+          }}
           onKeyDown=${(e) => {
             if (e.key === "Enter") handleQuickCmd();
           }}
@@ -830,7 +856,7 @@ export function ControlTab() {
         </button>
       </div>
       ${quickCmdFeedback && html`
-        <div class="meta-text mb-sm" style="color:var(--tg-theme-link-color,#4ea8d6)">
+        <div class="form-hint ${quickCmdFeedbackTone === "error" ? "error" : "success"} mb-sm">
           ${quickCmdFeedback}
         </div>
       `}

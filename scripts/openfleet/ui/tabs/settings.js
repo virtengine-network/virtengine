@@ -404,6 +404,7 @@ function ServerConfigMode() {
   /* Data loading state */
   const [serverData, setServerData] = useState(null);     // { KEY: "value" } from API
   const [serverMeta, setServerMeta] = useState(null);     // { envPath, configPath, configDir }
+  const [configSync, setConfigSync] = useState(null);     // { total, updated, skipped, configPath }
   const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -437,6 +438,7 @@ function ServerConfigMode() {
       if (res?.ok && res.data) {
         setServerData(res.data);
         setServerMeta(res.meta || null);
+        setConfigSync(null);
       } else {
         throw new Error(res?.error || "Unexpected response format");
       }
@@ -444,6 +446,7 @@ function ServerConfigMode() {
       setLoadError(err.message || "Failed to load settings");
       setServerData(null);
       setServerMeta(null);
+      setConfigSync(null);
     } finally {
       setLoading(false);
     }
@@ -580,6 +583,22 @@ function ServerConfigMode() {
       if (res?.ok) {
         showToast("Settings saved successfully", "success");
         haptic("medium");
+        const updatedConfig = Array.isArray(res.updatedConfig) ? res.updatedConfig : [];
+        const changeKeys = Object.keys(changes);
+        const skipped = changeKeys.filter((key) => !updatedConfig.includes(key));
+        setConfigSync({
+          total: changeKeys.length,
+          updated: updatedConfig.length,
+          skipped,
+          configPath: res.configPath || serverMeta?.configPath || null,
+        });
+        if (res.configPath && (!serverMeta || serverMeta.configPath !== res.configPath)) {
+          setServerMeta((prev) => ({
+            ...(prev || {}),
+            configPath: res.configPath,
+            configDir: res.configDir || prev?.configDir,
+          }));
+        }
         // Merge changes into serverData so they appear as the new baseline
         setServerData((prev) => ({ ...prev, ...changes }));
         setEdits({});
@@ -605,7 +624,7 @@ function ServerConfigMode() {
     } finally {
       setSaving(false);
     }
-  }, [edits, hasRestartSetting]);
+  }, [edits, hasRestartSetting, serverMeta]);
 
   const handleCancelSave = useCallback(() => {
     setConfirmOpen(false);
@@ -824,6 +843,26 @@ function ServerConfigMode() {
       <div class="settings-banner settings-banner-warn">
         <span>⚡</span>
         <span class="settings-banner-text">Connection lost — reconnecting…</span>
+      </div>
+    `}
+
+    ${configSync &&
+    html`
+      <div class="settings-banner ${configSync.skipped?.length ? "settings-banner-warn" : "settings-banner-info"}">
+        <span>💾</span>
+        <span class="settings-banner-text">
+          ${configSync.skipped?.length
+            ? `Saved ${configSync.total} settings; synced ${configSync.updated} to config file.`
+            : `Synced ${configSync.updated} settings to config file.`}
+          ${configSync.configPath &&
+          html`<div style="margin-top:4px;font-size:12px;color:var(--text-secondary, #bbb)">
+            Config: <code>${configSync.configPath}</code>
+          </div>`}
+          ${configSync.skipped?.length &&
+          html`<div style="margin-top:2px;font-size:12px;color:var(--text-secondary, #bbb)">
+            Not supported in config: ${configSync.skipped.slice(0, 4).join(", ")}${configSync.skipped.length > 4 ? ` +${configSync.skipped.length - 4} more` : ""}
+          </div>`}
+        </span>
       </div>
     `}
 

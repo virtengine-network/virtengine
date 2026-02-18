@@ -256,6 +256,16 @@ describe("ui-server mini app", () => {
     const json = await response.json();
     expect(response.status).toBe(200);
     expect(json.ok).toBe(true);
+    expect(json.updatedConfig).toEqual(
+      expect.arrayContaining([
+        "KANBAN_BACKEND",
+        "GITHUB_PROJECT_MODE",
+        "GITHUB_PROJECT_WEBHOOK_PATH",
+        "GITHUB_PROJECT_SYNC_ALERT_FAILURE_THRESHOLD",
+      ]),
+    );
+    expect(json.configPath).toBe(configPath);
+    expect(json.configDir).toBe(tmpDir);
 
     const raw = readFileSync(configPath, "utf8");
     const config = JSON.parse(raw);
@@ -263,6 +273,39 @@ describe("ui-server mini app", () => {
     expect(config.kanban?.github?.project?.mode).toBe("kanban");
     expect(config.kanban?.github?.project?.webhook?.path).toBe("/api/webhooks/github/project-sync");
     expect(config.kanban?.github?.project?.syncMonitoring?.alertFailureThreshold).toBe(5);
+
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("does not sync unsupported settings into config file", async () => {
+    const mod = await import("../ui-server.mjs");
+    const tmpDir = mkdtempSync(join(tmpdir(), "openfleet-config-"));
+    const configPath = join(tmpDir, "openfleet.config.json");
+    process.env.CODEX_MONITOR_CONFIG_PATH = configPath;
+
+    const server = await mod.startTelegramUiServer({
+      port: await getFreePort(),
+      host: "127.0.0.1",
+    });
+    const port = server.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/settings/update`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        changes: {
+          EXECUTORS: "CODEX:DEFAULT:100",
+        },
+      }),
+    });
+    const json = await response.json();
+    expect(response.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.updatedConfig).toEqual([]);
+
+    const raw = readFileSync(configPath, "utf8");
+    const config = JSON.parse(raw);
+    expect(config.executors).toBeUndefined();
 
     rmSync(tmpDir, { recursive: true, force: true });
   });

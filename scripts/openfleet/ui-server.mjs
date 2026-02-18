@@ -180,6 +180,10 @@ function getSchemaProperty(schema, pathParts) {
 function mapEnvKeyToConfigPath(key, schema) {
   if (!schema?.properties) return null;
   const envKey = String(key || "").toUpperCase();
+  const rootSkipSet = new Set([
+    "EXECUTORS",
+  ]);
+  if (rootSkipSet.has(envKey)) return null;
   const rootOverrideMap = {
     CODEX_MONITOR_MODE: "mode",
     TASK_PLANNER_MODE: "plannerMode",
@@ -3224,6 +3228,7 @@ async function handleApi(req, res, url) {
       // Write to .env file
       const updated = updateEnvFile(strChanges);
       const configUpdate = updateConfigFile(changes);
+      const configDir = configUpdate.path ? dirname(configUpdate.path) : null;
       _settingsLastUpdateTime = now;
       broadcastUiEvent(["settings", "overview"], "invalidate", { reason: "settings-updated", keys: updated });
       jsonResponse(res, 200, {
@@ -3231,6 +3236,7 @@ async function handleApi(req, res, url) {
         updated,
         updatedConfig: configUpdate.updated || [],
         configPath: configUpdate.path || null,
+        configDir,
       });
     } catch (err) {
       jsonResponse(res, 500, { ok: false, error: err.message });
