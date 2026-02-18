@@ -1,6 +1,6 @@
 {
   "name": "@virtengine/codex-monitor",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "AI-powered orchestrator supervisor — manages AI agent executors with failover, auto-restarts on failure, analyzes crashes with Codex SDK, creates PRs via Vibe-Kanban API, and sends Telegram notifications. Supports N executors with weighted distribution, multi-repo projects, and auto-setup.",
   "type": "module",
   "license": "Apache 2.0",
@@ -105,6 +105,7 @@
     "codex-config.mjs",
     "codex-monitor.config.example.json",
     "codex-monitor.schema.json",
+    "codex-model-profiles.mjs",
     "codex-shell.mjs",
     "config.mjs",
     "config-doctor.mjs",
@@ -148,6 +149,7 @@
     "task-store.mjs",
     "telegram-bot.mjs",
     "ui-server.mjs",
+    "ui/modules/settings-schema.js",
     "ui/",
     "update-check.mjs",
     "utils.mjs",
