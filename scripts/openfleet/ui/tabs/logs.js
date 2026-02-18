@@ -384,7 +384,7 @@ export function LogsTab() {
     const a = document.createElement("a");
     const d = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     a.href = url;
-    a.download = `codex-monitor-logs-${d}.log`;
+    a.download = `openfleet-logs-${d}.log`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

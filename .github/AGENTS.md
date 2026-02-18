@@ -22,7 +22,7 @@
 | ----------------------------- | ------- | ------------------------------------------------------------------ | ------------------------------- |
 | Go                            | 1.25.5  | `ci.yaml`, `quality-gate.yaml`, `security.yaml`, most Go workflows | Set in `GO_VERSION` env var     |
 | Node                          | 20      | `portal-ci.yaml`, `portal-deploy-pages.yaml`                       | Set in `NODE_VERSION` env var   |
-| Node (npm OIDC)               | 24      | `codex-monitor-publish.yaml`                                       | Requires Node 24 for provenance |
+| Node (npm OIDC)               | 24      | `openfleet-publish.yaml`                                       | Requires Node 24 for provenance |
 | pnpm                          | 10.28.2 | `portal-ci.yaml`, `portal-deploy-pages.yaml`, `smoke-test.yaml`     | Set in `PNPM_VERSION` env var   |
 | Python                        | 3.11    | `ci.yaml`, `security.yaml`, `ml-model-verify.yaml`                 | Set in `PYTHON_VERSION` env var |
 | Docker Buildx                 | latest  | `release.yaml`, `ci.yaml`                                          | Multi-arch builds               |
@@ -71,7 +71,7 @@ Inventory and docs live in `.github/workflows/` with release details in `RELEASE
 | `changelog.yaml`             | Generate changelog                                         | tags v\*, dispatch                                                   | `generate-changelog`, `validate-commits`, `release-stats`                                                                                                                                | Changelog artifacts                           | git-chglog, GITHUB_TOKEN                                    |
 | `chaos-test.yaml`            | Chaos tests                                                | schedule Sun 03:00 UTC, dispatch                                     | `chaos-test`                                                                                                                                                                             | None (best-effort run)                        | kubectl + Helm + Chaos Mesh                                 |
 | `ci.yaml`                    | Mainline CI build/test pipeline (not primary quality gate) | push main/mainnet/develop/release/\*_, tags v_                       | lint, vet, lint-shell, agents-docs, test-go, test-python, test-portal, build, integration, hpc-provider-e2e, container-security, build-macos, sims, network-upgrade, release, ci-summary | Coverage/build artifacts, checksums, E2E logs | Go 1.25.5, Node 20, Python 3.11, pnpm 10.28.2, Docker/Trivy |
-| `codex-monitor-publish.yaml` | Publish codex-monitor                                      | push main path filter, dispatch                                      | `check`, `publish`                                                                                                                                                                       | npm publish + summary                         | Node 24 + npm OIDC                                          |
+| `openfleet-publish.yaml` | Publish openfleet                                      | push main path filter, dispatch                                      | `check`, `publish`                                                                                                                                                                       | npm publish + summary                         | Node 24 + npm OIDC                                          |
 | `compatibility.yaml`         | Protobuf/API compatibility                                 | push main/mainnet, tags, PR paths \*\*.proto                         | `proto-breaking`, `compatibility-tests`, `api-version-check`, `deprecation-compliance`, `version-matrix-validation`, `full-compatibility-suite`                                          | Compatibility reports                         | Go 1.25.5                                                   |
 | `dependabot-auto-merge.yaml` | Auto-merge Dependabot PRs                                  | pull_request                                                         | `dependabot`                                                                                                                                                                             | Merge result                                  | GITHUB_TOKEN                                                |
 | `dispatch.yaml`              | Homebrew dispatch                                          | tags vX.Y.Z                                                          | `dispatch-homebrew`                                                                                                                                                                      | Dispatch event                                | GORELEASER_ACCESS_TOKEN                                     |
@@ -132,7 +132,7 @@ Inventory and docs live in `.github/workflows/` with release details in `RELEASE
 **OIDC Usage:**
 
 - AWS: Prefer `AWS_DEPLOY_ROLE_ARN` with GitHub OIDC provider trust over `AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY`.
-- npm: `codex-monitor-publish.yaml` uses npm provenance (Node 24+ required, auto OIDC).
+- npm: `openfleet-publish.yaml` uses npm provenance (Node 24+ required, auto OIDC).
 - PyPI: Configure trusted publisher for `virtengine` organization to avoid `PYPI_TOKEN`.
 - GitHub Actions auto-provides OIDC tokens via `id-token: write` permission.
 
@@ -311,7 +311,7 @@ gh workflow run release.yaml
 ## Configuration
 
 - Toolchain defaults live in `.github/workflows/ci.yaml:1` (`GO_VERSION`, `NODE_VERSION`, `PNPM_VERSION`, `PYTHON_VERSION`).
-- OIDC publish is required for `.github/workflows/codex-monitor-publish.yaml:1` (see `_docs/operations/ci-troubleshooting.md:1`).
+- OIDC publish is required for `.github/workflows/openfleet-publish.yaml:1` (see `_docs/operations/ci-troubleshooting.md:1`).
 
 ## Local Testing
 
@@ -418,7 +418,7 @@ node scripts/validate-agents-docs.mjs
 
 ### npm OIDC Publish Failures
 
-**Symptom:** `codex-monitor-publish.yaml` fails on `npm publish` with auth error
+**Symptom:** `openfleet-publish.yaml` fails on `npm publish` with auth error
 **Fix:** See `_docs/operations/ci-troubleshooting.md:1`
 
 1. Verify Node version is 24+ (required for provenance)

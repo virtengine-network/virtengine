@@ -76,6 +76,16 @@ function WorkspaceViewer({ agent, onClose }) {
   const [contextData, setContextData] = useState(null);
   const [steerInput, setSteerInput] = useState("");
   const [activeTab, setActiveTab] = useState("stream");
+  const [streamPaused, setStreamPaused] = useState(false);
+  const [streamFilter, setStreamFilter] = useState("all");
+  const [streamSearch, setStreamSearch] = useState("");
+  const [fileFilter, setFileFilter] = useState("all");
+  const [fileSearch, setFileSearch] = useState("");
+  const [streamSnapshot, setStreamSnapshot] = useState({
+    events: [],
+    fileAccess: null,
+    capturedAt: null,
+  });
   const logRef = useRef(null);
 
   const query = agent.branch || agent.taskId || agent.sessionId || "";
@@ -157,6 +167,31 @@ function WorkspaceViewer({ agent, onClose }) {
     setSteerInput("");
   };
 
+  const copyToClipboard = (text, successMessage) => {
+    if (!text) return;
+    if (!navigator?.clipboard?.writeText) {
+      showToast("Clipboard unavailable", "error");
+      return;
+    }
+    navigator.clipboard
+      .writeText(text)
+      .then(() => showToast(successMessage || "Copied", "success"))
+      .catch(() => showToast("Copy failed", "error"));
+  };
+
+  const downloadText = (filename, content) => {
+    if (!content) return;
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
   const renderChanges = () => {
     const ctx = contextData?.context;
     const matches = contextData?.matches || {};
@@ -166,12 +201,15 @@ function WorkspaceViewer({ agent, onClose }) {
     const actionHistory = contextData?.actionHistory || contextData?.toolHistory || [];
     const fileAccess = contextData?.fileAccessSummary || null;
     const fileAccessFiles = fileAccess?.files || [];
-    const fileAccessCounts = fileAccess?.counts || {};
     const streamMessages = sessionMessages.value || [];
-    const toolEvents = streamMessages
+    const rawToolEvents = streamMessages
       .filter((msg) => msg?.type === "tool_call" || msg?.type === "tool_result" || msg?.type === "error")
-      .slice(-20)
-      .reverse();
+      .slice(-200)
+      .map((evt, index) => ({
+        ...evt,
+        _id: evt?.id || `${evt?.type || "evt"}-${evt?.timestamp || evt?.createdAt || index}`,
+      }));
+    const liveToolEvents = rawToolEvents.slice().reverse();
     const liveFileAccess = (() => {
       const map = new Map();
       const counts = { read: 0, write: 0, other: 0 };
@@ -192,7 +230,7 @@ function WorkspaceViewer({ agent, onClose }) {
         }
         map.set(path, entry);
       };
-      for (const evt of toolEvents) {
+      for (const evt of rawToolEvents) {
         if (!evt?.content) continue;
         const kind = classify(evt.content);
         const matches = evt.content.matchAll(filePattern);
@@ -212,6 +250,8 @@ function WorkspaceViewer({ agent, onClose }) {
         counts,
       };
     })();
+    const toolEvents = streamPaused ? streamSnapshot.events : liveToolEvents;
+    const snapshotMeta = streamPaused ? streamSnapshot.capturedAt : null;
 
     const formatReason = (reason) => {
       const map = {
@@ -327,43 +367,244 @@ function WorkspaceViewer({ agent, onClose }) {
 
     const renderLiveToolEvents = () => {
       if (!sessionInfo && toolEvents.length === 0) return null;
+      const counts = toolEvents.reduce(
+        (acc, evt) => {
+          acc.all += 1;
+          if (evt.type === "tool_result") acc.result += 1;
+          else if (evt.type === "error") acc.error += 1;
+          else acc.tool += 1;
+          return acc;
+        },
+        { all: 0, tool: 0, result: 0, error: 0 },
+      );
+      const search = streamSearch.trim().toLowerCase();
+      const filteredEvents = toolEvents.filter((evt) => {
+        if (streamFilter !== "all") {
+          if (streamFilter === "tool" && evt.type !== "tool_call") return false;
+          if (streamFilter === "result" && evt.type !== "tool_result") return false;
+          if (streamFilter === "error" && evt.type !== "error") return false;
+        }
+        if (!search) return true;
+        const haystack = `${evt.tool || ""} ${evt.content || ""} ${evt.detail || ""}`
+          .toLowerCase();
+        return haystack.includes(search);
+      });
+      const exportText = filteredEvents.map((evt) => {
+        const label = evt.type === "tool_result" ? "RESULT" : evt.type === "error" ? "ERROR" : "TOOL";
+        const ts = evt.timestamp || evt.createdAt || "";
+        const tool = evt.tool ? ` ${evt.tool}` : "";
+        const body = evt.content || evt.detail || "";
+        return `${ts ? `[${ts}] ` : ""}${label}${tool} ${body}`.trim();
+      }).join("\n");
+      const toolLabel = (type) => (
+        type === "tool_result" ? "RESULT" : type === "error" ? "ERROR" : "TOOL"
+      );
       return html`
         <div class="card mb-sm">
-          <div class="card-title">Live Tool Stream</div>
-          ${toolEvents.length === 0 &&
-            html`<div class="meta-text">No tool events yet</div>`}
-          ${toolEvents.map((evt, i) => html`
-            <div class="meta-text" key=${i}>
-              <span class="mono">${evt.type === "tool_result" ? "RESULT" : evt.type === "error" ? "ERROR" : "TOOL"}</span>
-              ${evt.content ? ` ${truncate(evt.content, 140)}` : ""}
-              ${evt.timestamp ? ` · ${formatRelative(evt.timestamp)}` : ""}
+          <div class="card-title">Live Tool/Event Stream</div>
+          <div class="stream-toolbar">
+            <div class="chip-group stream-chips">
+              <button
+                class="chip ${streamFilter === "all" ? "active" : ""}"
+                onClick=${() => setStreamFilter("all")}
+              >
+                All (${counts.all})
+              </button>
+              <button
+                class="chip ${streamFilter === "tool" ? "active" : ""}"
+                onClick=${() => setStreamFilter("tool")}
+              >
+                Tool (${counts.tool})
+              </button>
+              <button
+                class="chip ${streamFilter === "result" ? "active" : ""}"
+                onClick=${() => setStreamFilter("result")}
+              >
+                Result (${counts.result})
+              </button>
+              <button
+                class="chip ${streamFilter === "error" ? "active" : ""}"
+                onClick=${() => setStreamFilter("error")}
+              >
+                Error (${counts.error})
+              </button>
             </div>
-          `)}
+            <div class="stream-actions">
+              <div class="stream-search">
+                <span class="icon-inline">${ICONS.search}</span>
+                <input
+                  class="input input-compact"
+                  placeholder="Filter events..."
+                  value=${streamSearch}
+                  onInput=${(e) => setStreamSearch(e.target.value)}
+                />
+              </div>
+              <button class="btn btn-ghost btn-sm" onClick=${() => {
+                if (!streamPaused) {
+                  setStreamSnapshot({
+                    events: liveToolEvents,
+                    fileAccess: liveFileAccess,
+                    capturedAt: new Date().toISOString(),
+                  });
+                  setStreamPaused(true);
+                } else {
+                  setStreamPaused(false);
+                  setStreamSnapshot({ events: [], fileAccess: null, capturedAt: null });
+                }
+              }}>
+                ${streamPaused ? "▶ Resume" : "⏸ Pause"}
+              </button>
+              <button
+                class="btn btn-ghost btn-sm"
+                onClick=${() => copyToClipboard(exportText, "Stream copied")}
+                disabled=${filteredEvents.length === 0}
+              >
+                <span class="icon-inline">${ICONS.copy}</span> Copy
+              </button>
+              <button
+                class="btn btn-ghost btn-sm"
+                onClick=${() => downloadText(
+                  `tool-stream-${agent.taskId || agent.branch || "agent"}.txt`,
+                  exportText,
+                )}
+                disabled=${filteredEvents.length === 0}
+              >
+                <span class="icon-inline">${ICONS.download}</span> Export
+              </button>
+            </div>
+          </div>
+          ${streamPaused && snapshotMeta &&
+            html`<div class="meta-text mt-xs">Paused at ${snapshotMeta}</div>`}
+          ${filteredEvents.length === 0 &&
+            html`<div class="stream-empty">
+              <div class="stream-empty-icon">🛰️</div>
+              <div class="stream-empty-text">
+                ${toolEvents.length === 0 ? "No tool events yet" : "No events match filters"}
+              </div>
+            </div>`}
+          ${filteredEvents.length > 0 &&
+            html`<div class="stream-list">
+              ${filteredEvents.map((evt) => html`
+                <div class="stream-item stream-${evt.type}" key=${evt._id}>
+                  <div class="stream-item-header">
+                    <span class="stream-tag stream-tag-${evt.type}">
+                      ${toolLabel(evt.type)}
+                    </span>
+                    ${evt.tool && html`<span class="stream-item-tool mono">${evt.tool}</span>`}
+                    ${evt.timestamp && html`<span class="stream-item-time">${formatRelative(evt.timestamp)}</span>`}
+                  </div>
+                  ${evt.content && html`<div class="stream-item-body">${truncate(evt.content, 260)}</div>`}
+                </div>
+              `)}
+            </div>`}
         </div>
       `;
     };
 
     const renderFileAccess = () => {
       if (!sessionInfo && !fileAccess && !liveFileAccess) return null;
-      const summarySource = liveFileAccess || fileAccess;
-      const summaryLine = summarySource
-        ? `${summarySource.counts?.read ?? 0} read · ${summarySource.counts?.write ?? 0} written · ${summarySource.counts?.other ?? 0} other`
-        : "No file access summary available";
-      const files = summarySource?.files || [];
+      const summarySource = (streamPaused ? streamSnapshot.fileAccess : liveFileAccess) || fileAccess;
+      const summaryCounts = summarySource?.counts || {};
+      const summaryFiles = summarySource?.files || [];
+      const counts = {
+        read: summaryCounts.read ?? summaryFiles.filter((f) => f.kinds?.includes("read")).length,
+        write: summaryCounts.write ?? summaryFiles.filter((f) => f.kinds?.includes("write")).length,
+        other: summaryCounts.other ?? summaryFiles.filter((f) => f.kinds?.includes("other")).length,
+      };
+      const search = fileSearch.trim().toLowerCase();
+      const filteredFiles = summaryFiles.filter((entry) => {
+        if (fileFilter !== "all" && !entry.kinds?.includes(fileFilter)) return false;
+        if (!search) return true;
+        return entry.path?.toLowerCase().includes(search);
+      });
+      const exportText = filteredFiles.map((entry) => {
+        const kinds = entry.kinds?.length ? ` (${entry.kinds.join(", ")})` : "";
+        return `${entry.path}${kinds}`;
+      }).join("\n");
       return html`
         <div class="card mb-sm">
           <div class="card-title">File Access</div>
-          <div class="meta-text">${summaryLine}</div>
-          ${files.length === 0 &&
-            html`<div class="meta-text mt-xs">No file access recorded</div>`}
-          ${files.map((entry, i) => html`
-            <div class="meta-text" key=${i}>
-              <span class="mono">${entry.path}</span>
-              ${entry.kinds?.length
-                ? html`<span class="meta-text"> · ${entry.kinds.join(", ")}</span>`
-                : ""}
+          <div class="stream-toolbar">
+            <div class="chip-group stream-chips">
+              <button
+                class="chip ${fileFilter === "all" ? "active" : ""}"
+                onClick=${() => setFileFilter("all")}
+              >
+                All (${summaryFiles.length})
+              </button>
+              <button
+                class="chip ${fileFilter === "read" ? "active" : ""}"
+                onClick=${() => setFileFilter("read")}
+              >
+                Read (${counts.read})
+              </button>
+              <button
+                class="chip ${fileFilter === "write" ? "active" : ""}"
+                onClick=${() => setFileFilter("write")}
+              >
+                Write (${counts.write})
+              </button>
+              <button
+                class="chip ${fileFilter === "other" ? "active" : ""}"
+                onClick=${() => setFileFilter("other")}
+              >
+                Other (${counts.other})
+              </button>
             </div>
-          `)}
+            <div class="stream-actions">
+              <div class="stream-search">
+                <span class="icon-inline">${ICONS.search}</span>
+                <input
+                  class="input input-compact"
+                  placeholder="Filter files..."
+                  value=${fileSearch}
+                  onInput=${(e) => setFileSearch(e.target.value)}
+                />
+              </div>
+              <button
+                class="btn btn-ghost btn-sm"
+                onClick=${() => copyToClipboard(exportText, "File list copied")}
+                disabled=${filteredFiles.length === 0}
+              >
+                <span class="icon-inline">${ICONS.copy}</span> Copy
+              </button>
+              <button
+                class="btn btn-ghost btn-sm"
+                onClick=${() => downloadText(
+                  `file-access-${agent.taskId || agent.branch || "agent"}.txt`,
+                  exportText,
+                )}
+                disabled=${filteredFiles.length === 0}
+              >
+                <span class="icon-inline">${ICONS.download}</span> Export
+              </button>
+            </div>
+          </div>
+          <div class="meta-text">
+            ${counts.read} read · ${counts.write} written · ${counts.other} other
+          </div>
+          ${streamPaused && snapshotMeta &&
+            html`<div class="meta-text mt-xs">Paused at ${snapshotMeta}</div>`}
+          ${filteredFiles.length === 0 &&
+            html`<div class="stream-empty">
+              <div class="stream-empty-icon">📂</div>
+              <div class="stream-empty-text">
+                ${summaryFiles.length === 0 ? "No file access recorded" : "No files match filters"}
+              </div>
+            </div>`}
+          ${filteredFiles.length > 0 &&
+            html`<div class="stream-list">
+              ${filteredFiles.map((entry) => html`
+                <div class="stream-item stream-file" key=${entry.path}>
+                  <div class="stream-item-header">
+                    <span class="stream-tag stream-tag-file">FILE</span>
+                    <span class="mono">${entry.path}</span>
+                  </div>
+                  ${entry.kinds?.length &&
+                    html`<div class="stream-item-body">Access: ${entry.kinds.join(", ")}</div>`}
+                </div>
+              `)}
+            </div>`}
         </div>
       `;
     };

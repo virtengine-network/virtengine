@@ -107,8 +107,8 @@ If using default setup, these additional scans would need separate workflows.
 
 **Symptom:**
 ```
-npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fcodex-monitor
-npm error 404  '@virtengine/codex-monitor@X.Y.Z' is not in this registry.
+npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fopenfleet
+npm error 404  '@virtengine/openfleet@X.Y.Z' is not in this registry.
 ```
 OR
 ```
@@ -125,7 +125,7 @@ The workflow uses npm's OIDC Trusted Publishing, which requires:
 
 #### Step 1: Verify Package Exists
 ```bash
-npm view @virtengine/codex-monitor
+npm view @virtengine/openfleet
 ```
 
 If package doesn't exist, create it first:
@@ -135,7 +135,7 @@ If package doesn't exist, create it first:
 #### Step 2: Configure Trusted Publisher on npmjs.com
 
 1. Log in to [npmjs.com](https://www.npmjs.com/)
-2. Navigate to package: `@virtengine/codex-monitor`
+2. Navigate to package: `@virtengine/openfleet`
 3. Go to **Settings** → **Publishing Access**
 4. Click **Add Trusted Publisher**
 5. Select **GitHub Actions**
@@ -143,7 +143,7 @@ If package doesn't exist, create it first:
    ```
    Organization: virtengine
    Repository: virtengine
-   Workflow filename: codex-monitor-publish.yaml
+   Workflow filename: openfleet-publish.yaml
    Environment: npm-publish
    ```
 7. Save configuration
@@ -161,7 +161,7 @@ If package doesn't exist, create it first:
 
 Trigger workflow manually:
 ```bash
-gh workflow run codex-monitor-publish.yaml
+gh workflow run openfleet-publish.yaml
 ```
 
 Check workflow logs for successful OIDC authentication.
@@ -169,7 +169,7 @@ Check workflow logs for successful OIDC authentication.
 **Debugging:**
 
 If still failing, check:
-1. **Workflow file name matches** - Must be exactly `codex-monitor-publish.yaml`
+1. **Workflow file name matches** - Must be exactly `openfleet-publish.yaml`
 2. **Environment name matches** - Must be exactly `npm-publish`
 3. **npm package ownership** - GitHub org must be authorized
 4. **Node version** - Trusted publishing requires npm 11.5.1+ (Node 24+ includes this)
@@ -183,7 +183,7 @@ If OIDC trusted publishing is not feasible:
 3. Update workflow to use token:
    ```yaml
    - name: Publish
-     working-directory: scripts/codex-monitor
+     working-directory: scripts/openfleet
      run: npm publish --access public
      env:
        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -226,7 +226,7 @@ actionlint
 
 Test publishing without actually publishing:
 ```bash
-gh workflow run codex-monitor-publish.yaml -f dry-run=true
+gh workflow run openfleet-publish.yaml -f dry-run=true
 ```
 
 ---
@@ -271,7 +271,7 @@ These workflows must pass before merging PRs:
 **Check:**
 1. Branch protection rules
 2. Workflow `on:` conditions
-3. Path filters (e.g., `paths: ["scripts/codex-monitor/**"]`)
+3. Path filters (e.g., `paths: ["scripts/openfleet/**"]`)
 
 **Debug:**
 ```yaml

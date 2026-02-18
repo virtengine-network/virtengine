@@ -608,7 +608,7 @@ function renderPresence() {
   return `
     <section class="card">
       <h2>Presence</h2>
-      <p>Active codex-monitor instances discovered via presence beacons.</p>
+      <p>Active openfleet instances discovered via presence beacons.</p>
       <div class="stat">
         <strong>${coordinator?.instance_label || coordinator?.instance_id || "none"}</strong>
         <div>Coordinator</div>

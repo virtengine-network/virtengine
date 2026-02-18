@@ -65,8 +65,8 @@ when the default setup is enabled
 
 **Problem**: Workflow failing with:
 ```
-npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fcodex-monitor
-npm error 404  '@virtengine/codex-monitor@0.8.0' is not in this registry.
+npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fopenfleet
+npm error 404  '@virtengine/openfleet@0.8.0' is not in this registry.
 ```
 
 **Root Cause**: npm OIDC trusted publishing not configured
@@ -77,7 +77,7 @@ npm error 404  '@virtengine/codex-monitor@0.8.0' is not in this registry.
 
 #### Part 1: On npmjs.com
 1. Log in to [npmjs.com](https://www.npmjs.com/)
-2. Navigate to package: `@virtengine/codex-monitor`
+2. Navigate to package: `@virtengine/openfleet`
    - If package doesn't exist, create it first (manual publish v0.1.0)
 3. Go to **Settings** → **Publishing Access**
 4. Click **Add Trusted Publisher**
@@ -86,7 +86,7 @@ npm error 404  '@virtengine/codex-monitor@0.8.0' is not in this registry.
    ```
    Organization: virtengine
    Repository: virtengine
-   Workflow filename: codex-monitor-publish.yaml
+   Workflow filename: openfleet-publish.yaml
    Environment: npm-publish
    ```
 7. Save
@@ -101,7 +101,7 @@ npm error 404  '@virtengine/codex-monitor@0.8.0' is not in this registry.
 
 **Verification**:
 ```bash
-gh workflow run codex-monitor-publish.yaml
+gh workflow run openfleet-publish.yaml
 ```
 Watch logs to confirm OIDC authentication succeeds.
 
@@ -153,7 +153,7 @@ https://github.com/virtengine/virtengine/blob/main/_docs/operations/ci-troublesh
 - Reference to troubleshooting guide
 - Explains resolution steps
 
-**codex-monitor-publish.yaml**:
+**openfleet-publish.yaml**:
 - Expanded prerequisites section
 - Added GitHub environment setup instructions
 - Added troubleshooting reference

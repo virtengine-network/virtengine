@@ -853,7 +853,7 @@ class GitHubIssuesAdapter {
     this._owner = process.env.GITHUB_REPO_OWNER || slugInfo?.owner || "unknown";
     this._repo = process.env.GITHUB_REPO_NAME || slugInfo?.repo || "unknown";
 
-    // Codex-monitor label scheme
+    // openfleet label scheme
     this._codexLabels = {
       claimed: "codex:claimed",
       working: "codex:working",

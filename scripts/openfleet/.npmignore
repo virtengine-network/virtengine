@@ -1,6 +1,6 @@
 # Runtime / user config
 .env
-codex-monitor.config.json
+openfleet.config.json
 workspaces.json
 
 # Logs

@@ -458,7 +458,7 @@ async function runRepairAgent(triggerReason, details = "") {
     const agentInfo = getPrimaryAgentInfo();
     const mmHealth = await assessMonitorMonitorHealth();
     const prompt = [
-      "Codex-monitor sentinel autonomous repair request.",
+      "openfleet sentinel autonomous repair request.",
       "",
       `Trigger: ${triggerReason}`,
       `Project: ${projectName}`,

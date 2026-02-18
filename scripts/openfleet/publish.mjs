@@ -135,7 +135,7 @@ function main() {
     if (status === 0 && !dryRun) {
       console.log(
         "\n[publish] REMINDER: deprecate the old npm package to preserve history and redirect users:\n" +
-        "  npm deprecate @virtengine/codex-monitor@'*' \"Renamed to @virtengine/openfleet. Install: npm install -g @virtengine/openfleet\"\n",
+        "  npm deprecate @virtengine/openfleet@'*' \"Renamed to @virtengine/openfleet. Install: npm install -g @virtengine/openfleet\"\n",
       );
     }
     process.exit(status);

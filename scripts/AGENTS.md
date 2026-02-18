@@ -3,8 +3,8 @@
 This document explains the purpose, usage, and modification patterns for the
 scripts/ folder. It is written for human developers and AI agents.
 
-Note: scripts/codex-monitor/ has its own documentation and is intentionally
-excluded from this guide. See scripts/codex-monitor/AGENTS.md.
+Note: scripts/openfleet/ has its own documentation and is intentionally
+excluded from this guide. See scripts/openfleet/AGENTS.md.
 
 ## Module Overview
 - Purpose: operational automation, build helpers, migrations, and one-off
@@ -137,8 +137,8 @@ When to add vs modify
 | scripts/agent-preflight.sh | Bash pre-flight checks before push. | ./scripts/agent-preflight.sh | bash, go, pnpm (optional) |
 | scripts/archive-completed-tasks.ps1 | Archive done VK tasks into _docs/ralph. | pwsh scripts/archive-completed-tasks.ps1 -DryRun | PowerShell, VK CLI wrapper (ve-kanban) |
 | scripts/_check-parse.ps1 | Parse ve-orchestrator.ps1 and report errors. | pwsh scripts/_check-parse.ps1 | PowerShell 7+ |
-| scripts/_check-ps1-syntax.ps1 | Syntax check PS1 files (defaults to codex-monitor). | pwsh scripts/_check-ps1-syntax.ps1 -Path scripts/codex-monitor/ve-orchestrator.ps1 | PowerShell 7+ |
-| scripts/_consolidate-refs.ps1 | One-off migration to codex-monitor paths. | pwsh scripts/_consolidate-refs.ps1 | PowerShell, git |
+| scripts/_check-ps1-syntax.ps1 | Syntax check PS1 files (defaults to openfleet). | pwsh scripts/_check-ps1-syntax.ps1 -Path scripts/openfleet/ve-orchestrator.ps1 | PowerShell 7+ |
+| scripts/_consolidate-refs.ps1 | One-off migration to openfleet paths. | pwsh scripts/_consolidate-refs.ps1 | PowerShell, git |
 | scripts/_show-line.ps1 | Print specific line numbers from orchestrator. | pwsh scripts/_show-line.ps1 | PowerShell 7+ |
 | scripts/_validate-syntax.ps1 | Parse orchestrator; ignore known parse error line. | pwsh scripts/_validate-syntax.ps1 | PowerShell 7+ |
 | scripts/VK-OPTIMIZATION-README.md | Operational notes for VK DB tuning. | Readme only. | N/A |
@@ -279,7 +279,7 @@ Note: run PowerShell scripts with pwsh (PowerShell 7+) unless stated.
   remove tasks/attempts from VK when merged PRs exist.
 - Parameters: -AgeHours, -MinIntervalMinutes, -MaxTasks, -DryRun.
 - Env overrides: VE_COMPLETED_TASK_ARCHIVE_* values for age/interval/max/dry-run.
-- Permissions: VK API access through ve-kanban.ps1 (see codex-monitor docs).
+- Permissions: VK API access through ve-kanban.ps1 (see openfleet docs).
 - Errors: throws when VK config or ve-kanban wrapper missing; non-zero on failures.
 - Example:
   - pwsh scripts/archive-completed-tasks.ps1 -AgeHours 48 -DryRun
@@ -292,20 +292,20 @@ Note: run PowerShell scripts with pwsh (PowerShell 7+) unless stated.
 - Example: pwsh scripts/agent-preflight.ps1
 
 ### scripts/_check-parse.ps1
-- Purpose: Parse scripts/codex-monitor/ve-orchestrator.ps1 and print errors.
+- Purpose: Parse scripts/openfleet/ve-orchestrator.ps1 and print errors.
 - Parameters: none.
 - Errors: exits 1 if parse errors exist.
 - Example: pwsh scripts/_check-parse.ps1
 
 ### scripts/_check-ps1-syntax.ps1
-- Purpose: Syntax-check PS1 files; defaults to codex-monitor wrappers.
+- Purpose: Syntax-check PS1 files; defaults to openfleet wrappers.
 - Parameters: -Path (array of PS1 paths).
 - Errors: exits 1 if any parse errors found.
-- Example: pwsh scripts/_check-ps1-syntax.ps1 -Path scripts/codex-monitor/ve-kanban.ps1
+- Example: pwsh scripts/_check-ps1-syntax.ps1 -Path scripts/openfleet/ve-kanban.ps1
 
 ### scripts/_consolidate-refs.ps1
 - Purpose: One-off migration to move ve-kanban/ve-orchestrator references into
-  scripts/codex-monitor/.
+  scripts/openfleet/.
 - Parameters: none (script edits files in-place).
 - Errors: throws on file I/O failures; git operations may fail if files missing.
 - Example: pwsh scripts/_consolidate-refs.ps1

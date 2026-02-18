@@ -115,7 +115,7 @@ updates:
 
   # npm dependencies (Codex Monitor)
   - package-ecosystem: "npm"
-    directory: "/scripts/codex-monitor"
+    directory: "/scripts/openfleet"
     schedule:
       interval: "weekly"
       day: "wednesday"

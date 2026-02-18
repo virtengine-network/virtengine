@@ -11,7 +11,7 @@ This guide documents the Phase 2 Slopdev workshop setup for coordinating multipl
 
 ## Workspace Registry
 
-Workspaces are defined in `scripts/codex-monitor/workspaces.json`.
+Workspaces are defined in `scripts/openfleet/workspaces.json`.
 
 Example:
 
@@ -35,10 +35,10 @@ Example:
 
 ### Add a new workspace
 
-1. Add a new entry to `scripts/codex-monitor/workspaces.json`.
+1. Add a new entry to `scripts/openfleet/workspaces.json`.
 2. Ensure the `vk_workspace_id` matches the workspace ID in Vibe-Kanban.
 3. Add `mentions` for `@workspace` routing (optional).
-4. Restart `pnpm -C scripts/codex-monitor start` on the workspace.
+4. Restart `pnpm -C scripts/openfleet start` on the workspace.
 
 No code changes are required for new workspaces.
 

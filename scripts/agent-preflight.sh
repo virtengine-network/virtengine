@@ -28,7 +28,7 @@ ERRORS=0
 echo "$CHANGED_FILES" | grep -q '\.go$' && HAS_GO=true || true
 echo "$CHANGED_FILES" | grep -q '^portal/' && HAS_PORTAL=true || true
 echo "$CHANGED_FILES" | grep -qE '^go\.(mod|sum)$' && HAS_GOMOD=true || true
-echo "$CHANGED_FILES" | grep -q '^scripts/codex-monitor/' && HAS_CODEX_MONITOR=true || true
+echo "$CHANGED_FILES" | grep -q '^scripts/openfleet/' && HAS_CODEX_MONITOR=true || true
 
 if $HAS_GO || $HAS_GOMOD; then
     echo "--- Go checks ---"
@@ -79,15 +79,15 @@ fi
 if $HAS_CODEX_MONITOR; then
     echo "--- Codex Monitor checks ---"
 
-    if [ ! -d "scripts/codex-monitor/node_modules" ]; then
+    if [ ! -d "scripts/openfleet/node_modules" ]; then
         echo "  npm install..."
-        cd scripts/codex-monitor
+        cd scripts/openfleet
         npm install 2>&1 || { echo "FAIL: npm install"; ERRORS=$((ERRORS+1)); }
         cd - >/dev/null
     fi
 
     echo "  Prepublish check..."
-    cd scripts/codex-monitor
+    cd scripts/openfleet
     node prepublish-check.mjs 2>&1 || { echo "FAIL: prepublish check"; ERRORS=$((ERRORS+1)); }
     cd - >/dev/null
 fi

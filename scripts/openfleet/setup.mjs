@@ -3142,7 +3142,7 @@ async function main() {
           env.ORCHESTRATOR_SCRIPT = customPath;
         } else {
           info(
-            "No orchestrator script configured. Codex-monitor will manage tasks directly via Vibe-Kanban.",
+            "No orchestrator script configured. openfleet will manage tasks directly via Vibe-Kanban.",
           );
         }
       }
@@ -3160,7 +3160,7 @@ async function main() {
         );
       } else {
         info(
-          "No orchestrator script configured. Codex-monitor will manage tasks directly via Vibe-Kanban.",
+          "No orchestrator script configured. openfleet will manage tasks directly via Vibe-Kanban.",
         );
       }
     }

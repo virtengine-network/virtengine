@@ -49,7 +49,7 @@ If you notice unexpected modified/untracked files, assume another agent/subagent
   - `api/AGENTS.md`
   - `sdk/ts/AGENTS.md`
   - `x/provider/AGENTS.md`
-  - `scripts/codex-monitor/AGENTS.md`
+  - `scripts/openfleet/AGENTS.md`
 
 ## Core Concepts
 

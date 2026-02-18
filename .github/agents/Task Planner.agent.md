@@ -122,12 +122,12 @@ tools:
 > `agent/runSubagent` is not exposed in current GitHub Copilot Chat sessions.
 > Use `search/searchSubagent` for repository exploration tasks.
 
-Use `scripts/codex-monitor/ve-kanban.ps1` to manage the backlog directly via the HTTP API. Do **NOT** use MCP vibe-kanban tools. Tasks should be detailed and thorough - all tasks should be tasks that involve lots of changes (minimum of 2-10k lines of code changes). Tasks should be prioritized into task execution order & parallel execution where possible. For e.g. 1A-1D would be 4 tasks that are triggered in parallel and before tasks 2A-2X which would be sequential tasks to be triggered after 1A-1D are complete.
+Use `scripts/openfleet/ve-kanban.ps1` to manage the backlog directly via the HTTP API. Do **NOT** use MCP vibe-kanban tools. Tasks should be detailed and thorough - all tasks should be tasks that involve lots of changes (minimum of 2-10k lines of code changes). Tasks should be prioritized into task execution order & parallel execution where possible. For e.g. 1A-1D would be 4 tasks that are triggered in parallel and before tasks 2A-2X which would be sequential tasks to be triggered after 1A-1D are complete.
 
 When creating tasks, use the direct CLI wrapper:
 
 ```powershell
-pwsh scripts/codex-monitor/ve-kanban.ps1 create --title "<title>" --description "<markdown>" --status todo
+pwsh scripts/openfleet/ve-kanban.ps1 create --title "<title>" --description "<markdown>" --status todo
 ```
 
 ---

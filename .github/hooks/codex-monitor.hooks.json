@@ -5,7 +5,7 @@
       "type": "command",
       "command": [
         "node",
-        "scripts/codex-monitor/agent-hook-bridge.mjs",
+        "scripts/openfleet/agent-hook-bridge.mjs",
         "--agent",
         "copilot",
         "--event",
@@ -19,7 +19,7 @@
       "type": "command",
       "command": [
         "node",
-        "scripts/codex-monitor/agent-hook-bridge.mjs",
+        "scripts/openfleet/agent-hook-bridge.mjs",
         "--agent",
         "copilot",
         "--event",
@@ -34,7 +34,7 @@
         "type": "command",
         "command": [
           "node",
-          "scripts/codex-monitor/agent-hook-bridge.mjs",
+          "scripts/openfleet/agent-hook-bridge.mjs",
           "--agent",
           "copilot",
           "--event",
@@ -50,7 +50,7 @@
         "type": "command",
         "command": [
           "node",
-          "scripts/codex-monitor/agent-hook-bridge.mjs",
+          "scripts/openfleet/agent-hook-bridge.mjs",
           "--agent",
           "copilot",
           "--event",

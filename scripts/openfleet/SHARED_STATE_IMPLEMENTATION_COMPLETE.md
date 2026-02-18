@@ -2,7 +2,7 @@
 
 ## Problem Solved
 
-Codex-monitor now handles shared GitHub/Jira kanban environments with multiple users, agents, and workstations reliably. Tasks no longer get duplicated, lost, or desynchronized across the fleet.
+openfleet now handles shared GitHub/Jira kanban environments with multiple users, agents, and workstations reliably. Tasks no longer get duplicated, lost, or desynchronized across the fleet.
 
 ## Solution Architecture
 

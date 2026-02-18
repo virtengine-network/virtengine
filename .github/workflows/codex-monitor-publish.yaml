@@ -1,7 +1,7 @@
-# Publish @virtengine/codex-monitor to npm via OIDC Trusted Publishing
+# Publish @virtengine/openfleet to npm via OIDC Trusted Publishing
 #
 # Triggers:
-#   1. Push to main that changes scripts/codex-monitor/** (auto-publish)
+#   1. Push to main that changes scripts/openfleet/** (auto-publish)
 #   2. Manual dispatch with optional version bump
 #
 # Security:
@@ -10,14 +10,14 @@
 #   - Version bump detection prevents redundant publishes
 #
 # Prerequisites (one-time setup):
-#   1. Package must exist on npm: @virtengine/codex-monitor
+#   1. Package must exist on npm: @virtengine/openfleet
 #   2. Configure Trusted Publisher on npmjs.com:
 #      - Navigate to package → Settings → Publishing Access → Add Trusted Publisher
 #      - Select "GitHub Actions"
 #      - Configure:
 #        * Organization: virtengine
 #        * Repository: virtengine
-#        * Workflow filename: codex-monitor-publish.yaml
+#        * Workflow filename: openfleet-publish.yaml
 #        * Environment: npm-publish
 #      - Save
 #   3. Configure GitHub environment:
@@ -37,11 +37,11 @@ on:
     push:
         branches: [main]
         paths:
-            - "scripts/codex-monitor/**"
-            - "!scripts/codex-monitor/.env*"
-            - "!scripts/codex-monitor/logs/**"
-            - "!scripts/codex-monitor/*.config.json"
-            - "!scripts/codex-monitor/workspaces.json"
+            - "scripts/openfleet/**"
+            - "!scripts/openfleet/.env*"
+            - "!scripts/openfleet/logs/**"
+            - "!scripts/openfleet/*.config.json"
+            - "!scripts/openfleet/workspaces.json"
     workflow_dispatch:
         inputs:
             dry-run:
@@ -54,7 +54,7 @@ on:
                 default: false
 
 concurrency:
-    group: codex-monitor-publish
+    group: openfleet-publish
     cancel-in-progress: false # never cancel an in-flight publish
 
 permissions:
@@ -73,24 +73,24 @@ jobs:
         steps:
             - uses: actions/checkout@v4
               with:
-                  sparse-checkout: scripts/codex-monitor
+                  sparse-checkout: scripts/openfleet
 
             - uses: actions/setup-node@v4
               with:
                   node-version: ${{ env.NODE_VERSION }}
                   registry-url: "https://registry.npmjs.org"
                   cache: "npm"
-                  cache-dependency-path: scripts/codex-monitor/package-lock.json
+                  cache-dependency-path: scripts/openfleet/package-lock.json
 
             - name: Compare versions
               id: compare
-              working-directory: scripts/codex-monitor
+              working-directory: scripts/openfleet
               run: |
                   LOCAL=$(node -p "require('./package.json').version")
                   echo "local-version=$LOCAL" >> "$GITHUB_OUTPUT"
 
                   # Fetch registry version (may 404 if first publish)
-                  REGISTRY=$(npm view @virtengine/codex-monitor version 2>/dev/null || echo "0.0.0")
+                  REGISTRY=$(npm view @virtengine/openfleet version 2>/dev/null || echo "0.0.0")
                   echo "registry-version=$REGISTRY" >> "$GITHUB_OUTPUT"
 
                   # Semver comparison via node
@@ -119,33 +119,33 @@ jobs:
         steps:
             - uses: actions/checkout@v4
               with:
-                  sparse-checkout: scripts/codex-monitor
+                  sparse-checkout: scripts/openfleet
 
             - uses: actions/setup-node@v4
               with:
                   node-version: ${{ env.NODE_VERSION }}
                   registry-url: "https://registry.npmjs.org"
                   cache: "npm"
-                  cache-dependency-path: scripts/codex-monitor/package-lock.json
+                  cache-dependency-path: scripts/openfleet/package-lock.json
 
             - name: Install dependencies
-              working-directory: scripts/codex-monitor
+              working-directory: scripts/openfleet
               run: npm install --ignore-scripts
 
             - name: Test
-              working-directory: scripts/codex-monitor
+              working-directory: scripts/openfleet
               run: npm test
 
             - name: Publish
               if: ${{ !inputs.dry-run }}
-              working-directory: scripts/codex-monitor
+              working-directory: scripts/openfleet
               run: npm publish --access public --provenance
               # No NODE_AUTH_TOKEN needed — npm v11.5.1+ handles OIDC auth natively
               # --provenance is optional with trusted publishing but kept for backward compat
 
             - name: Publish (dry run)
               if: ${{ inputs.dry-run }}
-              working-directory: scripts/codex-monitor
+              working-directory: scripts/openfleet
               run: npm publish --access public --dry-run
 
             - name: Verify publication
@@ -153,10 +153,10 @@ jobs:
               run: |
                   echo "⏳ Waiting for registry propagation..."
                   sleep 10
-                  PUBLISHED=$(npm view @virtengine/codex-monitor version 2>/dev/null || echo "NOT_FOUND")
+                  PUBLISHED=$(npm view @virtengine/openfleet version 2>/dev/null || echo "NOT_FOUND")
                   EXPECTED="${{ needs.check.outputs.local-version }}"
                   if [ "$PUBLISHED" = "$EXPECTED" ]; then
-                    echo "✅ Successfully published @virtengine/codex-monitor@$PUBLISHED"
+                    echo "✅ Successfully published @virtengine/openfleet@$PUBLISHED"
                   else
                     echo "⚠️ Registry shows $PUBLISHED, expected $EXPECTED (may still be propagating)"
                   fi
@@ -167,7 +167,7 @@ jobs:
                   echo "" >> "$GITHUB_STEP_SUMMARY"
                   echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
                   echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-                  echo "| Package | \`@virtengine/codex-monitor\` |" >> "$GITHUB_STEP_SUMMARY"
+                  echo "| Package | \`@virtengine/openfleet\` |" >> "$GITHUB_STEP_SUMMARY"
                   echo "| Version | \`${{ needs.check.outputs.local-version }}\` |" >> "$GITHUB_STEP_SUMMARY"
                   echo "| Previous | \`${{ needs.check.outputs.registry-version }}\` |" >> "$GITHUB_STEP_SUMMARY"
                   echo "| Dry Run | \`${{ inputs.dry-run || 'false' }}\` |" >> "$GITHUB_STEP_SUMMARY"

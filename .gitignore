@@ -77,15 +77,15 @@ nul
 # Task planning files (agent-generated)
 _docs/ralph/tasks/
 .localnet*
-scripts/codex-monitor/logs/*
-scripts/codex-monitor/codex-monitor.config.json
-scripts/codex-monitor/.codex-monitor.json
-scripts/codex-monitor/codex-monitor.json
-scripts/codex-monitor/.cache/
+scripts/openfleet/logs/*
+scripts/openfleet/openfleet.config.json
+scripts/openfleet/.openfleet.json
+scripts/openfleet/openfleet.json
+scripts/openfleet/.cache/
 pkg/provider_daemon/audit.log
 scripts/.cache/ve-orchestrator-copilot.json
 scripts/.cache/*
-/.codex-monitor/
+/.openfleet/
 tmpclaude*
 vk-stdout.log
 vk-stderr.log

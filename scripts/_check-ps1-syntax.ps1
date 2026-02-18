@@ -8,7 +8,7 @@ param(
 )
 
 if (-not $Path) {
-    $scriptDir = Join-Path $PSScriptRoot "codex-monitor"
+    $scriptDir = Join-Path $PSScriptRoot "openfleet"
     $Path = @(
         (Join-Path $scriptDir "ve-orchestrator.ps1"),
         (Join-Path $scriptDir "ve-kanban.ps1")
