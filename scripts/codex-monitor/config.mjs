@@ -1056,6 +1056,10 @@ export function loadConfig(argv = process.argv, options = {}) {
       process.env.JIRA_ISSUE_TYPE ||
       configData.kanban?.jira?.issueType ||
       "Task",
+    baseBranchField:
+      process.env.JIRA_CUSTOM_FIELD_BASE_BRANCH ||
+      configData.kanban?.jira?.baseBranchField ||
+      "",
     statusMapping: Object.freeze({
       todo:
         process.env.JIRA_STATUS_TODO ||
@@ -1181,6 +1185,11 @@ export function loadConfig(argv = process.argv, options = {}) {
       process.env.INTERNAL_EXECUTOR_PARALLEL ||
         internalExecutorConfig.maxParallel ||
         3,
+    ),
+    baseBranchParallelLimit: Number(
+      process.env.INTERNAL_EXECUTOR_BASE_BRANCH_PARALLEL ||
+        internalExecutorConfig.baseBranchParallelLimit ||
+        0,
     ),
     pollIntervalMs: Number(
       process.env.INTERNAL_EXECUTOR_POLL_MS ||

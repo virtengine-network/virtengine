@@ -3061,6 +3061,9 @@ class JiraAdapter {
       ignoreReason: process.env.JIRA_CUSTOM_FIELD_IGNORE_REASON || "",
       stateJson: process.env.JIRA_CUSTOM_FIELD_SHARED_STATE || "",
     };
+    this._customFieldBaseBranch = String(
+      process.env.JIRA_CUSTOM_FIELD_BASE_BRANCH || "",
+    ).trim();
     this._jiraFieldByNameCache = null;
   }
 
@@ -3246,8 +3249,17 @@ class JiraAdapter {
     const description = this._commentToText(fields.description);
     const branchMatch = description.match(/branch:\s*`?([^\s`]+)`?/i);
     const prMatch = description.match(/pr:\s*#?(\d+)/i);
+    const baseBranchFromField = this._customFieldBaseBranch
+      ? fields[this._customFieldBaseBranch]
+      : null;
     const baseBranch = normalizeBranchName(
-      extractBaseBranchFromLabels(labels) || extractBaseBranchFromText(description),
+      extractBaseBranchFromLabels(labels) ||
+        extractBaseBranchFromText(description) ||
+        (typeof baseBranchFromField === "string"
+          ? baseBranchFromField
+          : baseBranchFromField?.value ||
+            baseBranchFromField?.name ||
+            baseBranchFromField),
     );
     const issueKey = String(issue?.key || "");
     let status = this._normalizeJiraStatus(fields.status);
@@ -3786,6 +3798,9 @@ class JiraAdapter {
       const nextDesc = upsertBaseBranchMarker(currentDesc, baseBranch);
       fields.description = this._textToAdf(nextDesc);
     }
+    if (baseBranch && this._customFieldBaseBranch) {
+      fields[this._customFieldBaseBranch] = baseBranch;
+    }
     if (patch.assignee) {
       fields.assignee = { accountId: String(patch.assignee) };
     }
@@ -3859,6 +3874,9 @@ class JiraAdapter {
       },
       labels,
     };
+    if (baseBranch && this._customFieldBaseBranch) {
+      fields[this._customFieldBaseBranch] = baseBranch;
+    }
     if (isSubtask && parentKey) {
       fields.parent = { key: parentKey };
     }

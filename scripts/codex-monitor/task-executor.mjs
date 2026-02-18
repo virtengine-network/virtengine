@@ -342,6 +342,17 @@ function resolveTaskBaseBranch(task, branchRouting, defaultTargetBranch) {
   return normalizeBranchName(defaultTargetBranch);
 }
 
+function normalizeBaseBranchKey(baseBranch, defaultTargetBranch) {
+  const candidate =
+    normalizeBranchName(baseBranch) || normalizeBranchName(defaultTargetBranch);
+  if (!candidate) return null;
+  try {
+    return normalizeBaseBranch(candidate, "origin").branch;
+  } catch {
+    return candidate;
+  }
+}
+
 function ensureBaseBranchAvailable(repoRoot, baseBranch, defaultTargetBranch) {
   const fallback = normalizeBranchName(defaultTargetBranch) || "origin/main";
   let candidate = normalizeBranchName(baseBranch) || fallback;
@@ -829,6 +840,7 @@ async function commentOnIssue(task, commentBody) {
  * @typedef {Object} TaskExecutorOptions
  * @property {string}   mode            - "internal" | "vk" | "hybrid"
  * @property {number}   maxParallel     - Max concurrent agent slots (default: 3)
+ * @property {number}   baseBranchParallelLimit - Max concurrent tasks per base branch (0 = unlimited)
  * @property {number}   pollIntervalMs  - How often to check for tasks (default: 30000)
  * @property {string}   sdk             - SDK preference: "codex" | "copilot" | "claude" | "auto"
  * @property {number}   taskTimeoutMs   - Timeout per task execution (default: 90 * 60 * 1000)
@@ -851,6 +863,7 @@ async function commentOnIssue(task, commentBody) {
  * @property {string} taskId
  * @property {string} taskTitle
  * @property {string} branch
+ * @property {string|null} baseBranch
  * @property {string} worktreePath
  * @property {string} threadKey       - agent-pool thread key (taskId used as threadKey)
  * @property {number} startedAt       - timestamp
@@ -874,6 +887,7 @@ class TaskExecutor {
     const defaults = {
       mode: "internal",
       maxParallel: 3,
+      baseBranchParallelLimit: 0,
       pollIntervalMs: 30_000,
       sdk: "auto",
       taskTimeoutMs: 6 * 60 * 60 * 1000, // 6 hours — stream-based watchdog handles real issues
@@ -895,6 +909,12 @@ class TaskExecutor {
 
     this.mode = merged.mode;
     this.maxParallel = merged.maxParallel;
+    this.baseBranchParallelLimit = clampInt(
+      merged.baseBranchParallelLimit,
+      0,
+      1000,
+      0,
+    );
     this.pollIntervalMs = merged.pollIntervalMs;
     this.sdk = merged.sdk;
     this.taskTimeoutMs = merged.taskTimeoutMs;
@@ -1067,7 +1087,7 @@ class TaskExecutor {
     });
 
     console.log(
-      `${TAG} initialized (mode=${this.mode}, maxParallel=${this.maxParallel}, sdk=${this.sdk})`,
+      `${TAG} initialized (mode=${this.mode}, maxParallel=${this.maxParallel}, baseBranchParallelLimit=${this.baseBranchParallelLimit}, sdk=${this.sdk})`,
     );
   }
 
@@ -2148,7 +2168,10 @@ class TaskExecutor {
       resetToTodo++;
     }
 
-    const toDispatch = resumable.slice(0, available);
+    const toDispatch = this._selectTasksForBaseBranchLimit(
+      resumable,
+      available,
+    );
     for (const task of toDispatch) {
       void this.executeTask(task).catch((err) => {
         console.error(
@@ -2186,12 +2209,14 @@ class TaskExecutor {
         : 0,
       mode: this.mode,
       maxParallel: this.maxParallel,
+      baseBranchParallelLimit: this.baseBranchParallelLimit,
       sdk: this.sdk === "auto" ? getPoolSdkName() : this.sdk,
       activeSlots: this._activeSlots.size,
       slots: Array.from(this._activeSlots.values()).map((s) => ({
         taskId: s.taskId,
         taskTitle: s.taskTitle,
         branch: s.branch,
+        baseBranch: s.baseBranch || null,
         sdk: s.sdk,
         model: s.model || "",
         attempt: s.attempt,
@@ -2426,6 +2451,68 @@ class TaskExecutor {
     this._taskClaimRenewTimers.clear();
   }
 
+  _resolveTaskBaseBranch(task) {
+    return resolveTaskBaseBranch(
+      task,
+      this.branchRouting,
+      this.defaultTargetBranch,
+    );
+  }
+
+  _resolveTaskBaseBranchKey(task) {
+    return normalizeBaseBranchKey(
+      this._resolveTaskBaseBranch(task),
+      this.defaultTargetBranch,
+    );
+  }
+
+  _buildActiveBaseBranchCounts() {
+    const counts = new Map();
+    for (const slot of this._activeSlots.values()) {
+      const key = normalizeBaseBranchKey(
+        slot.baseBranch,
+        this.defaultTargetBranch,
+      );
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return counts;
+  }
+
+  _selectTasksForBaseBranchLimit(candidates, remaining) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+    if (!Number.isFinite(remaining) || remaining <= 0) return [];
+    const limit = Number(this.baseBranchParallelLimit || 0);
+    if (!Number.isFinite(limit) || limit <= 0) {
+      return candidates.slice(0, remaining);
+    }
+
+    const counts = this._buildActiveBaseBranchCounts();
+    const selected = [];
+    for (const task of candidates) {
+      if (selected.length >= remaining) break;
+      const key = this._resolveTaskBaseBranchKey(task);
+      if (!key) {
+        selected.push(task);
+        continue;
+      }
+      const current = counts.get(key) || 0;
+      if (current >= limit) continue;
+      counts.set(key, current + 1);
+      selected.push(task);
+    }
+    return selected;
+  }
+
+  _isBaseBranchLimitReached(task) {
+    const limit = Number(this.baseBranchParallelLimit || 0);
+    if (!Number.isFinite(limit) || limit <= 0) return false;
+    const key = this._resolveTaskBaseBranchKey(task);
+    if (!key) return false;
+    const counts = this._buildActiveBaseBranchCounts();
+    return (counts.get(key) || 0) >= limit;
+  }
+
   /**
    * Throttle duplicate "claimed by another orchestrator" issue comments.
    *
@@ -2590,7 +2677,10 @@ class TaskExecutor {
 
       // Fill remaining slots
       const remaining = this.maxParallel - this._activeSlots.size;
-      const toDispatch = eligible.slice(0, remaining);
+      const toDispatch = this._selectTasksForBaseBranchLimit(
+        eligible,
+        remaining,
+      );
 
       for (const task of toDispatch) {
         // Normalize task id
@@ -2626,6 +2716,13 @@ class TaskExecutor {
       );
       return;
     }
+    if (this._isBaseBranchLimitReached(task)) {
+      const baseBranch = this._resolveTaskBaseBranch(task);
+      console.log(
+        `${TAG} base-branch parallel limit reached (${this.baseBranchParallelLimit}) for "${taskTitle}" (${taskId}) on ${baseBranch || "default"} — deferring`,
+      );
+      return;
+    }
     const requestedBranch = String(
       options?.branch || options?.resumeBranch || "",
     ).trim();
@@ -2634,6 +2731,7 @@ class TaskExecutor {
       task.branchName ||
       task.meta?.branch_name ||
       `ve/${taskId.substring(0, 8)}-${slugify(taskTitle)}`;
+    const baseBranch = this._resolveTaskBaseBranch(task);
     let taskClaimToken = null;
 
     const releaseTaskClaimLock = async () => {
@@ -2747,6 +2845,7 @@ class TaskExecutor {
       taskId,
       taskTitle,
       branch,
+      baseBranch: baseBranch || null,
       worktreePath: null,
       threadKey: taskId,
       startedAt: validRecoveredStartedAt ? recoveredStartedAt : Date.now(),
@@ -4859,6 +4958,11 @@ export function loadExecutorOptionsFromConfig() {
     mode: envMode || configExec.mode || "internal",
     maxParallel: Number(
       process.env.INTERNAL_EXECUTOR_PARALLEL || configExec.maxParallel || 3,
+    ),
+    baseBranchParallelLimit: Number(
+      process.env.INTERNAL_EXECUTOR_BASE_BRANCH_PARALLEL ||
+        configExec.baseBranchParallelLimit ||
+        0,
     ),
     pollIntervalMs: Number(
       process.env.INTERNAL_EXECUTOR_POLL_MS ||

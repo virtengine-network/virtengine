@@ -629,6 +629,11 @@ export function upsertFromExternal(externalTask) {
   const existing = _store.tasks[externalTask.id];
 
   if (existing) {
+    const externalBaseBranch =
+      externalTask.baseBranch ??
+      externalTask.base_branch ??
+      externalTask.meta?.base_branch ??
+      externalTask.meta?.baseBranch;
     // Update only externally-controlled fields
     if (externalTask.title !== undefined) existing.title = externalTask.title;
     if (externalTask.description !== undefined)
@@ -639,6 +644,8 @@ export function upsertFromExternal(externalTask) {
       existing.priority = externalTask.priority;
     if (externalTask.projectId !== undefined)
       existing.projectId = externalTask.projectId;
+    if (externalBaseBranch !== undefined)
+      existing.baseBranch = externalBaseBranch;
     if (externalTask.branchName !== undefined)
       existing.branchName = externalTask.branchName;
     if (externalTask.prNumber !== undefined)
@@ -685,8 +692,14 @@ export function upsertFromExternal(externalTask) {
   }
 
   // New task from external — create it
+  const externalBaseBranch =
+    externalTask.baseBranch ??
+    externalTask.base_branch ??
+    externalTask.meta?.base_branch ??
+    externalTask.meta?.baseBranch;
   const task = defaultTask({
     ...externalTask,
+    ...(externalBaseBranch !== undefined ? { baseBranch: externalBaseBranch } : {}),
     externalStatus: externalTask.status || null,
     syncDirty: false,
     lastSyncedAt: now(),

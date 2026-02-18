@@ -343,6 +343,12 @@ export class SyncEngine {
         ...ext,
         status: normalizedExternalStatus,
       };
+      const externalBaseBranch =
+        normalizedExt.baseBranch ??
+        normalizedExt.base_branch ??
+        normalizedExt.meta?.base_branch ??
+        normalizedExt.meta?.baseBranch ??
+        null;
 
       try {
         const internal = internalById.get(ext.id);
@@ -370,6 +376,7 @@ export class SyncEngine {
             assignee: normalizedExt.assignee ?? internal.assignee,
             priority: normalizedExt.priority ?? internal.priority,
             projectId: normalizedExt.projectId ?? internal.projectId,
+            baseBranch: externalBaseBranch ?? internal.baseBranch,
             branchName: normalizedExt.branchName ?? internal.branchName,
             prNumber: normalizedExt.prNumber ?? internal.prNumber,
             prUrl: normalizedExt.prUrl ?? internal.prUrl,
@@ -385,6 +392,17 @@ export class SyncEngine {
         // ── Existing task — check for external status change ──
         const oldExternal = normalizeStatusLabel(internal.externalStatus);
         const newExternal = normalizedExternalStatus;
+
+        if (
+          externalBaseBranch &&
+          externalBaseBranch !== internal.baseBranch
+        ) {
+          updateTask(ext.id, {
+            baseBranch: externalBaseBranch,
+            externalBackend:
+              normalizedExt.backend ?? normalizedExt.externalBackend ?? null,
+          });
+        }
 
         // Read shared state metadata from external adapter (e.g., GitHub comments)
         if (SHARED_STATE_ENABLED) {
@@ -555,6 +573,18 @@ export class SyncEngine {
     );
 
     for (const task of dirtyTasks) {
+      const baseBranchCandidate =
+        task.baseBranch ??
+        task.base_branch ??
+        task.meta?.base_branch ??
+        task.meta?.baseBranch ??
+        null;
+      const metaBaseBranch =
+        task.meta?.base_branch ?? task.meta?.baseBranch ?? null;
+      const wantsBaseBranch =
+        baseBranchCandidate &&
+        String(baseBranchCandidate) !== String(metaBaseBranch);
+
       // Check shared state for conflicts before pushing
       if (SHARED_STATE_ENABLED) {
         try {
@@ -603,7 +633,14 @@ export class SyncEngine {
       }
 
       try {
-        await this.#updateExternal(pushId, task.status);
+        if (wantsBaseBranch) {
+          await this.#updateExternalPatch(pushId, {
+            status: task.status,
+            baseBranch: baseBranchCandidate,
+          });
+        } else {
+          await this.#updateExternal(pushId, task.status);
+        }
         markSynced(task.id);
         result.pushed++;
         console.log(TAG, `Pushed ${task.id} → ${task.status}`);
@@ -624,7 +661,14 @@ export class SyncEngine {
           await this.#sleep(SyncEngine.RATE_LIMIT_DELAY_MS);
           // Retry once after back-off
           try {
-            await this.#updateExternal(pushId, task.status);
+            if (wantsBaseBranch) {
+              await this.#updateExternalPatch(pushId, {
+                status: task.status,
+                baseBranch: baseBranchCandidate,
+              });
+            } else {
+              await this.#updateExternal(pushId, task.status);
+            }
             markSynced(task.id);
             result.pushed++;
             this.#metrics.rateLimitRetrySuccesses++;
@@ -787,8 +831,27 @@ export class SyncEngine {
       return;
     }
 
+    const baseBranchCandidate =
+      task.baseBranch ??
+      task.base_branch ??
+      task.meta?.base_branch ??
+      task.meta?.baseBranch ??
+      null;
+    const metaBaseBranch =
+      task.meta?.base_branch ?? task.meta?.baseBranch ?? null;
+    const wantsBaseBranch =
+      baseBranchCandidate &&
+      String(baseBranchCandidate) !== String(metaBaseBranch);
+
     try {
-      await this.#updateExternal(pushId, task.status);
+      if (wantsBaseBranch) {
+        await this.#updateExternalPatch(pushId, {
+          status: task.status,
+          baseBranch: baseBranchCandidate,
+        });
+      } else {
+        await this.#updateExternal(pushId, task.status);
+      }
       markSynced(taskId);
       console.log(
         TAG,
@@ -908,6 +971,19 @@ export class SyncEngine {
       return await this.#kanbanAdapter.updateTaskStatus(taskId, status);
     }
     return await updateExternalStatus(taskId, status);
+  }
+
+  async #updateExternalPatch(taskId, patch) {
+    if (
+      this.#kanbanAdapter &&
+      typeof this.#kanbanAdapter.updateTask === "function"
+    ) {
+      return await this.#kanbanAdapter.updateTask(taskId, patch);
+    }
+    if (typeof patch?.status === "string") {
+      return await this.#updateExternal(taskId, patch.status);
+    }
+    return null;
   }
 
   /**
