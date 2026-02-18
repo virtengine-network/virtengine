@@ -196,9 +196,9 @@ function Header() {
   const freshnessRaw = dataFreshness.value;
   let freshness = null;
   if (typeof freshnessRaw === "number") {
-    freshness = freshnessRaw;
+    freshness = Number.isFinite(freshnessRaw) ? freshnessRaw : null;
   } else if (freshnessRaw && typeof freshnessRaw === "object") {
-    const vals = Object.values(freshnessRaw).filter((v) => typeof v === "number");
+    const vals = Object.values(freshnessRaw).filter((v) => Number.isFinite(v));
     freshness = vals.length ? Math.max(...vals) : null;
   }
 
@@ -219,10 +219,10 @@ function Header() {
   // Freshness label
   let freshnessLabel = "";
   if (freshness != null && Number.isFinite(freshness)) {
-    const ago = Math.round((Date.now() - freshness) / 1000);
-    if (ago < 5) freshnessLabel = "Updated just now";
-    else if (ago < 60) freshnessLabel = `Updated ${ago}s ago`;
-    else freshnessLabel = `Updated ${Math.round(ago / 60)}m ago`;
+    const rel = formatRelative(freshness);
+    if (rel && rel !== "—") {
+      freshnessLabel = rel === "just now" ? "Updated just now" : `Updated ${rel}`;
+    }
   }
 
   return html`

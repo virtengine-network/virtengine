@@ -9,8 +9,8 @@ metadata:
   name: validator-partition
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: network
-    chaos.virtengine.io/scenario: partition
+    chaos.virtengine.com/category: network
+    chaos.virtengine.com/scenario: partition
 spec:
   action: partition
   mode: all
@@ -30,8 +30,8 @@ metadata:
   name: validator-latency
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: network
-    chaos.virtengine.io/scenario: latency
+    chaos.virtengine.com/category: network
+    chaos.virtengine.com/scenario: latency
 spec:
   action: delay
   mode: all
@@ -55,8 +55,8 @@ metadata:
   name: validator-packet-loss
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: network
-    chaos.virtengine.io/scenario: packet-loss
+    chaos.virtengine.com/category: network
+    chaos.virtengine.com/scenario: packet-loss
 spec:
   action: loss
   mode: all
@@ -79,8 +79,8 @@ metadata:
   name: validator-bandwidth-limit
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: network
-    chaos.virtengine.io/scenario: bandwidth
+    chaos.virtengine.com/category: network
+    chaos.virtengine.com/scenario: bandwidth
 spec:
   action: bandwidth
   mode: all
@@ -104,8 +104,8 @@ metadata:
   name: provider-isolation
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: network
-    chaos.virtengine.io/scenario: isolation
+    chaos.virtengine.com/category: network
+    chaos.virtengine.com/scenario: isolation
 spec:
   action: partition
   mode: all
@@ -125,8 +125,8 @@ metadata:
   name: cross-zone-latency
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: network
-    chaos.virtengine.io/scenario: cross-zone
+    chaos.virtengine.com/category: network
+    chaos.virtengine.com/scenario: cross-zone
 spec:
   action: delay
   mode: all

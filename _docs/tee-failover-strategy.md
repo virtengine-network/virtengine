@@ -118,19 +118,19 @@ affinity:
       - weight: 100  # Prefer Nitro
         preference:
           matchExpressions:
-            - key: virtengine.io/tee-platform
+            - key: virtengine.com/tee-platform
               operator: In
               values: ["nitro"]
       - weight: 80   # Then SEV-SNP
         preference:
           matchExpressions:
-            - key: virtengine.io/tee-platform
+            - key: virtengine.com/tee-platform
               operator: In
               values: ["sev-snp"]
       - weight: 60   # Then SGX
         preference:
           matchExpressions:
-            - key: virtengine.io/tee-platform
+            - key: virtengine.com/tee-platform
               operator: In
               values: ["sgx"]
 ```
@@ -191,10 +191,10 @@ To gracefully drain a TEE platform for maintenance:
 
 ```bash
 # 1. Cordon nodes on the platform
-kubectl cordon -l virtengine.io/tee-platform=nitro
+kubectl cordon -l virtengine.com/tee-platform=nitro
 
 # 2. Drain enclave pods (respects PDB)
-kubectl drain -l virtengine.io/tee-platform=nitro \
+kubectl drain -l virtengine.com/tee-platform=nitro \
   --pod-selector=app.kubernetes.io/name=tee-enclave \
   --grace-period=60 \
   --delete-emptydir-data
@@ -205,7 +205,7 @@ kubectl get pods -l app.kubernetes.io/name=tee-enclave -o wide
 # 4. Perform maintenance...
 
 # 5. Uncordon nodes
-kubectl uncordon -l virtengine.io/tee-platform=nitro
+kubectl uncordon -l virtengine.com/tee-platform=nitro
 ```
 
 ### Procedure: Force Failover
@@ -219,7 +219,7 @@ kubectl scale deployment/tee-enclave --replicas=0
 # 2. Update node affinity to exclude platform
 kubectl patch deployment/tee-enclave --type=json -p='[
   {"op": "add", "path": "/spec/template/spec/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution/nodeSelectorTerms/0/matchExpressions/-", 
-   "value": {"key": "virtengine.io/tee-platform", "operator": "NotIn", "values": ["nitro"]}}
+   "value": {"key": "virtengine.com/tee-platform", "operator": "NotIn", "values": ["nitro"]}}
 ]'
 
 # 3. Scale back up
@@ -245,7 +245,7 @@ kubectl exec -it tee-enclave-xxx -- /bin/tee-health-check
 kubectl exec -it tee-enclave-xxx -- /bin/attestation-test
 
 # 3. Uncordon nodes
-kubectl uncordon -l virtengine.io/tee-platform=nitro
+kubectl uncordon -l virtengine.com/tee-platform=nitro
 
 # 4. Kubernetes will automatically prefer recovered platform due to affinity weights
 ```
@@ -282,7 +282,7 @@ spec:
   selector:
     labelSelectors:
       app.kubernetes.io/name: tee-enclave
-      virtengine.io/tee-platform: nitro
+      virtengine.com/tee-platform: nitro
   duration: '30s'
 EOF
 ```
@@ -302,10 +302,10 @@ kubectl logs tee-enclave-xxx | grep -i failover
 
 ```bash
 # 1. Cordon all Nitro nodes
-kubectl cordon -l virtengine.io/tee-platform=nitro
+kubectl cordon -l virtengine.com/tee-platform=nitro
 
 # 2. Delete Nitro pods
-kubectl delete pods -l app.kubernetes.io/name=tee-enclave,virtengine.io/tee-platform=nitro
+kubectl delete pods -l app.kubernetes.io/name=tee-enclave,virtengine.com/tee-platform=nitro
 
 # 3. Verify pods scheduled on SEV-SNP/SGX
 kubectl get pods -l app.kubernetes.io/name=tee-enclave -o wide
@@ -314,7 +314,7 @@ kubectl get pods -l app.kubernetes.io/name=tee-enclave -o wide
 curl -X POST http://tee-enclave:8080/v1/attestation/generate
 
 # 5. Restore Nitro nodes
-kubectl uncordon -l virtengine.io/tee-platform=nitro
+kubectl uncordon -l virtengine.com/tee-platform=nitro
 ```
 
 ---
@@ -359,7 +359,7 @@ See `deploy/monitoring/alerts/enclave-health.yml` for:
 
 **Steps**:
 1. Check AWS/cloud provider status page
-2. Verify node group health: `kubectl get nodes -l virtengine.io/tee-platform=nitro`
+2. Verify node group health: `kubectl get nodes -l virtengine.com/tee-platform=nitro`
 3. Check node events: `kubectl describe node <node-name>`
 4. If hardware issue, escalate to cloud provider
 5. If software issue, restart node group

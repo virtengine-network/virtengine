@@ -70,13 +70,13 @@ resource "aws_eks_node_group" "nitro_enclave" {
   }
 
   labels = {
-    "virtengine.io/tee-platform"       = "nitro"
-    "virtengine.io/enclave-ready"      = "true"
+    "virtengine.com/tee-platform"      = "nitro"
+    "virtengine.com/enclave-ready"     = "true"
     "node.kubernetes.io/instance-type" = "enclave"
   }
 
   taint {
-    key    = "virtengine.io/tee"
+    key    = "virtengine.com/tee"
     value  = "nitro"
     effect = "NO_SCHEDULE"
   }
@@ -195,12 +195,12 @@ resource "aws_eks_node_group" "sev_snp" {
   }
 
   labels = {
-    "virtengine.io/tee-platform"  = "sev-snp"
-    "virtengine.io/enclave-ready" = "true"
+    "virtengine.com/tee-platform"  = "sev-snp"
+    "virtengine.com/enclave-ready" = "true"
   }
 
   taint {
-    key    = "virtengine.io/tee"
+    key    = "virtengine.com/tee"
     value  = "sev-snp"
     effect = "NO_SCHEDULE"
   }
@@ -310,12 +310,12 @@ resource "aws_eks_node_group" "sgx" {
   }
 
   labels = {
-    "virtengine.io/tee-platform"  = "sgx"
-    "virtengine.io/enclave-ready" = "true"
+    "virtengine.com/tee-platform"  = "sgx"
+    "virtengine.com/enclave-ready" = "true"
   }
 
   taint {
-    key    = "virtengine.io/tee"
+    key    = "virtengine.com/tee"
     value  = "sgx"
     effect = "NO_SCHEDULE"
   }

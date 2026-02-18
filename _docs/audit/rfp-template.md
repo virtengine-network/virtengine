@@ -63,7 +63,7 @@ All audit engagements require:
 
 ## 9. Submission Details
 - Submission deadline: [DATE]
-- Contact: audit@virtengine.io
+- Contact: audit@virtengine.com
 - Submission format: PDF + spreadsheet for pricing
 
 ## 10. Evaluation Criteria

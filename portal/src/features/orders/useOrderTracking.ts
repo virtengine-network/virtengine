@@ -156,16 +156,16 @@ function generateMockAccess(orderId: string, status: OrderStatus): ResourceAcces
           {
             type: 'api',
             label: 'API Endpoint',
-            host: 'api.provider.virtengine.io',
+            host: 'api.provider.virtengine.com',
             port: 443,
             apiKey: 've_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-            url: `https://api.provider.virtengine.io/v1/workloads/${orderId}`,
+            url: `https://api.provider.virtengine.com/v1/workloads/${orderId}`,
           },
           {
             type: 'console',
             label: 'Web Console',
-            host: 'console.provider.virtengine.io',
-            url: `https://console.provider.virtengine.io/session/${orderId}`,
+            host: 'console.provider.virtengine.com',
+            url: `https://console.provider.virtengine.com/session/${orderId}`,
           },
         ]
       : [],
@@ -173,20 +173,20 @@ function generateMockAccess(orderId: string, status: OrderStatus): ResourceAcces
       ? [
           {
             name: 'Workload API',
-            url: `https://api.provider.virtengine.io/v1/workloads/${orderId}`,
+            url: `https://api.provider.virtengine.com/v1/workloads/${orderId}`,
             method: 'GET',
             description: 'Query workload status and metrics',
           },
           {
             name: 'Logs API',
-            url: `https://api.provider.virtengine.io/v1/workloads/${orderId}/logs`,
+            url: `https://api.provider.virtengine.com/v1/workloads/${orderId}/logs`,
             method: 'GET',
             description: 'Stream workload logs',
           },
         ]
       : [],
     consoleUrl: isProvisioned
-      ? `https://console.provider.virtengine.io/session/${orderId}`
+      ? `https://console.provider.virtengine.com/session/${orderId}`
       : undefined,
   };
 }

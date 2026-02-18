@@ -405,4 +405,4 @@ tracker.finalize(sample_count=len(samples)).save("lineage.json")
 For questions or issues:
 - Create an issue in the repository
 - Contact the ML team on Slack #ml-veid
-- Email: ml-support@virtengine.io
+- Email: ml-support@virtengine.com

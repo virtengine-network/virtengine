@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://virtengine.io/schemas/billing/invoice.json",
+  "$id": "https://virtengine.com/schemas/billing/invoice.json",
   "title": "Invoice",
   "description": "VirtEngine billing invoice schema",
   "type": "object",

@@ -344,4 +344,4 @@ For questions about template publishing:
 
 - GitHub Issues: https://github.com/virtengine/virtengine/issues
 - Discord: #hpc-providers channel
-- Documentation: https://docs.virtengine.io/hpc
+- Documentation: https://docs.virtengine.com/hpc

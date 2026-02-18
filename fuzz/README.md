@@ -227,7 +227,7 @@ python infra/helper.py minimize_corpus virtengine fuzz_envelope_validate
    - Determine security impact (DoS, memory corruption, information leak)
 
 4. **File an issue:**
-   - For security issues: Follow responsible disclosure via security@virtengine.io
+   - For security issues: Follow responsible disclosure via security@virtengine.com
    - For non-security bugs: Create GitHub issue with reproduction steps
 
 ### OSS-Fuzz Crash Reports
@@ -260,7 +260,7 @@ Fuzzing dictionaries improve mutation effectiveness by providing domain-specific
 ## Security Considerations
 
 1. **Never commit crash-inducing inputs** that could be exploited before fix
-2. **Security bugs** should be reported privately to security@virtengine.io
+2. **Security bugs** should be reported privately to security@virtengine.com
 3. **Sensitive test data** (actual private keys, credentials) must not be in corpus
 4. **Sanitizers** (ASan, MSan, UBSan) should be used to catch memory issues
 

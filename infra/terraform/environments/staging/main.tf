@@ -114,8 +114,8 @@ module "eks" {
       max_size       = 5
       min_size       = 3
       labels = {
-        role                  = "validator"
-        "virtengine.io/chain" = "true"
+        role                   = "validator"
+        "virtengine.com/chain" = "true"
       }
       taints = [{
         key    = "dedicated"

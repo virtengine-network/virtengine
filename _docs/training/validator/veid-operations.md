@@ -546,7 +546,7 @@ Model upgrades are governed on-chain to ensure all validators use identical vers
     --model-name="facial_verification" \
     --new-version="1.3.0" \
     --checksum="sha256:newchecksum..." \
-    --download-url="https://models.virtengine.io/facial_v1.3.0.pb" \
+    --download-url="https://models.virtengine.com/facial_v1.3.0.pb" \
     --effective-height=5500000 \
     --title="Upgrade Facial Verification Model to v1.3.0" \
     --description="Improved accuracy and liveness detection" \
@@ -559,7 +559,7 @@ Model upgrades are governed on-chain to ensure all validators use identical vers
 ```bash
 # Download new model before effective height
 wget -O /opt/virtengine/models/facial_v1.3.0.pb \
-    "https://models.virtengine.io/facial_v1.3.0.pb"
+    "https://models.virtengine.com/facial_v1.3.0.pb"
 
 # Verify checksum
 echo "sha256:newchecksum... /opt/virtengine/models/facial_v1.3.0.pb" | \
@@ -920,7 +920,7 @@ shred -u ~/.virtengine/keyring-file/veid-identity.info
 sudo systemctl start virtengine
 
 # 7. Notify security team
-# security@virtengine.io
+# security@virtengine.com
 
 # 8. Review all recent decryptions for the compromised key
 ```
@@ -940,7 +940,7 @@ sha256sum /opt/virtengine/models/*.pb
 .cache/bin/virtengine query veid model-registry
 
 # 3. Re-download official models
-MODEL_URL="https://models.virtengine.io"
+MODEL_URL="https://models.virtengine.com"
 for model in facial_v1.2.0 liveness_v1.1.0 document_v1.0.0; do
     wget -O /opt/virtengine/models/${model}.pb "$MODEL_URL/${model}.pb"
 done

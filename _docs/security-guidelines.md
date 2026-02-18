@@ -915,7 +915,7 @@ semgrep --config=p/golang ./
 
 ### Reporting Security Issues
 
-For security vulnerabilities, please email security@virtengine.io with:
+For security vulnerabilities, please email security@virtengine.com with:
 
 1. Description of the vulnerability
 2. Steps to reproduce

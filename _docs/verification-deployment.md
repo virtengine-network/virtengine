@@ -77,7 +77,7 @@ signer:
   
   audit_log_enabled: true
   metrics_enabled: true
-  service_endpoint: "https://signer.veid.virtengine.io"
+  service_endpoint: "https://signer.veid.virtengine.com"
 ```
 
 ### Rate Limiter Configuration
@@ -204,7 +204,7 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: VAULT_ADDR
-          value: "https://vault.virtengine.io:8200"
+          value: "https://vault.virtengine.com:8200"
         - name: VAULT_TOKEN
           valueFrom:
             secretKeyRef:

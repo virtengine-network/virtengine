@@ -9,9 +9,9 @@
 
 homepage: "https://github.com/virtengine/virtengine"
 language: go
-primary_contact: "security@virtengine.io"
+primary_contact: "security@virtengine.com"
 auto_ccs:
-  - "dev@virtengine.io"
+  - "dev@virtengine.com"
 
 # Fuzzing configuration
 fuzzing_engines:

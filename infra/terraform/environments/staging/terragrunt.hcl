@@ -69,5 +69,5 @@ inputs = {
   grafana_hostname         = "grafana.staging.virtengine.internal"
   
   # Alerts
-  alert_emails = ["staging-alerts@virtengine.io"]
+  alert_emails = ["staging-alerts@virtengine.com"]
 }

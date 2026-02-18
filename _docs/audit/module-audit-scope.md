@@ -127,6 +127,6 @@ Critical areas:
 - Final report and retest verification by week 6.
 
 ## Points of Contact
-- Security Lead: security@virtengine.io
-- Engineering Lead: platform@virtengine.io
-- Audit Coordinator: audit@virtengine.io
+- Security Lead: security@virtengine.com
+- Engineering Lead: platform@virtengine.com
+- Audit Coordinator: audit@virtengine.com

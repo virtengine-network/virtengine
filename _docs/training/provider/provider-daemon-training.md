@@ -945,7 +945,7 @@ Upon successful completion:
 ### Support Channels
 - Discord: #provider-operators
 - GitHub Issues: virtengine/virtengine
-- Email: provider-support@virtengine.io
+- Email: provider-support@virtengine.com
 
 ### Reference Materials
 - Provider Daemon Source: `pkg/provider_daemon/`

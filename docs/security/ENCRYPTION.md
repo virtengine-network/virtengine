@@ -270,9 +270,9 @@ tls:
 
 | Endpoint | Port | TLS Version | Certificate | mTLS |
 |----------|------|-------------|-------------|------|
-| api.virtengine.io | 443 | TLS 1.3 | ECDSA P-256 | No |
-| rpc.virtengine.io | 443 | TLS 1.3 | ECDSA P-256 | No |
-| grpc.virtengine.io | 443 | TLS 1.3 | ECDSA P-256 | Optional |
+| api.virtengine.com | 443 | TLS 1.3 | ECDSA P-256 | No |
+| rpc.virtengine.com | 443 | TLS 1.3 | ECDSA P-256 | No |
+| grpc.virtengine.com | 443 | TLS 1.3 | ECDSA P-256 | Optional |
 | Internal services | 443 | TLS 1.3 | Internal CA | Yes |
 
 ### P2P Network Encryption

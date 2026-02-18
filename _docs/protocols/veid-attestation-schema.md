@@ -39,7 +39,7 @@ The core attestation structure that represents a signed verification result.
     "key_fingerprint": "<sha256_hex_64_chars>",
     "key_id": "validator-key-001",
     "validator_address": "virtengine1...",
-    "service_endpoint": "https://veid-signer.virtengine.io/v1"
+    "service_endpoint": "https://veid-signer.virtengine.com/v1"
   },
   "subject": {
     "id": "did:virtengine:<account_address>",
@@ -74,7 +74,7 @@ The core attestation structure that represents a signed verification result.
     "proof_purpose": "assertionMethod",
     "proof_value": "<base64_signature>",
     "nonce": "<same_as_attestation_nonce>",
-    "domain": "veid.virtengine.io"
+    "domain": "veid.virtengine.com"
   }
 }
 ```
@@ -128,7 +128,7 @@ The core attestation structure that represents a signed verification result.
   "proof_purpose": "assertionMethod",
   "proof_value": "<base64_encoded_signature>",
   "nonce": "<attestation_nonce_hex>",
-  "domain": "veid.virtengine.io",
+  "domain": "veid.virtengine.com",
   "challenge": "<optional_challenge>"
 }
 ```
@@ -426,7 +426,7 @@ X-Request-Signature: <ed25519_signature>
     "key_fingerprint": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
     "key_id": "validator-key-001",
     "validator_address": "virtengine1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu",
-    "service_endpoint": "https://veid-signer.virtengine.io/v1"
+    "service_endpoint": "https://veid-signer.virtengine.com/v1"
   },
   "subject": {
     "id": "did:virtengine:virtengine1abc123def456ghi789jkl012mno345pqr678stu",
@@ -469,7 +469,7 @@ X-Request-Signature: <ed25519_signature>
     "proof_purpose": "assertionMethod",
     "proof_value": "z3MvGcY3pFmYBDPKcSQr8TnqNkQu3yqNqwBmJCHuYU2JqcXNLHw2KwgEv7mFdJx2cFmTMxY4JmNvBpQnE9E3Kw7v",
     "nonce": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-    "domain": "veid.virtengine.io"
+    "domain": "veid.virtengine.com"
   }
 }
 ```

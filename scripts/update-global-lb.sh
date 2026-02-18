@@ -3,7 +3,7 @@
 # Manages Route53 weighted records for multi-region traffic distribution.
 set -euo pipefail
 
-DOMAIN="${VE_DOMAIN:-virtengine.io}"
+DOMAIN="${VE_DOMAIN:-virtengine.com}"
 REGIONS=("us-east-1" "eu-west-1" "ap-southeast-1")
 
 usage() {

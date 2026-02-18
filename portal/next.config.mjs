@@ -37,7 +37,7 @@ const nextConfig = {
           },
           {
             protocol: 'https',
-            hostname: '*.virtengine.io',
+            hostname: '*.virtengine.com',
           },
         ],
       },

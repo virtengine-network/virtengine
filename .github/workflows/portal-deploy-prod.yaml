@@ -89,7 +89,7 @@ jobs:
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           working-directory: ./portal
-          alias-domains: staging.portal.virtengine.io
+          alias-domains: staging.portal.virtengine.com
 
   smoke-test:
     name: Smoke Tests
@@ -121,7 +121,7 @@ jobs:
       - name: Run smoke tests
         run: pnpm -C portal test:e2e --project=chromium --grep @smoke
         env:
-          PLAYWRIGHT_BASE_URL: https://staging.portal.virtengine.io
+          PLAYWRIGHT_BASE_URL: https://staging.portal.virtengine.com
 
   deploy-production:
     name: Deploy to Production
@@ -133,7 +133,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
     environment:
       name: production
-      url: https://portal.virtengine.io
+      url: https://portal.virtengine.com
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -152,7 +152,7 @@ jobs:
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           vercel-args: '--prod'
           working-directory: ./portal
-          alias-domains: portal.virtengine.io
+          alias-domains: portal.virtengine.com
 
       - name: Create deployment record
         uses: actions/github-script@v7
@@ -163,7 +163,7 @@ jobs:
               repo: context.repo.repo,
               deployment_id: context.payload.deployment?.id,
               state: 'success',
-              environment_url: 'https://portal.virtengine.io',
+              environment_url: 'https://portal.virtengine.com',
               description: 'Production deployment successful',
             });
 

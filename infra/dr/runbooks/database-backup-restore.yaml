@@ -89,6 +89,6 @@ restore:
   post_checks:
     - name: verify_application_health
       command: |
-        curl -sf https://api.virtengine.io/cosmos/base/tendermint/v1beta1/node_info
+        curl -sf https://api.virtengine.com/cosmos/base/tendermint/v1beta1/node_info
       retries: 5
       interval: 15s

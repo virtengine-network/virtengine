@@ -9,8 +9,8 @@ metadata:
   name: validator-cpu-stress
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: stress
-    chaos.virtengine.io/scenario: cpu
+    chaos.virtengine.com/category: stress
+    chaos.virtengine.com/scenario: cpu
 spec:
   mode: one
   selector:
@@ -32,8 +32,8 @@ metadata:
   name: validator-memory-stress
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: stress
-    chaos.virtengine.io/scenario: memory
+    chaos.virtengine.com/category: stress
+    chaos.virtengine.com/scenario: memory
 spec:
   mode: one
   selector:
@@ -55,8 +55,8 @@ metadata:
   name: provider-cpu-stress
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: stress
-    chaos.virtengine.io/scenario: cpu
+    chaos.virtengine.com/category: stress
+    chaos.virtengine.com/scenario: cpu
 spec:
   mode: one
   selector:
@@ -78,8 +78,8 @@ metadata:
   name: ml-inference-stress
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: stress
-    chaos.virtengine.io/scenario: ml
+    chaos.virtengine.com/category: stress
+    chaos.virtengine.com/scenario: ml
 spec:
   mode: all
   selector:
@@ -104,8 +104,8 @@ metadata:
   name: gradual-cpu-increase
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: stress
-    chaos.virtengine.io/scenario: gradual
+    chaos.virtengine.com/category: stress
+    chaos.virtengine.com/scenario: gradual
 spec:
   mode: all
   selector:
@@ -127,8 +127,8 @@ metadata:
   name: oom-test
   namespace: chaos-testing
   labels:
-    chaos.virtengine.io/category: stress
-    chaos.virtengine.io/scenario: oom
+    chaos.virtengine.com/category: stress
+    chaos.virtengine.com/scenario: oom
 spec:
   mode: one
   selector:

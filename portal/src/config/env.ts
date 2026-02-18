@@ -27,8 +27,8 @@ export const env = {
   providerDaemonUrl: getEnvVar('NEXT_PUBLIC_PROVIDER_DAEMON_URL', ''),
 
   // API Configuration
-  apiUrl: getEnvVar('NEXT_PUBLIC_API_URL', 'https://api.virtengine.io'),
-  indexerUrl: getEnvVar('NEXT_PUBLIC_INDEXER_URL', 'https://indexer.virtengine.io'),
+  apiUrl: getEnvVar('NEXT_PUBLIC_API_URL', 'https://api.virtengine.com'),
+  indexerUrl: getEnvVar('NEXT_PUBLIC_INDEXER_URL', 'https://indexer.virtengine.com'),
   notificationsWsUrl: getEnvVar('NEXT_PUBLIC_NOTIFICATIONS_WS', ''),
 
   // Wallet Configuration
@@ -60,7 +60,7 @@ export const env = {
   devMode: getBoolEnvVar('NEXT_PUBLIC_DEV_MODE', false),
 
   // App Info
-  appUrl: getEnvVar('NEXT_PUBLIC_APP_URL', 'https://portal.virtengine.io'),
+  appUrl: getEnvVar('NEXT_PUBLIC_APP_URL', 'https://portal.virtengine.com'),
 
   // Fiat Off-ramp
   fiatOffRampUrl: getEnvVar('NEXT_PUBLIC_FIAT_OFFRAMP_URL', ''),

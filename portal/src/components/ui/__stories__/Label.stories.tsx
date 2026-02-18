@@ -24,7 +24,7 @@ export const Default: Story = {
     <div className="grid w-80 gap-4">
       <div className="grid gap-2">
         <Label htmlFor="email">Email</Label>
-        <Input id="email" placeholder="you@virtengine.io" />
+        <Input id="email" placeholder="you@virtengine.com" />
       </div>
       <div className="grid gap-2">
         <Label htmlFor="name" required>

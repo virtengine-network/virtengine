@@ -310,6 +310,6 @@ For cost review access:
 
 ### Contact
 
-- Platform Team: platform-team@virtengine.io
-- Finance: finance@virtengine.io
+- Platform Team: platform-team@virtengine.com
+- Finance: finance@virtengine.com
 - On-call: #platform-oncall

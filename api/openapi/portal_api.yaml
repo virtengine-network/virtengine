@@ -29,8 +29,8 @@ info:
 
   contact:
     name: VirtEngine
-    url: https://virtengine.io
-    email: api@virtengine.io
+    url: https://virtengine.com
+    email: api@virtengine.com
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html

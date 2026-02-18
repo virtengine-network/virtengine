@@ -39,11 +39,11 @@ export const metadata: Metadata = {
     address: false,
     telephone: false,
   },
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://portal.virtengine.io'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || 'https://portal.virtengine.com'),
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://portal.virtengine.io',
+    url: 'https://portal.virtengine.com',
     siteName: 'VirtEngine Portal',
     title: 'VirtEngine Portal',
     description: 'Decentralized cloud computing marketplace',

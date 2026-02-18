@@ -91,7 +91,7 @@ spec:
         - p, proj:virtengine:admin, logs, *, virtengine/*, allow
         - p, proj:virtengine:admin, exec, *, virtengine/*, allow
       groups:
-        - admin@virtengine.io
+        - admin@virtengine.com
     
     # Developer role - can sync dev/staging
     - name: developer
@@ -102,7 +102,7 @@ spec:
         - p, proj:virtengine:developer, applications, sync, virtengine/*-staging, allow
         - p, proj:virtengine:developer, logs, get, virtengine/*, allow
       groups:
-        - developers@virtengine.io
+        - developers@virtengine.com
     
     # Operator role - can sync all, no delete
     - name: operator
@@ -113,7 +113,7 @@ spec:
         - p, proj:virtengine:operator, applications, action, virtengine/*, allow
         - p, proj:virtengine:operator, logs, get, virtengine/*, allow
       groups:
-        - sre@virtengine.io
+        - sre@virtengine.com
 
   # Sync windows - restrict production deployments
   syncWindows:

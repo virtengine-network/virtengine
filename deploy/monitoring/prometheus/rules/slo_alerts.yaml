@@ -26,7 +26,7 @@ groups:
         annotations:
           summary: "Node uptime SLO budget burning fast"
           description: "Error budget for node uptime is being consumed at 14.4x the sustainable rate"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-node-uptime"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-node-uptime"
           slo_target: "99.95%"
 
       - alert: SLONodeUptimeBudgetCritical
@@ -43,7 +43,7 @@ groups:
         annotations:
           summary: "Node uptime SLO budget 75% consumed"
           description: "Only 25% of the monthly error budget remains for node uptime"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-node-uptime-critical"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-node-uptime-critical"
 
       # SLO-NODE-005: Transaction Confirmation P95 (< 10s)
       - alert: SLOTxConfirmationLatencyBreach
@@ -58,7 +58,7 @@ groups:
         annotations:
           summary: "Transaction confirmation latency SLO breach"
           description: "P95 transaction confirmation latency is {{ $value | printf \"%.2f\" }}s (SLO: <10s)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-tx-latency"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-tx-latency"
 
       # SLO-NODE-006: Query Response P95 (< 2s)
       - alert: SLOQueryLatencyBreach
@@ -73,7 +73,7 @@ groups:
         annotations:
           summary: "Query response latency SLO breach"
           description: "P95 query latency is {{ $value | printf \"%.2f\" }}s (SLO: <2s)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-query-latency"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-query-latency"
 
   # =============================================================================
   # Tier 1 - High Priority Services SLO Alerts
@@ -96,7 +96,7 @@ groups:
         annotations:
           summary: "Provider daemon uptime SLO budget burning"
           description: "Error budget for provider uptime is being consumed at 14.4x the sustainable rate"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-provider-uptime"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-provider-uptime"
 
       # SLO-PROV-003: Deployment Success Rate (99.00%)
       - alert: SLODeploymentSuccessRateBreach
@@ -114,7 +114,7 @@ groups:
         annotations:
           summary: "Deployment success rate below SLO"
           description: "Deployment success rate is {{ $value | printf \"%.2f\" }}% (SLO: 99%)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-deployment-success"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-deployment-success"
 
       # SLO-PROV-005: Provisioning Latency P95 (< 300s)
       - alert: SLOProvisioningLatencyBreach
@@ -129,7 +129,7 @@ groups:
         annotations:
           summary: "Provisioning latency SLO breach"
           description: "P95 provisioning latency is {{ $value | printf \"%.0f\" }}s (SLO: <300s)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-provisioning-latency"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-provisioning-latency"
 
       # SLO-API-001: API Availability (99.90%)
       - alert: SLOAPIAvailabilityBreach
@@ -147,7 +147,7 @@ groups:
         annotations:
           summary: "API availability below SLO"
           description: "API availability is {{ $value | printf \"%.4f\" }}% (SLO: 99.90%)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-api-availability"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-api-availability"
 
       # SLO-API-003: Request Latency P95 (< 2s)
       - alert: SLOAPILatencyBreach
@@ -162,7 +162,7 @@ groups:
         annotations:
           summary: "API request latency SLO breach"
           description: "P95 API latency is {{ $value | printf \"%.2f\" }}s (SLO: <2s)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-api-latency"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-api-latency"
 
   # =============================================================================
   # VEID SLO Alerts
@@ -186,7 +186,7 @@ groups:
         annotations:
           summary: "VEID verification success rate below target"
           description: "VEID verification success rate is {{ $value | printf \"%.2f\" }}% (target: 95%)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-veid-verification"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-veid-verification"
 
       # VEID Verification Latency P95
       - alert: SLOVEIDVerificationLatency
@@ -201,7 +201,7 @@ groups:
         annotations:
           summary: "VEID verification latency SLO breach"
           description: "P95 VEID verification latency is {{ $value | printf \"%.2f\" }}s (SLO: <30s)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-veid-latency"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-veid-latency"
 
       # VEID ML Inference Determinism (Critical - must be 100%)
       - alert: VEIDInferenceNonDeterministic
@@ -215,7 +215,7 @@ groups:
         annotations:
           summary: "CRITICAL: Non-deterministic ML inference detected"
           description: "{{ $value }} non-deterministic inference results detected. This is a consensus-breaking issue!"
-          runbook_url: "https://docs.virtengine.io/runbooks/veid-non-deterministic"
+          runbook_url: "https://docs.virtengine.com/runbooks/veid-non-deterministic"
           impact: "Validators may produce different results, causing consensus failures"
 
   # =============================================================================
@@ -236,7 +236,7 @@ groups:
         annotations:
           summary: "Marketplace fill rate below target"
           description: "Order fill rate is {{ $value | printf \"%.2f\" }}% (target: 90%)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-market-fill-rate"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-market-fill-rate"
 
       # Market Efficiency
       - alert: SLOMarketEfficiency
@@ -250,7 +250,7 @@ groups:
         annotations:
           summary: "Marketplace efficiency below target"
           description: "Market efficiency score is {{ $value | printf \"%.0f\" }} (target: >60)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slo-market-efficiency"
+          runbook_url: "https://docs.virtengine.com/runbooks/slo-market-efficiency"
 
   # =============================================================================
   # Error Budget Burn Rate Alerts (Multi-Window)
@@ -279,7 +279,7 @@ groups:
         annotations:
           summary: "Error budget fast burn detected"
           description: "Error budget is being consumed at 14.4x the sustainable rate"
-          runbook_url: "https://docs.virtengine.io/runbooks/error-budget-fast-burn"
+          runbook_url: "https://docs.virtengine.com/runbooks/error-budget-fast-burn"
 
       # Slow burn - 5% budget in 6 hours (2x rate)
       - alert: ErrorBudgetSlowBurn
@@ -302,4 +302,4 @@ groups:
         annotations:
           summary: "Error budget slow burn detected"
           description: "Error budget is being consumed at 2x the sustainable rate"
-          runbook_url: "https://docs.virtengine.io/runbooks/error-budget-slow-burn"
+          runbook_url: "https://docs.virtengine.com/runbooks/error-budget-slow-burn"

@@ -631,7 +631,7 @@ PDF exports are generated using the `pkg/billing` export service and include:
 PDFConfig{
     CompanyName:    "VirtEngine",
     CompanyAddress: []string{"VirtEngine Inc."},
-    CompanyEmail:   "billing@virtengine.io",
+    CompanyEmail:   "billing@virtengine.com",
     PrimaryColor:   "#2563eb",
     PageSize:       "A4",
     IncludeTerms:   true,

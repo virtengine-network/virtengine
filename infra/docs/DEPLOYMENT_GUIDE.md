@@ -293,5 +293,5 @@ See `scripts/dr/README.md` for detailed recovery procedures.
 ## Contact
 
 - **On-Call:** #virtengine-oncall (Slack)
-- **Infrastructure Team:** infra@virtengine.io
-- **Security Issues:** security@virtengine.io
+- **Infrastructure Team:** infra@virtengine.com
+- **Security Issues:** security@virtengine.com

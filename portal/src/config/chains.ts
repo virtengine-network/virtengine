@@ -49,7 +49,7 @@ export const MAINNET_CHAIN: ChainInfo = {
   rpcEndpoint: 'https://rpc.virtengine.com',
   restEndpoint: 'https://api.virtengine.com',
   wsEndpoint: 'wss://ws.virtengine.com',
-  explorerUrl: 'https://explorer.virtengine.io',
+  explorerUrl: 'https://explorer.virtengine.com',
   bip44: {
     coinType: 118,
   },
@@ -94,7 +94,7 @@ export const TESTNET_CHAIN: ChainInfo = {
   rpcEndpoint: 'https://rpc.testnet.virtengine.com',
   restEndpoint: 'https://api.testnet.virtengine.com',
   wsEndpoint: 'wss://ws.testnet.virtengine.com',
-  explorerUrl: 'https://testnet.explorer.virtengine.io',
+  explorerUrl: 'https://testnet.explorer.virtengine.com',
   bip44: {
     coinType: 118,
   },

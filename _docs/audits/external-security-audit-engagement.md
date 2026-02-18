@@ -3,7 +3,7 @@
 **Date:** 2026-02-06  
 **Engagement ID:** VE-AUDIT-EXT-2026-02  
 **Auditor:** Third-Party Security Firm (name withheld under NDA)  
-**VirtEngine Contact:** security@virtengine.io  
+**VirtEngine Contact:** security@virtengine.com  
 **Status:** Complete
 
 ## Scope Summary

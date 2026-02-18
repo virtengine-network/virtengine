@@ -2,12 +2,12 @@
 name = "virtengine"
 version = "0.1.0"
 description = "Python SDK for VirtEngine blockchain"
-authors = ["VirtEngine <sdk@virtengine.io>"]
+authors = ["VirtEngine <sdk@virtengine.com>"]
 license = "Apache-2.0"
 readme = "README.md"
 homepage = "https://github.com/virtengine/virtengine"
 repository = "https://github.com/virtengine/virtengine/tree/main/sdk/python"
-documentation = "https://docs.virtengine.io/sdk/python"
+documentation = "https://docs.virtengine.com/sdk/python"
 keywords = ["blockchain", "cosmos", "sdk", "identity"]
 classifiers = [
     "Development Status :: 4 - Beta",

@@ -288,7 +288,7 @@ deterministic-inference = true
 cp -r ~/.virtengine/config ~/.virtengine/config.backup
 
 # Step 2: Configure persistent peers
-PEERS="a1b2c3d4e5f6@validator1.virtengine.io:26656,..."
+PEERS="a1b2c3d4e5f6@validator1.virtengine.com:26656,..."
 sed -i "s/persistent_peers = \"\"/persistent_peers = \"$PEERS\"/" \
     ~/.virtengine/config/config.toml
 
@@ -387,7 +387,7 @@ else
 fi
 
 # Step 3: Configure state sync (optional, for faster sync)
-SNAP_RPC="https://rpc.virtengine.io:443"
+SNAP_RPC="https://rpc.virtengine.com:443"
 LATEST_HEIGHT=$(curl -s $SNAP_RPC/block | jq -r .result.block.header.height)
 TRUST_HEIGHT=$((LATEST_HEIGHT - 2000))
 TRUST_HASH=$(curl -s "$SNAP_RPC/block?height=$TRUST_HEIGHT" | \
@@ -1289,7 +1289,7 @@ sudo systemctl stop virtengine
 .cache/bin/virtengine tendermint unsafe-reset-all --keep-addr-book
 
 # Step 2: Configure state sync
-SNAP_RPC="https://rpc.virtengine.io:443"
+SNAP_RPC="https://rpc.virtengine.com:443"
 LATEST=$(curl -s $SNAP_RPC/block | jq -r .result.block.header.height)
 TRUST_HEIGHT=$((LATEST - 2000))
 TRUST_HASH=$(curl -s "$SNAP_RPC/block?height=$TRUST_HEIGHT" | \
@@ -1494,21 +1494,21 @@ virtengine query block HEIGHT             # Get block info
 
 | Network | RPC | gRPC | REST |
 |---------|-----|------|------|
-| Mainnet | rpc.virtengine.io:443 | grpc.virtengine.io:443 | api.virtengine.io:443 |
-| Testnet | rpc-testnet.virtengine.io:443 | grpc-testnet.virtengine.io:443 | api-testnet.virtengine.io:443 |
+| Mainnet | rpc.virtengine.com:443 | grpc.virtengine.com:443 | api.virtengine.com:443 |
+| Testnet | rpc-testnet.virtengine.com:443 | grpc-testnet.virtengine.com:443 | api-testnet.virtengine.com:443 |
 
 ### Appendix C: Emergency Contacts
 
 | Issue | Contact | Response Time |
 |-------|---------|---------------|
-| Critical Security | security@virtengine.io | 1 hour |
-| Network Issues | ops@virtengine.io | 4 hours |
+| Critical Security | security@virtengine.com | 1 hour |
+| Network Issues | ops@virtengine.com | 4 hours |
 | Validator Support | Discord #validators | Community |
-| Documentation | docs@virtengine.io | 24 hours |
+| Documentation | docs@virtengine.com | 24 hours |
 
 ### Appendix D: Additional Resources
 
-- [VirtEngine Documentation](https://docs.virtengine.io)
+- [VirtEngine Documentation](https://docs.virtengine.com)
 - [Cosmos SDK Documentation](https://docs.cosmos.network)
 - [CometBFT Documentation](https://docs.cometbft.com)
 - [Validator Community Discord](https://discord.gg/virtengine)

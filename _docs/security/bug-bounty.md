@@ -49,7 +49,7 @@ researchers to report vulnerabilities in a safe and coordinated manner.
 5. Use good faith testing and minimize data exposure.
 
 ## Submission Process
-- Email: security@virtengine.io
+- Email: security@virtengine.com
 - PGP Key: available upon request
 - Expected response: 24 hours
 - Expected triage: 72 hours

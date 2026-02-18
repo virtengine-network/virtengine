@@ -100,7 +100,7 @@ endif
 	@cosign verify-blob \
 		--signature "$(ARTIFACT).sig" \
 		--certificate "$(ARTIFACT).pem" \
-		--certificate-identity-regexp ".*@virtengine.io" \
+		--certificate-identity-regexp ".*@virtengine.com" \
 		--certificate-oidc-issuer https://token.actions.githubusercontent.com \
 		"$(ARTIFACT)"
 	@echo "✓ Signature verified"

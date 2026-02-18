@@ -178,6 +178,6 @@ Configure alerting on these events:
 
 ## Contact
 
-- **Finance Operations**: finance-ops@virtengine.io
-- **On-call Engineering**: oncall@virtengine.io
-- **Escalation**: settlement-escalation@virtengine.io
+- **Finance Operations**: finance-ops@virtengine.com
+- **On-call Engineering**: oncall@virtengine.com
+- **Escalation**: settlement-escalation@virtengine.com

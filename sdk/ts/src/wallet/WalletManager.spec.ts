@@ -9,8 +9,8 @@ describe("WalletManager", () => {
   const mockChainInfo: ChainInfo = {
     chainId: "virtengine-testnet-1",
     chainName: "VirtEngine Testnet",
-    rpc: "https://rpc.testnet.virtengine.io",
-    rest: "https://api.testnet.virtengine.io",
+    rpc: "https://rpc.testnet.virtengine.com",
+    rest: "https://api.testnet.virtengine.com",
     bip44: { coinType: 118 },
     bech32Config: {
       bech32PrefixAccAddr: "virt",

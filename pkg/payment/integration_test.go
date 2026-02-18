@@ -85,7 +85,7 @@ func TestStripeIntegration_CustomerLifecycle(t *testing.T) {
 
 	// Create customer
 	customer, err := svc.CreateCustomer(ctx, payment.CreateCustomerRequest{
-		Email:       "integration-test@virtengine.io",
+		Email:       "integration-test@virtengine.com",
 		Name:        "Integration Test User",
 		VEIDAddress: "virtengine1integration",
 		Metadata: map[string]string{
@@ -94,7 +94,7 @@ func TestStripeIntegration_CustomerLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, customer.ID)
-	assert.Equal(t, "integration-test@virtengine.io", customer.Email)
+	assert.Equal(t, "integration-test@virtengine.com", customer.Email)
 
 	// Get customer
 	retrieved, err := svc.GetCustomer(ctx, customer.ID)
@@ -161,7 +161,7 @@ func TestAdyenIntegration_CustomerLifecycle(t *testing.T) {
 
 	// Create customer (in Adyen, this just generates a shopperReference)
 	customer, err := svc.CreateCustomer(ctx, payment.CreateCustomerRequest{
-		Email:       "adyen-test@virtengine.io",
+		Email:       "adyen-test@virtengine.com",
 		Name:        "Adyen Test User",
 		VEIDAddress: "virtengine1adyentest",
 	})
@@ -178,7 +178,7 @@ func TestAdyenIntegration_PaymentIntentFlow(t *testing.T) {
 		Amount:      payment.NewAmount(1000, payment.CurrencyEUR), // €10.00
 		CustomerID:  "virtengine1adyentest",
 		Description: "Integration test payment",
-		ReturnURL:   "https://virtengine.io/payment/return",
+		ReturnURL:   "https://virtengine.com/payment/return",
 	})
 	require.NoError(t, err)
 	assert.NotEmpty(t, intent.ID)
@@ -207,7 +207,7 @@ func TestStripeIntegration_3DSecureFlow(t *testing.T) {
 	intent, err := svc.CreatePaymentIntent(ctx, payment.PaymentIntentRequest{
 		Amount:      payment.NewAmount(5000, payment.CurrencyUSD), // $50.00
 		Description: "3DS Test Payment",
-		ReturnURL:   "https://virtengine.io/payment/return",
+		ReturnURL:   "https://virtengine.com/payment/return",
 		Metadata: map[string]string{
 			"test":         "true",
 			"requires_3ds": "true",

@@ -354,8 +354,8 @@ curl -s http://prometheus:9090/api/v1/status/runtimeinfo | jq .data.storageReten
 | Role | Contact |
 |------|---------|
 | On-Call Engineer | pagerduty.com/oncall |
-| Security Team | security@virtengine.io |
-| Platform Team | platform@virtengine.io |
+| Security Team | security@virtengine.com |
+| Platform Team | platform@virtengine.com |
 
 ## Related Documents
 

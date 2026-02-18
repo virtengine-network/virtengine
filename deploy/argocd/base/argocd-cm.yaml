@@ -54,7 +54,7 @@ data:
         return hs
 
   # URLs
-  url: https://argocd.virtengine.io
+  url: https://argocd.virtengine.com
   
   # OIDC configuration (placeholder - configure per environment)
   # oidc.config: |

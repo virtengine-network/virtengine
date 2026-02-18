@@ -112,7 +112,7 @@ go test -fuzz=Fuzz -fuzztime=10m ./tests/security/fuzz/
 ./tests/security/scripts/secret_scan.sh
 
 # Nuclei scanning (external targets)
-nuclei -t ./tests/security/configs/nuclei/ -u https://api.virtengine.io
+nuclei -t ./tests/security/configs/nuclei/ -u https://api.virtengine.com
 ```
 
 ## Test Coverage by Attack Scenario

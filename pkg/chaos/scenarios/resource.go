@@ -298,8 +298,8 @@ func (s *CPUStressScenario) Build() (*Experiment, error) {
 		Targets:     s.Targets,
 		Spec:        spec,
 		Labels: map[string]string{
-			"chaos.virtengine.io/type":     string(ExperimentTypeCPUStress),
-			"chaos.virtengine.io/category": "resource",
+			"chaos.virtengine.com/type":     string(ExperimentTypeCPUStress),
+			"chaos.virtengine.com/category": "resource",
 		},
 	}, nil
 }
@@ -447,8 +447,8 @@ func (s *MemoryStressScenario) Build() (*Experiment, error) {
 		Targets:     s.Targets,
 		Spec:        spec,
 		Labels: map[string]string{
-			"chaos.virtengine.io/type":     string(ExperimentTypeMemoryStress),
-			"chaos.virtengine.io/category": "resource",
+			"chaos.virtengine.com/type":     string(ExperimentTypeMemoryStress),
+			"chaos.virtengine.com/category": "resource",
 		},
 	}, nil
 }
@@ -622,8 +622,8 @@ func (s *DiskStressScenario) Build() (*Experiment, error) {
 		Targets:     s.Targets,
 		Spec:        spec,
 		Labels: map[string]string{
-			"chaos.virtengine.io/type":     string(ExperimentTypeDiskStress),
-			"chaos.virtengine.io/category": "resource",
+			"chaos.virtengine.com/type":     string(ExperimentTypeDiskStress),
+			"chaos.virtengine.com/category": "resource",
 		},
 	}, nil
 }

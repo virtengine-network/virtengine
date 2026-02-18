@@ -5,7 +5,7 @@ global:
   resolve_timeout: 5m
   # SMTP configuration (customize for your environment)
   # smtp_smarthost: 'smtp.example.com:587'
-  # smtp_from: 'alertmanager@virtengine.io'
+  # smtp_from: 'alertmanager@virtengine.com'
   # smtp_auth_username: 'alertmanager'
   # smtp_auth_password: '{{ SMTP_PASSWORD }}'
 

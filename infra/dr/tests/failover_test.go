@@ -19,7 +19,7 @@ const (
 	defaultPrimaryRegion   = "us-east-1"
 	defaultSecondaryRegion = "eu-west-1"
 	defaultTertiaryRegion  = "ap-southeast-1"
-	defaultDomain          = "virtengine.io"
+	defaultDomain          = "virtengine.com"
 
 	// SLA targets
 	rtoTarget = 15 * time.Minute // Recovery Time Objective

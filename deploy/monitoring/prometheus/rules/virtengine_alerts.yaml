@@ -15,7 +15,7 @@ groups:
         annotations:
           summary: "Consensus has stalled - no new blocks in 5 minutes"
           description: "No new blocks have been produced in the last 5 minutes. Consensus may be stalled."
-          runbook_url: "https://docs.virtengine.io/runbooks/consensus-stalled"
+          runbook_url: "https://docs.virtengine.com/runbooks/consensus-stalled"
           dashboard_url: "http://grafana:3000/d/virtengine-overview"
 
       - alert: ValidatorDown
@@ -28,7 +28,7 @@ groups:
         annotations:
           summary: "More than 1/3 of validators are down"
           description: "Validator readiness has dropped below 67% of total voting power."
-          runbook_url: "https://docs.virtengine.io/runbooks/validator-down"
+          runbook_url: "https://docs.virtengine.com/runbooks/validator-down"
           dashboard_url: "http://grafana:3000/d/chain-health"
 
       - alert: EscrowBalanceLow
@@ -41,7 +41,7 @@ groups:
         annotations:
           summary: "Escrow balance critically low"
           description: "Escrow balance is below 1000 tokens (minor units)."
-          runbook_url: "https://docs.virtengine.io/runbooks/escrow-balance-low"
+          runbook_url: "https://docs.virtengine.com/runbooks/escrow-balance-low"
           dashboard_url: "http://grafana:3000/d/business-metrics"
 
   - name: virtengine.warning
@@ -57,7 +57,7 @@ groups:
         annotations:
           summary: "P99 transaction latency exceeds 5 seconds"
           description: "Transaction latency P99 has exceeded 5 seconds for 10 minutes."
-          runbook_url: "https://docs.virtengine.io/runbooks/high-transaction-latency"
+          runbook_url: "https://docs.virtengine.com/runbooks/high-transaction-latency"
           dashboard_url: "http://grafana:3000/d/virtengine-overview"
 
       - alert: VEIDVerificationQueue
@@ -70,7 +70,7 @@ groups:
         annotations:
           summary: "VEID verification queue backlog"
           description: "Pending VEID verifications exceed 100 for 15 minutes."
-          runbook_url: "https://docs.virtengine.io/runbooks/veid-queue-backlog"
+          runbook_url: "https://docs.virtengine.com/runbooks/veid-queue-backlog"
           dashboard_url: "http://grafana:3000/d/veid-module"
 
       - alert: ProviderHighFailureRate
@@ -83,7 +83,7 @@ groups:
         annotations:
           summary: "Provider experiencing high workload failure rate (>10%)"
           description: "Provider workload failure rate has exceeded 10% for 15 minutes."
-          runbook_url: "https://docs.virtengine.io/runbooks/provider-failure-rate"
+          runbook_url: "https://docs.virtengine.com/runbooks/provider-failure-rate"
           dashboard_url: "http://grafana:3000/d/provider-daemon"
 
       - alert: MLInferenceTimeout
@@ -96,7 +96,7 @@ groups:
         annotations:
           summary: "ML inference timeouts detected"
           description: "ML inference timeout rate is above 0.01/sec."
-          runbook_url: "https://docs.virtengine.io/runbooks/ml-inference-timeout"
+          runbook_url: "https://docs.virtengine.com/runbooks/ml-inference-timeout"
           dashboard_url: "http://grafana:3000/d/ml-inference"
 
   - name: virtengine.business
@@ -117,7 +117,7 @@ groups:
         annotations:
           summary: "VEID response time SLO at risk (<99% within 10s)"
           description: "Less than 99% of VEID submissions complete within 10 seconds."
-          runbook_url: "https://docs.virtengine.io/runbooks/veid-slo-response-time"
+          runbook_url: "https://docs.virtengine.com/runbooks/veid-slo-response-time"
           dashboard_url: "http://grafana:3000/d/veid-module"
 
       - alert: SLOOrderMatchingSuccess
@@ -135,5 +135,5 @@ groups:
         annotations:
           summary: "Order matching success rate below 95%"
           description: "Order matching success rate has fallen below 95% for 2 hours."
-          runbook_url: "https://docs.virtengine.io/runbooks/order-matching-slo"
+          runbook_url: "https://docs.virtengine.com/runbooks/order-matching-slo"
           dashboard_url: "http://grafana:3000/d/market-module"

@@ -303,7 +303,7 @@ EOF
       github.event_name == 'workflow_dispatch'
     environment:
       name: dev
-      url: https://dev.virtengine.io
+      url: https://dev.virtengine.com
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -337,7 +337,7 @@ EOF
       github.event.inputs.environment == 'staging'
     environment:
       name: staging
-      url: https://staging.virtengine.io
+      url: https://staging.virtengine.com
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -367,7 +367,7 @@ EOF
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod' && github.event.inputs.action == 'apply'
     environment:
       name: prod
-      url: https://virtengine.io
+      url: https://virtengine.com
     steps:
       - name: Checkout
         uses: actions/checkout@v4

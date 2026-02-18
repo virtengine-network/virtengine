@@ -279,7 +279,7 @@ func (r *KubernetesRunner) generateChaosMeshManifest(experiment *chaos.Experimen
 			"namespace": r.namespace,
 			"labels": map[string]string{
 				"app.kubernetes.io/component": "chaos-experiment",
-				"chaos.virtengine.io/id":      experiment.ID,
+				"chaos.virtengine.com/id":     experiment.ID,
 			},
 		},
 	}

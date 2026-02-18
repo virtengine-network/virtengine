@@ -138,7 +138,7 @@ sudo systemctl restart virtengined
 ```bash
 # 1. Get canonical model from trusted source
 CANONICAL_MODEL_HASH="sha256:abc123..."
-curl -O https://models.virtengine.io/veid/v1.2.3/model.pb
+curl -O https://models.virtengine.com/veid/v1.2.3/model.pb
 
 # 2. Verify checksum
 sha256sum model.pb | grep -q "$CANONICAL_MODEL_HASH" || echo "CHECKSUM MISMATCH"

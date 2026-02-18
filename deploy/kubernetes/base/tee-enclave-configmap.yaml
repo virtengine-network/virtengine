@@ -23,14 +23,14 @@ data:
   VIRTENGINE_TEE_ALLOW_DEBUG: "false"
 
   # Attestation configuration
-  VIRTENGINE_TEE_ATTESTATION_ENDPOINT: "https://attestation.virtengine.io/v1"
+  VIRTENGINE_TEE_ATTESTATION_ENDPOINT: "https://attestation.virtengine.com/v1"
   VIRTENGINE_TEE_CERT_CACHE_PATH: "/var/cache/virtengine/tee-certs"
 
   # Minimum TCB version for SEV-SNP (BL.TEE.SNP.UC format)
   VIRTENGINE_TEE_MIN_TCB_VERSION: "2.0.8.115"
 
   # SGX Configuration
-  sgx.pccs.endpoint: "https://pccs.virtengine.io/sgx/certification/v4/"
+  sgx.pccs.endpoint: "https://pccs.virtengine.com/sgx/certification/v4/"
   sgx.quote.provider.library: "/usr/lib/x86_64-linux-gnu/libsgx_dcap_ql.so"
   sgx.enclave.path: "/opt/virtengine/enclaves/veid_scorer.signed.so"
   sgx.require.flc: "true"

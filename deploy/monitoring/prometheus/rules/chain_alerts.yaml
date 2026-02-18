@@ -18,7 +18,7 @@ groups:
         annotations:
           summary: "VirtEngine node is down"
           description: "Node {{ $labels.instance }} has been down for more than 1 minute"
-          runbook_url: "https://docs.virtengine.io/runbooks/node-down"
+          runbook_url: "https://docs.virtengine.com/runbooks/node-down"
           dashboard_url: "http://grafana:3000/d/chain-health"
 
       - alert: NodeHighMemoryUsage
@@ -31,7 +31,7 @@ groups:
         annotations:
           summary: "Node using high memory"
           description: "Node {{ $labels.instance }} is using {{ $value | printf \"%.2f\" }}GB of memory"
-          runbook_url: "https://docs.virtengine.io/runbooks/high-memory"
+          runbook_url: "https://docs.virtengine.com/runbooks/high-memory"
 
       - alert: NodeHighCPU
         expr: rate(process_cpu_seconds_total{job="virtengine-node"}[5m]) > 0.9
@@ -43,7 +43,7 @@ groups:
         annotations:
           summary: "Node using high CPU"
           description: "Node {{ $labels.instance }} CPU usage is {{ $value | printf \"%.2f\" }}"
-          runbook_url: "https://docs.virtengine.io/runbooks/high-cpu"
+          runbook_url: "https://docs.virtengine.com/runbooks/high-cpu"
 
   # =============================================================================
   # Block Production Alerts
@@ -61,7 +61,7 @@ groups:
         annotations:
           summary: "Block production has stalled"
           description: "No new blocks have been produced in the last 5 minutes"
-          runbook_url: "https://docs.virtengine.io/runbooks/block-stalled"
+          runbook_url: "https://docs.virtengine.com/runbooks/block-stalled"
           impact: "Transactions cannot be processed. All chain operations are halted."
 
       - alert: SlowBlockProduction
@@ -74,7 +74,7 @@ groups:
         annotations:
           summary: "Block production is slow"
           description: "Block latency is {{ $value | printf \"%.2f\" }} seconds (threshold: 10s)"
-          runbook_url: "https://docs.virtengine.io/runbooks/slow-blocks"
+          runbook_url: "https://docs.virtengine.com/runbooks/slow-blocks"
 
       - alert: HighBlockTxCount
         expr: virtengine_chain_block_tx_count > 500
@@ -103,7 +103,7 @@ groups:
         annotations:
           summary: "Consensus requiring multiple rounds"
           description: "Consensus is taking {{ $value }} rounds to complete"
-          runbook_url: "https://docs.virtengine.io/runbooks/consensus-rounds"
+          runbook_url: "https://docs.virtengine.com/runbooks/consensus-rounds"
 
       - alert: LowValidatorCount
         expr: virtengine_validator_active_count < 3
@@ -115,7 +115,7 @@ groups:
         annotations:
           summary: "Low active validator count"
           description: "Only {{ $value }} validators are active. Minimum required: 3"
-          runbook_url: "https://docs.virtengine.io/runbooks/low-validators"
+          runbook_url: "https://docs.virtengine.com/runbooks/low-validators"
           impact: "Chain may halt if more validators go offline"
 
       - alert: ValidatorMissedBlocks
@@ -128,7 +128,7 @@ groups:
         annotations:
           summary: "Validator missing blocks"
           description: "Validator {{ $labels.validator }} has missed {{ $value }} blocks in the last hour"
-          runbook_url: "https://docs.virtengine.io/runbooks/missed-blocks"
+          runbook_url: "https://docs.virtengine.com/runbooks/missed-blocks"
 
       - alert: ValidatorLowUptime
         expr: virtengine_validator_uptime_percentage < 99
@@ -140,7 +140,7 @@ groups:
         annotations:
           summary: "Validator uptime below SLO"
           description: "Validator {{ $labels.validator }} uptime is {{ $value | printf \"%.2f\" }}% (SLO: 99%)"
-          runbook_url: "https://docs.virtengine.io/runbooks/validator-uptime"
+          runbook_url: "https://docs.virtengine.com/runbooks/validator-uptime"
 
   # =============================================================================
   # Transaction Alerts
@@ -158,7 +158,7 @@ groups:
         annotations:
           summary: "High mempool size"
           description: "Mempool contains {{ $value }} pending transactions"
-          runbook_url: "https://docs.virtengine.io/runbooks/high-mempool"
+          runbook_url: "https://docs.virtengine.com/runbooks/high-mempool"
 
       - alert: TxPoolCritical
         expr: virtengine_tx_pool_size > 5000
@@ -170,7 +170,7 @@ groups:
         annotations:
           summary: "Critical mempool size"
           description: "Mempool contains {{ $value }} pending transactions. Transaction processing may be impacted."
-          runbook_url: "https://docs.virtengine.io/runbooks/critical-mempool"
+          runbook_url: "https://docs.virtengine.com/runbooks/critical-mempool"
 
       - alert: HighTxFailureRate
         expr: rate(virtengine_tx_processed_total{status="failed"}[5m]) / rate(virtengine_tx_processed_total[5m]) > 0.05
@@ -182,7 +182,7 @@ groups:
         annotations:
           summary: "High transaction failure rate"
           description: "Transaction failure rate is {{ $value | printf \"%.2f\" }}%"
-          runbook_url: "https://docs.virtengine.io/runbooks/tx-failures"
+          runbook_url: "https://docs.virtengine.com/runbooks/tx-failures"
 
       - alert: LowTPS
         expr: virtengine_tx_per_second < 5
@@ -211,7 +211,7 @@ groups:
         annotations:
           summary: "Low peer count"
           description: "Node has only {{ $value }} peers connected"
-          runbook_url: "https://docs.virtengine.io/runbooks/low-peers"
+          runbook_url: "https://docs.virtengine.com/runbooks/low-peers"
           impact: "Node may become isolated from the network"
 
       - alert: NoPeers
@@ -224,7 +224,7 @@ groups:
         annotations:
           summary: "No peers connected"
           description: "Node has lost all peer connections"
-          runbook_url: "https://docs.virtengine.io/runbooks/no-peers"
+          runbook_url: "https://docs.virtengine.com/runbooks/no-peers"
           impact: "Node is isolated and cannot participate in consensus"
 
       - alert: HighPeerLatency
@@ -237,7 +237,7 @@ groups:
         annotations:
           summary: "High peer latency"
           description: "P95 peer latency is {{ $value | printf \"%.2f\" }} seconds"
-          runbook_url: "https://docs.virtengine.io/runbooks/peer-latency"
+          runbook_url: "https://docs.virtengine.com/runbooks/peer-latency"
 
   # =============================================================================
   # State Alerts
@@ -255,7 +255,7 @@ groups:
         annotations:
           summary: "State database is large"
           description: "State database size is {{ $value | printf \"%.2f\" }}GB"
-          runbook_url: "https://docs.virtengine.io/runbooks/large-state"
+          runbook_url: "https://docs.virtengine.com/runbooks/large-state"
 
       - alert: StateSyncBehind
         expr: virtengine_chain_block_height - virtengine_state_sync_height > 100
@@ -267,4 +267,4 @@ groups:
         annotations:
           summary: "State sync falling behind"
           description: "State sync is {{ $value }} blocks behind current height"
-          runbook_url: "https://docs.virtengine.io/runbooks/sync-behind"
+          runbook_url: "https://docs.virtengine.com/runbooks/sync-behind"

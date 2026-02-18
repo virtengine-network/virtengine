@@ -38,7 +38,7 @@ resource "kubernetes_namespace" "cockroachdb" {
     labels = {
       "app.kubernetes.io/name"       = "cockroachdb"
       "app.kubernetes.io/managed-by" = "terraform"
-      "virtengine.io/region"         = var.region
+      "virtengine.com/region"        = var.region
     }
   }
 }
@@ -230,7 +230,7 @@ resource "helm_release" "cockroachdb" {
       }
 
       nodeSelector = {
-        "virtengine.io/region" = var.region
+        "virtengine.com/region" = var.region
       }
 
       tolerations = var.tolerations
@@ -242,8 +242,8 @@ resource "helm_release" "cockroachdb" {
       }
 
       labels = {
-        "virtengine.io/component" = "database"
-        "virtengine.io/region"    = var.region
+        "virtengine.com/component" = "database"
+        "virtengine.com/region"    = var.region
       }
     })
   ]

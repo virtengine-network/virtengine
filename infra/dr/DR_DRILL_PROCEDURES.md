@@ -123,14 +123,14 @@ cd /opt/virtengine
 # Verify all regions healthy
 for REGION in us-east-1 eu-west-1 ap-southeast-1; do
   kubectl --context=virtengine-prod-${REGION} cluster-info
-  curl -sf https://rpc-${REGION}.virtengine.io/status | jq '.result.sync_info'
+  curl -sf https://rpc-${REGION}.virtengine.com/status | jq '.result.sync_info'
 done
 
 # Verify backup freshness
 ./scripts/dr/dr-test.sh --test backup
 
 # Record baseline metrics
-curl -sf https://prometheus.virtengine.io/api/v1/query?query=up | jq '.data.result'
+curl -sf https://prometheus.virtengine.com/api/v1/query?query=up | jq '.data.result'
 ```
 
 #### Phase 2: Simulated Failure (T+0)
@@ -169,12 +169,12 @@ ansible-playbook regional-failover.yaml \
 
 ```bash
 # Verify API accessibility
-curl -sf https://api.virtengine.io/cosmos/base/tendermint/v1beta1/node_info
+curl -sf https://api.virtengine.com/cosmos/base/tendermint/v1beta1/node_info
 
 # Verify block production
-HEIGHT1=$(curl -sf https://rpc.virtengine.io/status | jq -r '.result.sync_info.latest_block_height')
+HEIGHT1=$(curl -sf https://rpc.virtengine.com/status | jq -r '.result.sync_info.latest_block_height')
 sleep 10
-HEIGHT2=$(curl -sf https://rpc.virtengine.io/status | jq -r '.result.sync_info.latest_block_height')
+HEIGHT2=$(curl -sf https://rpc.virtengine.com/status | jq -r '.result.sync_info.latest_block_height')
 [ "$HEIGHT2" -gt "$HEIGHT1" ] && echo "Block production: OK"
 
 # Verify database writes
@@ -317,7 +317,7 @@ echo "Achieved RTO: ${RTO} seconds (target: 900 seconds)"
 2. **Update Metrics:**
    ```bash
    # Record drill metrics in Prometheus
-   curl -X POST http://pushgateway.virtengine.io:9091/metrics/job/dr_drill \
+   curl -X POST http://pushgateway.virtengine.com:9091/metrics/job/dr_drill \
      --data-binary @- << EOF
    dr_drill_rto_seconds $(cat /tmp/failover_duration)
    dr_drill_success 1
@@ -479,7 +479,7 @@ echo "Achieved RTO: ${RTO} seconds (target: 900 seconds)"
 **Communication Channels:**
 - **Incident Channel:** `#incident-response`
 - **DR Channel:** `#dr-drills`
-- **Status Page:** https://status.virtengine.io
+- **Status Page:** https://status.virtengine.com
 - **PagerDuty:** https://virtengine.pagerduty.com
 
 ---

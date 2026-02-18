@@ -74,7 +74,13 @@ const QUICK_ACTIONS = [
     icon: "▶",
     color: "var(--color-todo)",
   },
-  { label: "Plan", cmd: "/plan", icon: "📋", color: "var(--color-inreview)" },
+  {
+    label: "Plan",
+    cmd: "/plan",
+    icon: "📋",
+    color: "var(--color-inreview)",
+    targetTab: "control",
+  },
   {
     label: "Logs",
     cmd: "/logs 50",
@@ -291,7 +297,13 @@ export function DashboardTab() {
           await refreshTab("logs", { force: true });
           showToast("Opened logs", "success");
         } else if (action.cmd.startsWith("/menu")) {
+          await sendCommandToChat(action.cmd);
           showToast("Opened control panel", "success");
+          scheduleRefresh(60);
+        } else if (action.cmd.startsWith("/plan")) {
+          await sendCommandToChat(action.cmd);
+          showToast("Planner dispatched", "success");
+          scheduleRefresh(120);
         } else {
           await sendCommandToChat(action.cmd);
           showToast(`Sent: ${action.cmd}`, "success");

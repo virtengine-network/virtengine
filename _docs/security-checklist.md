@@ -240,8 +240,8 @@ Complete before any mainnet release:
 
 ### Security Contacts
 
-- **Security Issues:** security@virtengine.io
-- **Bug Bounty:** https://virtengine.io/security/bounty
+- **Security Issues:** security@virtengine.com
+- **Bug Bounty:** https://virtengine.com/security/bounty
 - **Responsible Disclosure:** See `SECURITY.md`
 
 ---

@@ -47,9 +47,9 @@ data:
     p, role:readonly, projects, get, *, allow
     
     # Group bindings (configure based on your SSO groups)
-    g, admin@virtengine.io, role:admin
-    g, sre@virtengine.io, role:operator
-    g, developers@virtengine.io, role:developer
+    g, admin@virtengine.com, role:admin
+    g, sre@virtengine.com, role:operator
+    g, developers@virtengine.com, role:developer
     
   # Scopes for OIDC
   scopes: '[groups]'

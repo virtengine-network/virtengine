@@ -58,7 +58,7 @@ export function Footer() {
             <ul className="mt-4 space-y-2 text-sm">
               <li>
                 <a
-                  href="https://docs.virtengine.io"
+                  href="https://docs.virtengine.com"
                   className="text-muted-foreground hover:text-foreground"
                 >
                   {t('Documentation')}

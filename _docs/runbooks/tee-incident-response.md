@@ -17,7 +17,7 @@ This runbook covers incidents involving TEE hardware, enclave health, and attest
 1. Confirm blast radius and current platform:
    ```bash
    kubectl get pods -n virtengine -l app.kubernetes.io/name=tee-enclave -o wide
-   kubectl get nodes -l virtengine.io/enclave-ready=true -o wide
+   kubectl get nodes -l virtengine.com/enclave-ready=true -o wide
    ```
 2. Check enclave service health and recent errors:
    ```bash
@@ -91,8 +91,8 @@ kubectl rollout restart deployment/tee-enclave -n virtengine
 ### Force Failover Away from a Failing Platform
 
 ```bash
-kubectl cordon -l virtengine.io/tee-platform=nitro
-kubectl drain -l virtengine.io/tee-platform=nitro \
+kubectl cordon -l virtengine.com/tee-platform=nitro
+kubectl drain -l virtengine.com/tee-platform=nitro \
   --pod-selector=app.kubernetes.io/name=tee-enclave \
   --grace-period=60 \
   --delete-emptydir-data
@@ -104,7 +104,7 @@ kubectl scale deployment/tee-enclave -n virtengine --replicas=2
 ```bash
 kubectl patch deployment/tee-enclave -n virtengine --type=json -p='[
   {"op": "add", "path": "/spec/template/spec/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution/nodeSelectorTerms/0/matchExpressions/-",
-   "value": {"key": "virtengine.io/tee-platform", "operator": "NotIn", "values": ["nitro"]}}
+   "value": {"key": "virtengine.com/tee-platform", "operator": "NotIn", "values": ["nitro"]}}
 ]'
 ```
 
@@ -140,7 +140,7 @@ kubectl rollout restart deployment/tee-enclave -n virtengine
    ```bash
    kubectl exec -n virtengine -it deploy/tee-enclave -- /bin/tee-health-check
    kubectl exec -n virtengine -it deploy/tee-enclave -- /bin/attestation-test
-   kubectl uncordon -l virtengine.io/tee-platform=nitro
+   kubectl uncordon -l virtengine.com/tee-platform=nitro
    kubectl get pods -n virtengine -l app.kubernetes.io/name=tee-enclave -o wide
    ```
 2. Confirm failover state cleared and attestation succeeds:

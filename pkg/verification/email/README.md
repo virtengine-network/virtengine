@@ -47,9 +47,9 @@ This package provides email OTP/link verification with signed attestations for t
 ```go
 config := email.DefaultConfig()
 config.Provider = "ses"                          // ses, sendgrid, or mock
-config.FromAddress = "noreply@virtengine.io"
+config.FromAddress = "noreply@virtengine.com"
 config.FromName = "VirtEngine Identity"
-config.BaseURL = "https://verify.virtengine.io"
+config.BaseURL = "https://verify.virtengine.com"
 config.OTPLength = 6
 config.OTPTTLSeconds = 600                       // 10 minutes
 config.MaxAttempts = 5
@@ -61,7 +61,7 @@ config.MaxResends = 3
 ```go
 sesConfig := email.SESConfig{
     Region:     "us-east-1",
-    FromDomain: "virtengine.io",
+    FromDomain: "virtengine.com",
 }
 provider, err := email.NewSESProvider(sesConfig, logger)
 ```
@@ -71,7 +71,7 @@ provider, err := email.NewSESProvider(sesConfig, logger)
 ```go
 sgConfig := email.SendGridConfig{
     APIKey:     os.Getenv("SENDGRID_API_KEY"),
-    FromDomain: "virtengine.io",
+    FromDomain: "virtengine.com",
 }
 provider, err := email.NewSendGridProvider(sgConfig, logger)
 ```

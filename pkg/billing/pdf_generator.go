@@ -73,7 +73,7 @@ func DefaultPDFConfig() PDFConfig {
 	return PDFConfig{
 		CompanyName:    "VirtEngine",
 		CompanyAddress: []string{"VirtEngine Inc.", "Decentralized Cloud Infrastructure"},
-		CompanyEmail:   "billing@virtengine.io",
+		CompanyEmail:   "billing@virtengine.com",
 		CompanyPhone:   "",
 		PrimaryColor:   "#2563eb",
 		SecondaryColor: "#1e40af",
@@ -81,7 +81,7 @@ func DefaultPDFConfig() PDFConfig {
 		PageSize:       "A4",
 		IncludeTerms:   true,
 		TermsText: `Payment is due within the terms specified on this invoice. Late payments may incur additional fees.
-For questions about this invoice, please contact billing@virtengine.io`,
+For questions about this invoice, please contact billing@virtengine.com`,
 		FooterText:              "Thank you for using VirtEngine - Decentralized Cloud Computing",
 		ShowTaxBreakdown:        true,
 		ShowPaymentInstructions: true,

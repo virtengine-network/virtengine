@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REGION="${1:-}"
-DOMAIN="${VE_DOMAIN:-virtengine.io}"
+DOMAIN="${VE_DOMAIN:-virtengine.com}"
 PASS=0
 FAIL=0
 SKIP=0

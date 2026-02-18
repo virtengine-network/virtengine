@@ -8,7 +8,7 @@ metadata:
   namespace: litmus
   labels:
     app.kubernetes.io/part-of: virtengine
-    chaos.virtengine.io/target: provider
+    chaos.virtengine.com/target: provider
 spec:
   schedule: "0 3 * * *"  # Run daily at 3 AM
   concurrencyPolicy: Forbid

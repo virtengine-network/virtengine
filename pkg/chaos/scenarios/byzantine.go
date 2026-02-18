@@ -165,9 +165,9 @@ func (d *DoubleSigningScenario) Build() (*Experiment, error) {
 			},
 		},
 		Labels: map[string]string{
-			"chaos.virtengine.io/type":     string(ExperimentTypeByzantineDoubleSigning),
-			"chaos.virtengine.io/category": "byzantine",
-			"chaos.virtengine.io/severity": "critical",
+			"chaos.virtengine.com/type":     string(ExperimentTypeByzantineDoubleSigning),
+			"chaos.virtengine.com/category": "byzantine",
+			"chaos.virtengine.com/severity": "critical",
 		},
 	}, nil
 }
@@ -272,8 +272,8 @@ func (e *EquivocationScenario) Build() (*Experiment, error) {
 			},
 		},
 		Labels: map[string]string{
-			"chaos.virtengine.io/type":     string(ExperimentTypeByzantineEquivocation),
-			"chaos.virtengine.io/category": "byzantine",
+			"chaos.virtengine.com/type":     string(ExperimentTypeByzantineEquivocation),
+			"chaos.virtengine.com/category": "byzantine",
 		},
 	}, nil
 }
@@ -375,8 +375,8 @@ func (i *InvalidBlockScenario) Build() (*Experiment, error) {
 			},
 		},
 		Labels: map[string]string{
-			"chaos.virtengine.io/type":     string(ExperimentTypeByzantineInvalidBlock),
-			"chaos.virtengine.io/category": "byzantine",
+			"chaos.virtengine.com/type":     string(ExperimentTypeByzantineInvalidBlock),
+			"chaos.virtengine.com/category": "byzantine",
 		},
 	}, nil
 }
@@ -469,8 +469,8 @@ func (m *MessageTamperingScenario) Build() (*Experiment, error) {
 			},
 		},
 		Labels: map[string]string{
-			"chaos.virtengine.io/type":     string(ExperimentTypeByzantineMessageTampering),
-			"chaos.virtengine.io/category": "byzantine",
+			"chaos.virtengine.com/type":     string(ExperimentTypeByzantineMessageTampering),
+			"chaos.virtengine.com/category": "byzantine",
 		},
 	}, nil
 }
@@ -566,8 +566,8 @@ func (s *SelectiveForwardingScenario) Build() (*Experiment, error) {
 			},
 		},
 		Labels: map[string]string{
-			"chaos.virtengine.io/type":     string(ExperimentTypeByzantineSelectiveForwarding),
-			"chaos.virtengine.io/category": "byzantine",
+			"chaos.virtengine.com/type":     string(ExperimentTypeByzantineSelectiveForwarding),
+			"chaos.virtengine.com/category": "byzantine",
 		},
 	}, nil
 }

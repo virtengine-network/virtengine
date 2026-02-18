@@ -45,7 +45,7 @@ variable "regions" {
 variable "domain_name" {
   description = "Domain name for DNS records"
   type        = string
-  default     = "virtengine.io"
+  default     = "virtengine.com"
 }
 
 variable "tags" {

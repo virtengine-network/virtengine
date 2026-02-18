@@ -38,7 +38,7 @@ resource "kubernetes_namespace" "monitoring" {
     labels = {
       "app.kubernetes.io/name"       = "monitoring"
       "app.kubernetes.io/managed-by" = "terraform"
-      "virtengine.io/region"         = var.region
+      "virtengine.com/region"        = var.region
     }
   }
 }

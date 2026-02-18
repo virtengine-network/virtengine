@@ -121,7 +121,7 @@ hpc:
   ood:
     base_url: https://ondemand.example.com
     cluster: virtengine-hpc
-    oidc_issuer: https://veid.virtengine.io
+    oidc_issuer: https://veid.virtengine.com
     oidc_client_id: provider-daemon
     # oidc_client_secret provided via environment variable
     session_poll_interval: 15s

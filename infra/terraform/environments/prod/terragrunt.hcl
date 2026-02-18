@@ -88,7 +88,7 @@ inputs = {
   
   # Alerts
   alert_emails = [
-    "prod-alerts@virtengine.io",
-    "oncall@virtengine.io"
+    "prod-alerts@virtengine.com",
+    "oncall@virtengine.com"
   ]
 }

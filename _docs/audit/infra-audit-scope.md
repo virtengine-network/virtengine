@@ -63,6 +63,6 @@ configuration hardening, and resilience of validator/provider operations.
 - Final report and retest by week 4.
 
 ## Points of Contact
-- Infrastructure Lead: infra@virtengine.io
-- SRE Lead: sre@virtengine.io
-- Audit Coordinator: audit@virtengine.io
+- Infrastructure Lead: infra@virtengine.com
+- SRE Lead: sre@virtengine.com
+- Audit Coordinator: audit@virtengine.com

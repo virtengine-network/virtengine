@@ -8,7 +8,7 @@ metadata:
   namespace: litmus
   labels:
     app.kubernetes.io/part-of: virtengine
-    chaos.virtengine.io/target: validator
+    chaos.virtengine.com/target: validator
 spec:
   schedule: "0 2 * * *"  # Run daily at 2 AM
   concurrencyPolicy: Forbid

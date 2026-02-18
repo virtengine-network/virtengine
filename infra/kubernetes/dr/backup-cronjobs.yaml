@@ -13,7 +13,7 @@ metadata:
   name: dr-system
   labels:
     name: dr-system
-    virtengine.io/managed-by: terraform
+    virtengine.com/managed-by: terraform
 
 ---
 apiVersion: v1

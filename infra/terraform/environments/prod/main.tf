@@ -134,8 +134,8 @@ module "eks" {
       max_size       = 7
       min_size       = 4
       labels = {
-        role                  = "validator"
-        "virtengine.io/chain" = "true"
+        role                   = "validator"
+        "virtengine.com/chain" = "true"
       }
       taints = [{
         key    = "dedicated"
@@ -151,8 +151,8 @@ module "eks" {
       max_size       = 6
       min_size       = 2
       labels = {
-        role                        = "inference"
-        "virtengine.io/accelerator" = "nvidia"
+        role                         = "inference"
+        "virtengine.com/accelerator" = "nvidia"
       }
       taints = [{
         key    = "dedicated"
@@ -368,7 +368,7 @@ module "tee_hardware" {
   sgx_desired_size  = 2
   sgx_min_size      = 2
   sgx_max_size      = 6
-  sgx_pccs_endpoint = "https://pccs.virtengine.io/sgx/certification/v4/"
+  sgx_pccs_endpoint = "https://pccs.virtengine.com/sgx/certification/v4/"
 
   # Attestation configuration
   measurement_allowlist = var.tee_measurement_allowlist

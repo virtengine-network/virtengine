@@ -8,7 +8,7 @@ variable "environment" {
 variable "domain_name" {
   description = "Primary domain name"
   type        = string
-  default     = "virtengine.io"
+  default     = "virtengine.com"
 }
 
 variable "create_hosted_zone" {

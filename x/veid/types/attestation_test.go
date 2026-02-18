@@ -578,7 +578,7 @@ func TestExampleFacialVerificationAttestation(t *testing.T) {
 
 	issuer := NewAttestationIssuer(fingerprint, "virtengine1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu")
 	issuer.KeyID = "validator-key-001"
-	issuer.ServiceEndpoint = "https://veid-signer.virtengine.io/v1"
+	issuer.ServiceEndpoint = "https://veid-signer.virtengine.com/v1"
 
 	subject := NewAttestationSubject("virtengine1abc123def456ghi789jkl012mno345pqr678stu")
 	subject.ScopeID = "scope-facial-001"
@@ -623,7 +623,7 @@ func TestExampleFacialVerificationAttestation(t *testing.T) {
 		[]byte("example-ed25519-signature-64-bytes-padded-for-test-purposes!!"),
 		hex.EncodeToString(nonce),
 	)
-	proof.Domain = "veid.virtengine.io"
+	proof.Domain = "veid.virtengine.com"
 	attestation.SetProof(proof)
 
 	// Validate

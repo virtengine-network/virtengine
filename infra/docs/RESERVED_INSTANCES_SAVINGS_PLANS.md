@@ -269,6 +269,6 @@ $3,000/month commitment:
 
 ### Contacts
 
-- Cloud Economics: cloud-economics@virtengine.io
-- Finance: finance@virtengine.io
-- Platform Team: platform-team@virtengine.io
+- Cloud Economics: cloud-economics@virtengine.com
+- Finance: finance@virtengine.com
+- Platform Team: platform-team@virtengine.com

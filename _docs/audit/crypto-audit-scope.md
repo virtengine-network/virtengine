@@ -68,6 +68,6 @@ cryptographic boundaries.
 - Final report and retest by week 4.
 
 ## Points of Contact
-- Crypto Lead: security@virtengine.io
-- Key Management Owner: keymanagement@virtengine.io
-- Audit Coordinator: audit@virtengine.io
+- Crypto Lead: security@virtengine.com
+- Key Management Owner: keymanagement@virtengine.com
+- Audit Coordinator: audit@virtengine.com

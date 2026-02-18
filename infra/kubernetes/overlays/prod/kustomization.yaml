@@ -86,7 +86,7 @@ patches:
         path: /spec/template/spec/nodeSelector
         value:
           role: validator
-          virtengine.io/chain: "true"
+          virtengine.com/chain: "true"
       - op: add
         path: /spec/template/spec/tolerations
         value:

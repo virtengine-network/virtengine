@@ -2428,11 +2428,73 @@ async function handleApi(req, res, url) {
             String(s.taskId || "").toLowerCase().includes(short),
         );
       }
+      const fullSession =
+        session && typeof sessionTracker?.getSessionMessages === "function"
+          ? sessionTracker.getSessionMessages(session.id || session.taskId)
+          : null;
+      const actionHistory = [];
+      const fileAccessMap = new Map();
+      const fileAccessCounts = { read: 0, write: 0, other: 0 };
+      const filePattern = /([a-zA-Z0-9_./-]+\.(?:js|mjs|cjs|ts|tsx|jsx|json|md|mdx|css|scss|less|html|yml|yaml|toml|env|lock|go|rs|py|sh|ps1|psm1|txt|sql))/g;
+      const classifyActionKind = (toolName, detail) => {
+        const toolLower = String(toolName || "").toLowerCase();
+        const cmdLower = String(detail || "").toLowerCase();
+        if (toolLower.includes("apply_patch") || toolLower.includes("write")) return "write";
+        if (/\b(rg|cat|sed|ls|stat|head|tail|grep|find)\b/.test(cmdLower)) return "read";
+        return "other";
+      };
+      const addFileAccess = (path, kind) => {
+        if (!path) return;
+        const entry = fileAccessMap.get(path) || { path, kinds: new Set() };
+        if (!entry.kinds.has(kind)) {
+          entry.kinds.add(kind);
+          if (fileAccessCounts[kind] != null) fileAccessCounts[kind] += 1;
+          else fileAccessCounts.other += 1;
+        }
+        fileAccessMap.set(path, entry);
+      };
+
+      const messages = fullSession?.messages || [];
+      const recentMessages = messages.slice(-50);
+      for (const msg of recentMessages) {
+        if (!msg || !msg.type) continue;
+        if (msg.type === "tool_call" || msg.type === "tool_result" || msg.type === "error") {
+          actionHistory.push({
+            type: msg.type,
+            tool: msg.meta?.toolName || (msg.type === "tool_result" ? "RESULT" : "TOOL"),
+            detail: msg.content || "",
+            content: msg.content || "",
+            timestamp: msg.timestamp || null,
+          });
+        }
+        if (msg.type === "tool_call" && msg.content) {
+          const kind = classifyActionKind(msg.meta?.toolName, msg.content);
+          const matches = msg.content.matchAll(filePattern);
+          for (const match of matches) {
+            const file = match?.[1];
+            if (file) addFileAccess(file, kind);
+          }
+        }
+      }
+      for (const file of changedFiles) {
+        if (file?.file) addFileAccess(file.file, "write");
+      }
+      const fileAccessSummary = fileAccessMap.size
+        ? {
+            files: Array.from(fileAccessMap.values()).map((entry) => ({
+              path: entry.path,
+              kinds: Array.from(entry.kinds),
+            })),
+            counts: fileAccessCounts,
+          }
+        : null;
       jsonResponse(res, 200, {
         ok: true,
         data: {
           matches: worktreeMatches,
           session: session || null,
+          actionHistory,
+          fileAccessSummary,
           context: {
             name: wtName,
             path: wtPath,
@@ -2503,9 +2565,59 @@ async function handleApi(req, res, url) {
             return { hash, message, time };
           })
         : [];
+      const commitListRaw = runGit(
+        `log ${safe} --format=%H||%h||%an||%ae||%ad||%s --date=iso-strict -20`,
+        15000,
+      );
+      const commitList = commitListRaw
+        ? commitListRaw.split("\n").filter(Boolean).map((line) => {
+            const [hash, short, authorName, authorEmail, authorDate, subject] = line.split("||");
+            return {
+              hash,
+              short,
+              authorName,
+              authorEmail,
+              authorDate,
+              subject,
+            };
+          })
+        : [];
       const diffStat = runGit(`diff --stat ${diffRange}`, 15000);
       const filesRaw = runGit(`diff --name-only ${diffRange}`, 15000);
       const files = filesRaw ? filesRaw.split("\n").filter(Boolean) : [];
+      const numstatRaw = runGit(`diff --numstat ${diffRange}`, 15000);
+      const parseNumstat = (raw) => {
+        if (!raw) return [];
+        const entries = [];
+        for (const line of raw.split("\n")) {
+          if (!line.trim()) continue;
+          const parts = line.split("\t");
+          if (parts.length < 3) continue;
+          const [addRaw, delRaw, ...fileParts] = parts;
+          const file = fileParts.join("\t");
+          if (!file) continue;
+          if (addRaw === "-" && delRaw === "-") {
+            entries.push({ file, additions: 0, deletions: 0, binary: true });
+          } else {
+            entries.push({
+              file,
+              additions: parseInt(addRaw, 10) || 0,
+              deletions: parseInt(delRaw, 10) || 0,
+              binary: false,
+            });
+          }
+        }
+        return entries;
+      };
+      const filesChanged = parseNumstat(numstatRaw);
+      const diffSummary = filesChanged.length
+        ? {
+            totalFiles: filesChanged.length,
+            totalAdditions: filesChanged.reduce((sum, f) => sum + (f.additions || 0), 0),
+            totalDeletions: filesChanged.reduce((sum, f) => sum + (f.deletions || 0), 0),
+            binaryFiles: filesChanged.reduce((sum, f) => sum + (f.binary ? 1 : 0), 0),
+          }
+        : null;
 
       let worktree = null;
       try {
@@ -2538,6 +2650,24 @@ async function handleApi(req, res, url) {
           activeSlot = slotMatch;
         }
       }
+      const workspaceTarget =
+        activeSlot || worktree
+          ? {
+              taskId: activeSlot?.taskId || worktree?.taskKey || null,
+              taskTitle: activeSlot?.taskTitle || worktree?.taskKey || safe,
+              branch: worktree?.branch || safe,
+              workspacePath: worktree?.path || null,
+            }
+          : null;
+      const workspaceLink = workspaceTarget
+        ? {
+            label: workspaceTarget.taskTitle || workspaceTarget.branch || safe,
+            taskTitle: workspaceTarget.taskTitle,
+            branch: workspaceTarget.branch,
+            workspacePath: workspaceTarget.workspacePath,
+            target: workspaceTarget,
+          }
+        : null;
 
       jsonResponse(res, 200, {
         ok: true,
@@ -2545,10 +2675,16 @@ async function handleApi(req, res, url) {
           branch: safe,
           base: baseRef,
           commits,
+          commitList,
           diffStat,
           files,
+          filesChanged,
+          filesDetailed: filesChanged,
+          diffSummary,
           worktree,
           activeSlot,
+          workspaceTarget,
+          workspaceLink,
         },
       });
     } catch (err) {

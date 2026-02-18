@@ -27,8 +27,8 @@ func TestRenderTemplates(t *testing.T) {
 		ServiceName:  "GPU",
 		Amount:       "10",
 		Currency:     "USD",
-		DashboardURL: "https://virtengine.io/dashboard",
-		Unsubscribe:  "https://virtengine.io/unsub",
+		DashboardURL: "https://virtengine.com/dashboard",
+		Unsubscribe:  "https://virtengine.com/unsub",
 	})
 	if err != nil {
 		t.Fatalf("render: %v", err)
@@ -47,12 +47,12 @@ func TestSendTemplateIncludesUnsubscribe(t *testing.T) {
 		t.Fatalf("renderer: %v", err)
 	}
 	sender := &memorySender{}
-	service := NewService(renderer, sender, "noreply@virtengine.io", "https://virtengine.io/unsubscribe")
+	service := NewService(renderer, sender, "noreply@virtengine.com", "https://virtengine.com/unsubscribe")
 
 	data := VEIDStatusData{
 		Status:       "approved",
 		Details:      "Your identity is verified.",
-		DashboardURL: "https://virtengine.io/account",
+		DashboardURL: "https://virtengine.com/account",
 		Unsubscribe:  service.BuildUnsubscribeURL("token-123"),
 	}
 	if err := service.SendTemplate(context.Background(), "user@example.com", "token-123", TemplateVEIDStatus, data); err != nil {

@@ -14,7 +14,7 @@ metadata:
     app.kubernetes.io/part-of: virtengine
     app.kubernetes.io/version: "0.1.0"
   annotations:
-    virtengine.io/task: "TEE-HW-001"
+    virtengine.com/task: "TEE-HW-001"
 spec:
   replicas: 2
   strategy:
@@ -52,7 +52,7 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: virtengine.io/enclave-ready
+                  - key: virtengine.com/enclave-ready
                     operator: In
                     values:
                       - "true"
@@ -60,21 +60,21 @@ spec:
             - weight: 100
               preference:
                 matchExpressions:
-                  - key: virtengine.io/tee-platform
+                  - key: virtengine.com/tee-platform
                     operator: In
                     values:
                       - nitro
             - weight: 80
               preference:
                 matchExpressions:
-                  - key: virtengine.io/tee-platform
+                  - key: virtengine.com/tee-platform
                     operator: In
                     values:
                       - sev-snp
             - weight: 60
               preference:
                 matchExpressions:
-                  - key: virtengine.io/tee-platform
+                  - key: virtengine.com/tee-platform
                     operator: In
                     values:
                       - sgx
@@ -89,7 +89,7 @@ spec:
 
       # Tolerate TEE-specific taints
       tolerations:
-        - key: virtengine.io/tee
+        - key: virtengine.com/tee
           operator: Exists
           effect: NoSchedule
         - key: dedicated

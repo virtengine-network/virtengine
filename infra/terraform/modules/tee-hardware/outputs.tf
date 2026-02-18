@@ -53,11 +53,11 @@ output "enabled_platforms" {
 output "node_labels" {
   description = "Kubernetes labels for TEE node selection"
   value = {
-    enclave_ready = "virtengine.io/enclave-ready=true"
+    enclave_ready = "virtengine.com/enclave-ready=true"
     platform = {
-      nitro   = "virtengine.io/tee-platform=nitro"
-      sev_snp = "virtengine.io/tee-platform=sev-snp"
-      sgx     = "virtengine.io/tee-platform=sgx"
+      nitro   = "virtengine.com/tee-platform=nitro"
+      sev_snp = "virtengine.com/tee-platform=sev-snp"
+      sgx     = "virtengine.com/tee-platform=sgx"
     }
   }
 }
@@ -65,8 +65,8 @@ output "node_labels" {
 output "node_taints" {
   description = "Kubernetes taints for TEE nodes"
   value = {
-    nitro   = "virtengine.io/tee=nitro:NoSchedule"
-    sev_snp = "virtengine.io/tee=sev-snp:NoSchedule"
-    sgx     = "virtengine.io/tee=sgx:NoSchedule"
+    nitro   = "virtengine.com/tee=nitro:NoSchedule"
+    sev_snp = "virtengine.com/tee=sev-snp:NoSchedule"
+    sgx     = "virtengine.com/tee=sgx:NoSchedule"
   }
 }

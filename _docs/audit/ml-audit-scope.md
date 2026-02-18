@@ -70,6 +70,6 @@ verification, focusing on adversarial robustness, bias, and secure deployment.
 - Final report and retest verification by week 4.
 
 ## Points of Contact
-- ML Security Lead: ml-security@virtengine.io
-- Data Governance: privacy@virtengine.io
-- Audit Coordinator: audit@virtengine.io
+- ML Security Lead: ml-security@virtengine.com
+- Data Governance: privacy@virtengine.com
+- Audit Coordinator: audit@virtengine.com

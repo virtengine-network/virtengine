@@ -144,7 +144,7 @@ message OldRequest {
 ```http
 Deprecation: true
 Sunset: Sat, 01 Jun 2025 00:00:00 GMT
-Link: <https://docs.virtengine.io/migrations/v0.12>; rel="successor-version"
+Link: <https://docs.virtengine.com/migrations/v0.12>; rel="successor-version"
 ```
 
 ### Deprecation Enforcement
@@ -229,7 +229,7 @@ virtengine version
 virtengine query version
 
 # API version check
-curl -I https://rpc.virtengine.io/version
+curl -I https://rpc.virtengine.com/version
 ```
 
 ## Testing Requirements

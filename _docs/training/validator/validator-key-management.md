@@ -855,7 +855,7 @@ tar -czf /tmp/evidence_$(date +%Y%m%d_%H%M%S).tar.gz \
     ~/.bash_history
 
 # Step 4: Alert security team
-# security@virtengine.io
+# security@virtengine.com
 # Include: timestamp, nature of compromise, actions taken
 
 # Step 5: DO NOT RESTART until cleared by security team
@@ -966,7 +966,7 @@ sudo systemctl stop virtengine
    ```bash
    # Contact VirtEngine security team FIRST
    # They will coordinate safe recovery
-   # security@virtengine.io
+   # security@virtengine.com
    ```
 
 5. **If key is unrecoverable:**
@@ -1101,7 +1101,7 @@ sudo systemctl start virtengine
    - Follow key-specific compromise procedures above
 
 5. **Notify stakeholders**
-   - Security team: security@virtengine.io
+   - Security team: security@virtengine.com
    - Delegators (if funds at risk)
    - Other validators (if network-wide threat)
 
@@ -1171,8 +1171,8 @@ Complete the following exercises in a test environment:
 │  Revoke VEID key:    virtengine tx veid emergency-revoke-key    │
 │                                                                  │
 │  CONTACTS                                                        │
-│  Security:           security@virtengine.io                     │
-│  Operations:         ops@virtengine.io                          │
+│  Security:           security@virtengine.com                     │
+│  Operations:         ops@virtengine.com                          │
 │  Discord:            discord.gg/virtengine #validators          │
 │                                                                  │
 │  BACKUP CHECKLIST                                                │

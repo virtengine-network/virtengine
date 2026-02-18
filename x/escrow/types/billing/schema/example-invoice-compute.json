@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://virtengine.io/schemas/billing/examples/invoice-compute.json",
+  "$id": "https://virtengine.com/schemas/billing/examples/invoice-compute.json",
   "title": "Example Invoice - Compute Services",
   "description": "Example invoice for compute resource usage",
   "invoice_id": "inv-2026-001-abc123",

@@ -28,7 +28,7 @@ We take all security vulnerabilities seriously. If you discover a security issue
 
 ### How to Report
 
-**Email:** [security@virtengine.io](mailto:security@virtengine.io)
+**Email:** [security@virtengine.com](mailto:security@virtengine.com)
 
 When reporting a vulnerability, please include:
 
@@ -46,7 +46,7 @@ You will receive an acknowledgment within 48 hours of your report.
 
 | Contact Method | Details                                                 |
 | -------------- | ------------------------------------------------------- |
-| Email          | [security@virtengine.io](mailto:security@virtengine.io) |
+| Email          | [security@virtengine.com](mailto:security@virtengine.com) |
 | PGP Key        | Available upon request                                  |
 | Response Time  | Initial acknowledgment within 48 hours                  |
 
@@ -192,13 +192,13 @@ go install github.com/sigstore/cosign/v2/cmd/cosign@latest
 cosign verify-blob \
   --signature virtengine_v0.9.0_linux_amd64.zip.sig \
   --certificate virtengine_v0.9.0_linux_amd64.zip.pem \
-  --certificate-identity-regexp ".*@virtengine.io" \
+  --certificate-identity-regexp ".*@virtengine.com" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   virtengine_v0.9.0_linux_amd64.zip
 
 # Verify container image
 cosign verify \
-  --certificate-identity-regexp ".*@virtengine.io" \
+  --certificate-identity-regexp ".*@virtengine.com" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/virtengine/virtengine:v0.9.0
 ```
@@ -276,9 +276,9 @@ Actual rewards will depend on:
 
 We are actively developing our bug bounty program. In the meantime:
 
-- Report vulnerabilities to [security@virtengine.io](mailto:security@virtengine.io)
+- Report vulnerabilities to [security@virtengine.com](mailto:security@virtengine.com)
 - Good-faith reporters will be recognized and may receive discretionary rewards
-- Sign up for announcements at [virtengine.io](https://virtengine.io) for program launch updates
+- Sign up for announcements at [virtengine.com](https://virtengine.com) for program launch updates
 
 ## Scope
 
@@ -343,12 +343,12 @@ We will not pursue legal action against researchers who:
 Security advisories are published via:
 
 - [GitHub Security Advisories](https://github.com/virtengine/virtengine/security/advisories)
-- Our security mailing list (subscribe at [virtengine.io](https://virtengine.io))
+- Our security mailing list (subscribe at [virtengine.com](https://virtengine.com))
 - Release notes and CHANGELOG.md
 
 ## Questions
 
-For questions about this security policy, contact [security@virtengine.io](mailto:security@virtengine.io).
+For questions about this security policy, contact [security@virtengine.com](mailto:security@virtengine.com).
 
 ---
 

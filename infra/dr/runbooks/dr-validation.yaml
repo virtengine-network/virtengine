@@ -35,7 +35,7 @@ automated_tests:
     steps:
       - command: |
           for REGION in us-east-1 eu-west-1 ap-southeast-1; do
-            curl -sf --connect-timeout 10 "https://rpc-${REGION}.virtengine.io/status" | \
+            curl -sf --connect-timeout 10 "https://rpc-${REGION}.virtengine.com/status" | \
               jq -r '.result.sync_info.catching_up' | grep -q "false" && \
               echo "${REGION}: OK" || echo "${REGION}: FAIL"
           done
@@ -46,10 +46,10 @@ automated_tests:
     steps:
       - command: |
           # Query failover DNS record
-          dig +short api-failover.virtengine.io
+          dig +short api-failover.virtengine.com
           # Verify both primary and secondary resolve
-          dig +short api-failover.virtengine.io @ns-1.awsdns.co.uk
-          dig +short api-failover.virtengine.io @ns-1.awsdns.com
+          dig +short api-failover.virtengine.com @ns-1.awsdns.co.uk
+          dig +short api-failover.virtengine.com @ns-1.awsdns.com
 
   - name: validator_distribution
     description: "Verify validators are distributed across regions"
@@ -71,5 +71,5 @@ reporting:
       webhook: ${SLACK_WEBHOOK}
     - channel: email
       recipients:
-        - sre-team@virtengine.io
-        - platform@virtengine.io
+        - sre-team@virtengine.com
+        - platform@virtengine.com

@@ -107,7 +107,7 @@ for validator in $VALIDATOR_IPS; do
 done
 
 # Check DNS resolution
-dig +short validator1.virtengine.io
+dig +short validator1.virtengine.com
 ```
 
 **Resolution**:

@@ -165,7 +165,7 @@ resource "aws_eks_node_group" "main" {
   labels = merge(
     each.value.labels,
     {
-      "virtengine.io/node-group" = each.key
+      "virtengine.com/node-group" = each.key
     }
   )
 

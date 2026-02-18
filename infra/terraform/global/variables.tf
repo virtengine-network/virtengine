@@ -3,7 +3,7 @@
 variable "domain_name" {
   description = "Primary domain name for VirtEngine"
   type        = string
-  default     = "virtengine.io"
+  default     = "virtengine.com"
 }
 
 variable "create_hosted_zone" {

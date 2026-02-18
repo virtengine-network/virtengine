@@ -395,7 +395,7 @@ Before production deployment:
 
 ### Contact Information
 
-- **Compliance Team**: compliance@virtengine.io
-- **Operations**: ops@virtengine.io
-- **Security**: security@virtengine.io
-- **Legal**: legal@virtengine.io
+- **Compliance Team**: compliance@virtengine.com
+- **Operations**: ops@virtengine.com
+- **Security**: security@virtengine.com
+- **Legal**: legal@virtengine.com

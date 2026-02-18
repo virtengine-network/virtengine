@@ -170,13 +170,13 @@ Users can verify artifact signatures:
 cosign verify-blob \
   --signature virtengine_v0.9.0_linux_amd64.zip.sig \
   --certificate virtengine_v0.9.0_linux_amd64.zip.sig.cert \
-  --certificate-identity-regexp ".*@virtengine.io" \
+  --certificate-identity-regexp ".*@virtengine.com" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   virtengine_v0.9.0_linux_amd64.zip
 
 # Verify container image
 cosign verify \
-  --certificate-identity-regexp ".*@virtengine.io" \
+  --certificate-identity-regexp ".*@virtengine.com" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/virtengine/virtengine:v0.9.0
 ```
@@ -385,7 +385,7 @@ sha256sum -c checksums.txt --ignore-missing
 cosign verify-blob \
   --signature "virtengine_${VERSION}_linux_amd64.zip.sig" \
   --certificate "virtengine_${VERSION}_linux_amd64.zip.sig.cert" \
-  --certificate-identity-regexp ".*@virtengine.io" \
+  --certificate-identity-regexp ".*@virtengine.com" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   "virtengine_${VERSION}_linux_amd64.zip"
 ```
@@ -395,14 +395,14 @@ cosign verify-blob \
 ```bash
 # Verify container image signature
 cosign verify \
-  --certificate-identity-regexp ".*@virtengine.io" \
+  --certificate-identity-regexp ".*@virtengine.com" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/virtengine/virtengine:v0.9.0
 
 # Verify SBOM attestation
 cosign verify-attestation \
   --type cyclonedx \
-  --certificate-identity-regexp ".*@virtengine.io" \
+  --certificate-identity-regexp ".*@virtengine.com" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/virtengine/virtengine:v0.9.0
 ```
@@ -466,7 +466,7 @@ git commit -s -m "chore(deps): add github.com/new/dependency v1.2.3"
 
 ## Contact
 
-For supply chain security concerns, contact [security@virtengine.io](mailto:security@virtengine.io).
+For supply chain security concerns, contact [security@virtengine.com](mailto:security@virtengine.com).
 
 ---
 

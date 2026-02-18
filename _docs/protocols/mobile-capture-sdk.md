@@ -604,6 +604,6 @@ func (v *ServerValidator) ValidateSignatures(
 
 ## Support
 
-- **Documentation:** https://docs.virtengine.io/veid/mobile-sdk
+- **Documentation:** https://docs.virtengine.com/veid/mobile-sdk
 - **GitHub Issues:** https://github.com/virtengine/veid-capture-sdk/issues
 - **Discord:** https://discord.gg/virtengine

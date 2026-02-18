@@ -737,8 +737,8 @@ kubectl apply -f deploy/tee/sev-deployment.yaml
 
 **Required node labels:**
 
-- `virtengine.io/enclave-ready=true`
-- `virtengine.io/tee-platform=sgx` or `virtengine.io/tee-platform=sev-snp`
+- `virtengine.com/enclave-ready=true`
+- `virtengine.com/tee-platform=sgx` or `virtengine.com/tee-platform=sev-snp`
 
 **Required node devices:**
 

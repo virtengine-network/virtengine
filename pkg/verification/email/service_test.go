@@ -26,9 +26,9 @@ func newTestLogger() zerolog.Logger {
 func newTestConfig() Config {
 	config := DefaultConfig()
 	config.Provider = "mock"
-	config.FromAddress = "noreply@test.virtengine.io"
+	config.FromAddress = "noreply@test.virtengine.com"
 	config.FromName = "Test VirtEngine"
-	config.BaseURL = "https://test.virtengine.io"
+	config.BaseURL = "https://test.virtengine.com"
 	return config
 }
 

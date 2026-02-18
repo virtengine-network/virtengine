@@ -60,7 +60,7 @@ export function useWalletConnect(): UseWalletConnectResult {
         name: 'VirtEngine Portal',
         description: 'Decentralized cloud computing marketplace',
         url:
-          typeof window !== 'undefined' ? window.location.origin : 'https://portal.virtengine.io',
+          typeof window !== 'undefined' ? window.location.origin : 'https://portal.virtengine.com',
         icons: ['/apple-touch-icon.png'],
       },
     });

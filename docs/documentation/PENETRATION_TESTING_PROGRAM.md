@@ -115,10 +115,10 @@ This document establishes the comprehensive penetration testing program for Virt
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │  EXTERNAL ZONE (Full Testing)                                        │   │
-│  │  • Public API endpoints (api.virtengine.io)                         │   │
-│  │  • Web Portal (portal.virtengine.io)                                │   │
-│  │  • RPC endpoints (rpc.virtengine.io)                                │   │
-│  │  • gRPC endpoints (grpc.virtengine.io)                              │   │
+│  │  • Public API endpoints (api.virtengine.com)                         │   │
+│  │  • Web Portal (portal.virtengine.com)                                │   │
+│  │  • RPC endpoints (rpc.virtengine.com)                                │   │
+│  │  • gRPC endpoints (grpc.virtengine.com)                              │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                        │                                    │
 │                                        ▼                                    │
@@ -664,10 +664,10 @@ Each module must pass the following security audit:
 
 | Application | URL | Test Type |
 |-------------|-----|-----------|
-| VirtEngine Portal | portal.virtengine.io | Gray-box |
-| Provider Dashboard | provider.virtengine.io | Gray-box |
-| Documentation Site | docs.virtengine.io | Black-box |
-| API Explorer | api.virtengine.io/explorer | Gray-box |
+| VirtEngine Portal | portal.virtengine.com | Gray-box |
+| Provider Dashboard | provider.virtengine.com | Gray-box |
+| Documentation Site | docs.virtengine.com | Black-box |
+| API Explorer | api.virtengine.com/explorer | Gray-box |
 
 ### OWASP Top 10 Testing
 
@@ -1125,10 +1125,10 @@ Each technical finding must include:
 
 | Role | Contact | Responsibility |
 |------|---------|----------------|
-| Security Lead | security@virtengine.io | Program owner |
-| Engineering Lead | engineering@virtengine.io | Remediation owner |
-| Operations Lead | ops@virtengine.io | Infrastructure testing |
-| Legal/Compliance | legal@virtengine.io | Vendor contracts |
+| Security Lead | security@virtengine.com | Program owner |
+| Engineering Lead | engineering@virtengine.com | Remediation owner |
+| Operations Lead | ops@virtengine.com | Infrastructure testing |
+| Legal/Compliance | legal@virtengine.com | Vendor contracts |
 
 ### Appendix D: Change History
 
