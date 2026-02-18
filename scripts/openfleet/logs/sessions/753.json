@@ -1,0 +1,62 @@
+{
+  "id": "753",
+  "taskId": "753",
+  "type": "task",
+  "status": "active",
+  "createdAt": "2026-02-17T17:17:33.862Z",
+  "lastActiveAt": "2026-02-17T18:00:29.257Z",
+  "turnCount": 0,
+  "messages": [
+    {
+      "type": "error",
+      "content": "Reconnecting... 2/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T17:56:51.046Z"
+    },
+    {
+      "type": "error",
+      "content": "Reconnecting... 3/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T17:56:55.413Z"
+    },
+    {
+      "type": "error",
+      "content": "Reconnecting... 4/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T17:56:58.490Z"
+    },
+    {
+      "type": "error",
+      "content": "Reconnecting... 5/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T17:57:04.411Z"
+    },
+    {
+      "type": "error",
+      "content": "Reconnecting... 6/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T17:57:09.189Z"
+    },
+    {
+      "type": "error",
+      "content": "Reconnecting... 7/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T17:57:18.735Z"
+    },
+    {
+      "type": "error",
+      "content": "Reconnecting... 8/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T17:57:34.920Z"
+    },
+    {
+      "type": "error",
+      "content": "Reconnecting... 9/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T17:58:01.434Z"
+    },
+    {
+      "type": "error",
+      "content": "Reconnecting... 10/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T17:58:51.742Z"
+    },
+    {
+      "type": "error",
+      "content": "Reconnecting... 11/15 (unexpected status 404 Not Found: The API deployment for this resource does not exist. If you created the deployment within the last 5 minutes, please wait a moment and try again., url: https://open-ai-foundry-us-resource.openai.azure.com/openai/v1/responses)",
+      "timestamp": "2026-02-17T18:00:29.257Z"
+    }
+  ],
+  "metadata": {}
+}
