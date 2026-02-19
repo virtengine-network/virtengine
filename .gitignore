@@ -93,3 +93,4 @@ vk-stderr.log
 .claude/settings.local.json
 /.openfleet/
 scripts/openfleet/logs/*
+/.codex-monitor/
