@@ -1,21 +1,21 @@
 {
-  "name": "openfleet",
+  "name": "bosun",
   "version": "0.25.0",
-  "description": "Deprecated legacy shim. Renamed to @virtengine/openfleet; this package forwards CLI commands to openfleet.",
+  "description": "Deprecated legacy shim. Renamed to @virtengine/bosun; this package forwards CLI commands to bosun.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "VirtEngine <dev@virtengine.com>",
-  "homepage": "https://github.com/virtengine/virtengine/tree/main/scripts/openfleet",
+  "homepage": "https://github.com/virtengine/virtengine/tree/main/scripts/bosun",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/virtengine/virtengine.git",
-    "directory": "scripts/openfleet"
+    "directory": "scripts/bosun"
   },
   "bugs": {
     "url": "https://github.com/virtengine/virtengine/issues"
   },
   "keywords": [
-    "openfleet",
+    "bosun",
     "codex",
     "monitor",
     "orchestrator",
@@ -24,18 +24,18 @@
     "shim"
   ],
   "bin": {
-    "openfleet": "bin/openfleet.mjs",
-    "openfleet-setup": "bin/openfleet.mjs",
-    "openfleet-chat-id": "bin/openfleet.mjs",
-    "openfleet-shared-workspaces": "bin/openfleet.mjs"
+    "bosun": "bin/bosun.mjs",
+    "bosun-setup": "bin/bosun.mjs",
+    "bosun-chat-id": "bin/bosun.mjs",
+    "bosun-shared-workspaces": "bin/bosun.mjs"
   },
   "files": [
-    "bin/openfleet.mjs",
+    "bin/bosun.mjs",
     "README.md",
     "LICENSE"
   ],
   "dependencies": {
-    "@virtengine/openfleet": "latest"
+    "@virtengine/bosun": "latest"
   },
   "engines": {
     "node": ">=18"

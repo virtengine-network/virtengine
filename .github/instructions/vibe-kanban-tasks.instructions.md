@@ -78,7 +78,7 @@ If an agent (including yourself) outputs any of these phrases WITHOUT taking act
    - Do NOT wait for user response
    - Treat the plan as your working memory and execute it
 
-2. **If openfleet detects this pattern:**
+2. **If bosun detects this pattern:**
    - Auto-respond with: "Please continue with your plan and implement it now."
    - Trigger a follow-up agent call with the continuation prompt
    - Monitor for actual code changes (not just more planning)
@@ -149,7 +149,7 @@ Ready to start implementing?"
 
 <implementation_notes>
 
-## For openfleet Integration
+## For bosun Integration
 
 When monitoring agent responses for VK tasks:
 

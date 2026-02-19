@@ -8,7 +8,7 @@ This guide covers common issues with GitHub Actions workflows and how to resolve
 |----------|--------------|------------|
 | standardize-yaml | `.yml` files detected | Rename to `.yaml` extension |
 | Security (CodeQL) | Default setup conflict | Disable default setup in GitHub UI |
-| OpenFleet: Publish | npm authentication | Configure OIDC trusted publisher |
+| Bosun: Publish | npm authentication | Configure OIDC trusted publisher |
 
 ## Detailed Solutions
 
@@ -103,12 +103,12 @@ If using default setup, these additional scans would need separate workflows.
 
 ---
 
-### 3. OpenFleet: Publish Workflow Failures
+### 3. Bosun: Publish Workflow Failures
 
 **Symptom:**
 ```
-npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fopenfleet
-npm error 404  '@virtengine/openfleet@X.Y.Z' is not in this registry.
+npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fbosun
+npm error 404  '@virtengine/bosun@X.Y.Z' is not in this registry.
 ```
 OR
 ```
@@ -125,7 +125,7 @@ The workflow uses npm's OIDC Trusted Publishing, which requires:
 
 #### Step 1: Verify Package Exists
 ```bash
-npm view @virtengine/openfleet
+npm view @virtengine/bosun
 ```
 
 If package doesn't exist, create it first:
@@ -135,7 +135,7 @@ If package doesn't exist, create it first:
 #### Step 2: Configure Trusted Publisher on npmjs.com
 
 1. Log in to [npmjs.com](https://www.npmjs.com/)
-2. Navigate to package: `@virtengine/openfleet`
+2. Navigate to package: `@virtengine/bosun`
 3. Go to **Settings** → **Publishing Access**
 4. Click **Add Trusted Publisher**
 5. Select **GitHub Actions**
@@ -143,7 +143,7 @@ If package doesn't exist, create it first:
    ```
    Organization: virtengine
    Repository: virtengine
-   Workflow filename: openfleet-publish.yaml
+   Workflow filename: bosun-publish.yaml
    Environment: npm-publish
    ```
 7. Save configuration
@@ -161,7 +161,7 @@ If package doesn't exist, create it first:
 
 Trigger workflow manually:
 ```bash
-gh workflow run openfleet-publish.yaml
+gh workflow run bosun-publish.yaml
 ```
 
 Check workflow logs for successful OIDC authentication.
@@ -169,7 +169,7 @@ Check workflow logs for successful OIDC authentication.
 **Debugging:**
 
 If still failing, check:
-1. **Workflow file name matches** - Must be exactly `openfleet-publish.yaml`
+1. **Workflow file name matches** - Must be exactly `bosun-publish.yaml`
 2. **Environment name matches** - Must be exactly `npm-publish`
 3. **npm package ownership** - GitHub org must be authorized
 4. **Node version** - Trusted publishing requires npm 11.5.1+ (Node 24+ includes this)
@@ -183,7 +183,7 @@ If OIDC trusted publishing is not feasible:
 3. Update workflow to use token:
    ```yaml
    - name: Publish
-     working-directory: scripts/openfleet
+     working-directory: scripts/bosun
      run: npm publish --access public
      env:
        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -226,7 +226,7 @@ actionlint
 
 Test publishing without actually publishing:
 ```bash
-gh workflow run openfleet-publish.yaml -f dry-run=true
+gh workflow run bosun-publish.yaml -f dry-run=true
 ```
 
 ---
@@ -271,7 +271,7 @@ These workflows must pass before merging PRs:
 **Check:**
 1. Branch protection rules
 2. Workflow `on:` conditions
-3. Path filters (e.g., `paths: ["scripts/openfleet/**"]`)
+3. Path filters (e.g., `paths: ["scripts/bosun/**"]`)
 
 **Debug:**
 ```yaml

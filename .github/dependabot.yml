@@ -113,9 +113,9 @@ updates:
     commit-message:
       prefix: "chore(deps)"
 
-  # npm dependencies (OpenFleet)
+  # npm dependencies (Bosun)
   - package-ecosystem: "npm"
-    directory: "/scripts/openfleet"
+    directory: "/scripts/bosun"
     schedule:
       interval: "weekly"
       day: "wednesday"

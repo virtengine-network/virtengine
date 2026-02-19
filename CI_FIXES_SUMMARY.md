@@ -61,12 +61,12 @@ when the default setup is enabled
 
 ---
 
-### 📚 OpenFleet npm Publishing
+### 📚 Bosun npm Publishing
 
 **Problem**: Workflow failing with:
 ```
-npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fopenfleet
-npm error 404  '@virtengine/openfleet@0.8.0' is not in this registry.
+npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fbosun
+npm error 404  '@virtengine/bosun@0.8.0' is not in this registry.
 ```
 
 **Root Cause**: npm OIDC trusted publishing not configured
@@ -77,7 +77,7 @@ npm error 404  '@virtengine/openfleet@0.8.0' is not in this registry.
 
 #### Part 1: On npmjs.com
 1. Log in to [npmjs.com](https://www.npmjs.com/)
-2. Navigate to package: `@virtengine/openfleet`
+2. Navigate to package: `@virtengine/bosun`
    - If package doesn't exist, create it first (manual publish v0.1.0)
 3. Go to **Settings** → **Publishing Access**
 4. Click **Add Trusted Publisher**
@@ -86,7 +86,7 @@ npm error 404  '@virtengine/openfleet@0.8.0' is not in this registry.
    ```
    Organization: virtengine
    Repository: virtengine
-   Workflow filename: openfleet-publish.yaml
+   Workflow filename: bosun-publish.yaml
    Environment: npm-publish
    ```
 7. Save
@@ -101,7 +101,7 @@ npm error 404  '@virtengine/openfleet@0.8.0' is not in this registry.
 
 **Verification**:
 ```bash
-gh workflow run openfleet-publish.yaml
+gh workflow run bosun-publish.yaml
 ```
 Watch logs to confirm OIDC authentication succeeds.
 
@@ -153,7 +153,7 @@ https://github.com/virtengine/virtengine/blob/main/_docs/operations/ci-troublesh
 - Reference to troubleshooting guide
 - Explains resolution steps
 
-**openfleet-publish.yaml**:
+**bosun-publish.yaml**:
 - Expanded prerequisites section
 - Added GitHub environment setup instructions
 - Added troubleshooting reference
@@ -180,7 +180,7 @@ After merge to main:
 
 1. **standardize-yaml**: ✅ Will pass (file renamed)
 2. **Security (CodeQL)**: ⚠️ Will fail until admin configures
-3. **OpenFleet Publish**: ⚠️ Will fail until admin configures
+3. **Bosun Publish**: ⚠️ Will fail until admin configures
 
 ---
 
@@ -197,7 +197,7 @@ After merge to main:
 - Configure trusted publisher on npmjs.com
 - Create GitHub environment
 - Required for automatic npm publishes
-- Blocks: OpenFleet releases
+- Blocks: Bosun releases
 
 ### For Team
 - Review troubleshooting guide
@@ -211,7 +211,7 @@ After merge to main:
 **Workflows Fixed**: 1/3
 - ✅ standardize-yaml (100% fixed)
 - 📚 Security (documented, requires admin)
-- 📚 OpenFleet Publish (documented, requires admin)
+- 📚 Bosun Publish (documented, requires admin)
 
 **Documentation Added**:
 - 1 comprehensive troubleshooting guide (357 lines)
@@ -229,7 +229,7 @@ After merge to main:
 **After admin configuration**:
 - [ ] standardize-yaml passes on main ✅ (already fixed)
 - [ ] Security workflow passes on main (after CodeQL config)
-- [ ] OpenFleet publishes successfully (after npm config)
+- [ ] Bosun publishes successfully (after npm config)
 - [ ] All documentation is clear and actionable ✅
 
 **Long-term**:

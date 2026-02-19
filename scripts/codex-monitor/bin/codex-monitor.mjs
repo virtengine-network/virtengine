@@ -7,31 +7,31 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const COMMAND_MAP = new Map([
-  ["openfleet", "cli.mjs"],
-  ["openfleet-setup", "setup.mjs"],
-  ["openfleet-chat-id", "get-telegram-chat-id.mjs"],
-  ["openfleet-shared-workspaces", "shared-workspace-cli.mjs"],
+  ["bosun", "cli.mjs"],
+  ["bosun-setup", "setup.mjs"],
+  ["bosun-chat-id", "get-telegram-chat-id.mjs"],
+  ["bosun-shared-workspaces", "shared-workspace-cli.mjs"],
 ]);
 
-function resolveOpenfleetDir() {
+function resolveBosunDir() {
   try {
-    const monitorPath = require.resolve("@virtengine/openfleet");
+    const monitorPath = require.resolve("@virtengine/bosun");
     return dirname(monitorPath);
   } catch (err) {
     const message = err && typeof err.message === "string" ? err.message : String(err);
     console.error(
-      "[openfleet] Failed to locate @virtengine/openfleet. " +
-      "Install it with: npm install -g @virtengine/openfleet\n" +
+      "[bosun] Failed to locate @virtengine/bosun. " +
+      "Install it with: npm install -g @virtengine/bosun\n" +
       `Details: ${message}`,
     );
     process.exit(1);
   }
 }
 
-const invoked = basename(process.argv[1] || "openfleet");
+const invoked = basename(process.argv[1] || "bosun");
 const scriptName = COMMAND_MAP.get(invoked) || "cli.mjs";
-const openfleetDir = resolveOpenfleetDir();
-const scriptPath = resolve(openfleetDir, scriptName);
+const bosunDir = resolveBosunDir();
+const scriptPath = resolve(bosunDir, scriptName);
 
 const child = spawn(process.execPath, [scriptPath, ...process.argv.slice(2)], {
   stdio: "inherit",
@@ -39,7 +39,7 @@ const child = spawn(process.execPath, [scriptPath, ...process.argv.slice(2)], {
 });
 
 child.on("error", (err) => {
-  console.error(`[openfleet] Failed to launch openfleet: ${err.message}`);
+  console.error(`[bosun] Failed to launch bosun: ${err.message}`);
   process.exit(1);
 });
 

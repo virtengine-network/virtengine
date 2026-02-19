@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Agent lifecycle hooks for VirtEngine openfleet. Compatible with Codex, Claude Code, and Copilot CLI.",
+  "description": "Agent lifecycle hooks for VirtEngine bosun. Compatible with Codex, Claude Code, and Copilot CLI.",
   "hooks": {
     "SessionStart": [
       {
@@ -75,7 +75,7 @@
   },
   "meta": {
     "profile": "strict",
-    "generatedBy": "openfleet setup",
+    "generatedBy": "bosun setup",
     "generatedAt": "2026-02-13T22:55:47.365Z"
   }
 }

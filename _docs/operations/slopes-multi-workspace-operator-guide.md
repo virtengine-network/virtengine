@@ -5,8 +5,8 @@ This guide documents how to bootstrap, add workspaces, configure Telegram notifi
 ## Scope and terminology
 
 - **Workspace**: A vibe-kanban task attempt that creates a Git worktree and runs an agent session.
-- **Orchestrator**: `scripts/openfleet/ve-orchestrator.ps1`, the loop that assigns tasks and monitors progress.
-- **Monitor**: `scripts/openfleet/monitor.mjs`, long-running wrapper with restart + diagnostics.
+- **Orchestrator**: `scripts/bosun/ve-orchestrator.ps1`, the loop that assigns tasks and monitors progress.
+- **Monitor**: `scripts/bosun/monitor.mjs`, long-running wrapper with restart + diagnostics.
 
 ## Bootstrap (Windows)
 
@@ -17,7 +17,7 @@ This guide documents how to bootstrap, add workspaces, configure Telegram notifi
 2. **Install monitor dependencies**
 
 ```bash
-pnpm -C scripts/openfleet install
+pnpm -C scripts/bosun install
 ```
 
 3. **Configure environment variables**
@@ -39,10 +39,10 @@ setx VK_PUBLIC_URL "http://<vk-host>:<port>"
 4. **Start the monitor (recommended)**
 
 ```bash
-pnpm -C scripts/openfleet start -- --args "-MaxParallel 6"
+pnpm -C scripts/bosun start -- --args "-MaxParallel 6"
 ```
 
-This launches `scripts/openfleet/ve-orchestrator.ps1` and auto-restarts on failures.
+This launches `scripts/bosun/ve-orchestrator.ps1` and auto-restarts on failures.
 
 ## Bootstrap (Linux/WSL - future)
 
@@ -51,13 +51,13 @@ This launches `scripts/openfleet/ve-orchestrator.ps1` and auto-restarts on failu
 3. Install monitor deps:
 
 ```bash
-pnpm -C scripts/openfleet install
+pnpm -C scripts/bosun install
 ```
 
 4. Run:
 
 ```bash
-pnpm -C scripts/openfleet start -- --args "-MaxParallel 6"
+pnpm -C scripts/bosun start -- --args "-MaxParallel 6"
 ```
 
 ## Adding a workspace
@@ -67,24 +67,24 @@ Use the vibe-kanban CLI wrapper to create new attempts (workspaces). Each attemp
 ### Add a specific workspace (task ID)
 
 ```bash
-pwsh scripts/openfleet/ve-kanban.ps1 submit <task-id>
+pwsh scripts/bosun/ve-kanban.ps1 submit <task-id>
 ```
 
 ### Add the next N tasks as workspaces
 
 ```bash
-pwsh scripts/openfleet/ve-kanban.ps1 submit-next --count 2
+pwsh scripts/bosun/ve-kanban.ps1 submit-next --count 2
 ```
 
 ### See active workspaces
 
 ```bash
-pwsh scripts/openfleet/ve-kanban.ps1 status
+pwsh scripts/bosun/ve-kanban.ps1 status
 ```
 
 ## Telegram bot configuration
 
-The OpenFleet posts important status updates to Telegram.
+The Bosun posts important status updates to Telegram.
 
 ### Required environment variables
 
@@ -99,7 +99,7 @@ The OpenFleet posts important status updates to Telegram.
 
 ```bash
 set TELEGRAM_BOT_TOKEN=<token>
-node scripts/openfleet/get-telegram-chat-id.mjs
+node scripts/bosun/get-telegram-chat-id.mjs
 ```
 
 3. Set the chosen ID:
@@ -114,7 +114,7 @@ Start the monitor and confirm the first status post arrives in the chat.
 
 ## Model priority configuration examples
 
-The orchestrator alternates between executor profiles defined in `scripts/openfleet/ve-kanban.ps1` (used by `ve-orchestrator.ps1`). Update the list to control priority or weighting.
+The orchestrator alternates between executor profiles defined in `scripts/bosun/ve-kanban.ps1` (used by `ve-orchestrator.ps1`). Update the list to control priority or weighting.
 
 ### Default (50/50 Codex/Copilot)
 
@@ -168,19 +168,19 @@ Steps:
 1. List archived attempts:
 
 ```bash
-pwsh scripts/openfleet/ve-kanban.ps1 archived
+pwsh scripts/bosun/ve-kanban.ps1 archived
 ```
 
 2. Unarchive if needed:
 
 ```bash
-pwsh scripts/openfleet/ve-kanban.ps1 unarchive <attempt-id>
+pwsh scripts/bosun/ve-kanban.ps1 unarchive <attempt-id>
 ```
 
 3. Rebase the attempt:
 
 ```bash
-pwsh scripts/openfleet/ve-kanban.ps1 rebase <attempt-id>
+pwsh scripts/bosun/ve-kanban.ps1 rebase <attempt-id>
 ```
 
 ### Agent session disconnected
@@ -191,12 +191,12 @@ Symptoms:
 
 Steps:
 1. Restart the monitor (it auto-relaunches the orchestrator).
-2. Verify the workspace still exists via `pwsh scripts/openfleet/ve-kanban.ps1 status`.
+2. Verify the workspace still exists via `pwsh scripts/bosun/ve-kanban.ps1 status`.
 3. If the attempt is stale, archive it in VK (or via the CLI helper) and resubmit the task:
 
 ```bash
 pwsh -Command ". .\\scripts\\ve-kanban.ps1; Archive-VKAttempt -AttemptId <attempt-id>"
-pwsh scripts/openfleet/ve-kanban.ps1 submit <task-id>
+pwsh scripts/bosun/ve-kanban.ps1 submit <task-id>
 ```
 
 ### GitHub auth expired
@@ -224,7 +224,7 @@ gh auth login
 
 ## Related references
 
-- `scripts/openfleet/ve-orchestrator.ps1`
-- `scripts/openfleet/ve-kanban.ps1`
-- `scripts/openfleet/README.md`
+- `scripts/bosun/ve-orchestrator.ps1`
+- `scripts/bosun/ve-kanban.ps1`
+- `scripts/bosun/README.md`
 - `_docs/failure-analysis.md`

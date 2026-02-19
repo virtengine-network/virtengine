@@ -1,13 +1,13 @@
-# OpenFleet Shim — AGENTS Guide
+# Bosun Shim — AGENTS Guide
 
 ## Module Overview
-- Purpose: Provide a legacy npm shim that forwards `openfleet` CLI commands to `@virtengine/openfleet`.
+- Purpose: Provide a legacy npm shim that forwards `bosun` CLI commands to `@virtengine/bosun`.
 - Use when: Updating the deprecation redirect behavior or adding legacy command aliases.
-- Key entry points: `scripts/openfleet/bin/openfleet.mjs:1`, `scripts/openfleet/package.json:1`.
+- Key entry points: `scripts/bosun/bin/bosun.mjs:1`, `scripts/bosun/package.json:1`.
 
 ## Architecture
-- Single entrypoint script resolves the installed `@virtengine/openfleet` package
-  and launches the appropriate openfleet CLI script based on the invoked command.
+- Single entrypoint script resolves the installed `@virtengine/bosun` package
+  and launches the appropriate bosun CLI script based on the invoked command.
 - Directory layout:
   - `bin/` shim launcher(s)
   - `package.json` npm metadata and bin mappings
@@ -15,34 +15,34 @@
 
 ```mermaid
 flowchart TD
-  Shim[openfleet bin] --> Resolve[resolve @virtengine/openfleet]
-  Resolve --> OpenFleet[openfleet CLI script]
+  Shim[bosun bin] --> Resolve[resolve @virtengine/bosun]
+  Resolve --> Bosun[bosun CLI script]
 ```
 
 ## Core Concepts
 - Legacy compatibility: keep the old command names working while funneling users
-  to the new `openfleet` binaries.
-- Forwarding: the shim delegates execution to openfleet and preserves CLI args.
+  to the new `bosun` binaries.
+- Forwarding: the shim delegates execution to bosun and preserves CLI args.
 
 ## Usage Examples
 
 ### Install the legacy shim
 ```bash
-npm install -g openfleet
+npm install -g bosun
 ```
 
-### Run the shim (forwards to openfleet)
+### Run the shim (forwards to bosun)
 ```bash
-openfleet --help
+bosun --help
 ```
 
 ## Implementation Patterns
 - Add new legacy aliases by updating `bin` entries in
-  `scripts/openfleet/package.json:1` and mapping in
-  `scripts/openfleet/bin/openfleet.mjs:1`.
-- Keep the shim minimal and avoid embedding openfleet logic here.
+  `scripts/bosun/package.json:1` and mapping in
+  `scripts/bosun/bin/bosun.mjs:1`.
+- Keep the shim minimal and avoid embedding bosun logic here.
 - Anti-patterns:
-  - Duplicating openfleet implementation in the shim.
+  - Duplicating bosun implementation in the shim.
   - Removing legacy aliases without a documented migration path.
 
 ## Configuration
@@ -50,10 +50,10 @@ openfleet --help
 
 ## Testing
 - No automated tests for the shim.
-- Manual smoke check (requires published or local openfleet install):
-  - `node scripts/openfleet/bin/openfleet.mjs --help`
+- Manual smoke check (requires published or local bosun install):
+  - `node scripts/bosun/bin/bosun.mjs --help`
 
 ## Troubleshooting
-- Shim cannot find openfleet:
-  - Cause: `@virtengine/openfleet` dependency not installed.
-  - Fix: `npm install -g @virtengine/openfleet` or reinstall `openfleet`.
+- Shim cannot find bosun:
+  - Cause: `@virtengine/bosun` dependency not installed.
+  - Fix: `npm install -g @virtengine/bosun` or reinstall `bosun`.

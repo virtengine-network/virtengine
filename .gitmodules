@@ -1,4 +1,4 @@
-[submodule "scripts/openfleet"]
-	path = scripts/openfleet
-	url = https://github.com/virtengine/openfleet.git
+[submodule "scripts/bosun"]
+	path = scripts/bosun
+	url = https://github.com/virtengine/bosun.git
 	ignore = dirty

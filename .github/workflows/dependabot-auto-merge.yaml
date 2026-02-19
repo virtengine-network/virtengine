@@ -6,7 +6,7 @@
 #
 # This workflow complements the monitor's built-in dependabot auto-merge
 # (DEPENDABOT_AUTO_MERGE env var) and serves as a reliable fallback when
-# the openfleet process is not running.
+# the bosun process is not running.
 
 name: Dependabot Auto-Merge
 on: pull_request

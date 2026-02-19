@@ -1,34 +1,36 @@
-# openfleet (deprecated)
+# codex-monitor (deprecated)
 
-This package has been renamed to `@virtengine/openfleet`.
+This package has been renamed to `@virtengine/bosun`.
 
-You can find openfleet at : https://github.com/virtengine/virtengine/tree/main/scripts/openfleet
+You can find bosun at : https://github.com/virtengine/virtengine/tree/main/scripts/bosun
 
-Or in NPM: http://npmjs.com/package/@virtengine/openfleet
+Or in NPM: http://npmjs.com/package/@virtengine/bosun
 
-`openfleet` now acts as a legacy shim that forwards all CLI commands to the
-latest `@virtengine/openfleet` binaries.
+`bosun` now acts as a legacy shim that forwards all CLI commands to the
+latest `@virtengine/bosun` binaries.
+
+bosun is a contuation of the initial codex-monitor project.
 
 ## Install (recommended)
 
 ```bash
-npm install -g @virtengine/openfleet
+npm install -g @virtengine/bosun
 ```
 
 ## Legacy install
 
 ```bash
-npm install -g openfleet
+npm install -g bosun
 ```
 
-This legacy install will provide these commands (forwarded to openfleet):
+This legacy install will provide these commands (forwarded to bosun):
 
-- `openfleet`
-- `openfleet-setup`
-- `openfleet-chat-id`
-- `openfleet-shared-workspaces`
+- `bosun`
+- `bosun-setup`
+- `bosun-chat-id`
+- `bosun-shared-workspaces`
 
 ## Notes
 
-- Use `openfleet` going forward.
+- Use `bosun` going forward.
 - If you see deprecation warnings, they are expected and safe.
