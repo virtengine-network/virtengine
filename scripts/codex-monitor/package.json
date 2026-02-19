@@ -1,6 +1,6 @@
 {
   "name": "codex-monitor",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "description": "Deprecated legacy shim. Renamed to @virtengine/openfleet; this package forwards CLI commands to openfleet.",
   "type": "module",
   "license": "Apache-2.0",
