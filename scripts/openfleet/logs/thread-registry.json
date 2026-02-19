@@ -1,13 +1,1 @@
-{
-  "monitor-monitor": {
-    "threadId": "timeout-thread-min-bound",
-    "sdk": "codex",
-    "taskKey": "monitor-monitor",
-    "cwd": "/home/jon/repos/virtengine/scripts/openfleet",
-    "turnCount": 1,
-    "createdAt": 1771396467686,
-    "lastUsedAt": 1771396467797,
-    "lastError": "[agent-pool] codex timeout after 80ms",
-    "alive": false
-  }
-}
+{}

@@ -92,3 +92,4 @@ vk-stderr.log
 *.log
 .claude/settings.local.json
 /.openfleet/
+scripts/openfleet/logs/*
