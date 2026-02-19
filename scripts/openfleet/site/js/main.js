@@ -5,6 +5,17 @@
 (function () {
   'use strict';
 
+  /* ── Scroll Progress Bar ─────────────────────────────────────────────── */
+  const progressBar = document.getElementById('scroll-progress');
+  if (progressBar) {
+    window.addEventListener('scroll', function () {
+      const scrollTop = window.scrollY;
+      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+      const progress = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+      progressBar.style.width = progress + '%';
+    }, { passive: true });
+  }
+
   /* ── Scroll-linked nav background ────────────────────────────────────── */
   const nav = document.querySelector('.nav');
   if (nav) {
@@ -13,6 +24,25 @@
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
+  }
+
+  /* ── Active nav link highlighting ────────────────────────────────────── */
+  const navLinks = document.querySelectorAll('.nav__links a[href^="#"]');
+  const sections = [];
+  navLinks.forEach(function (link) {
+    var target = document.querySelector(link.getAttribute('href'));
+    if (target) sections.push({ el: target, link: link });
+  });
+  if (sections.length) {
+    window.addEventListener('scroll', function () {
+      var scrollY = window.scrollY + 120;
+      var active = null;
+      for (var i = 0; i < sections.length; i++) {
+        if (sections[i].el.offsetTop <= scrollY) active = sections[i].link;
+      }
+      navLinks.forEach(function (l) { l.classList.remove('nav__link--active'); });
+      if (active) active.classList.add('nav__link--active');
+    }, { passive: true });
   }
 
   /* ── Mobile nav toggle ───────────────────────────────────────────────── */
@@ -30,6 +60,60 @@
         toggle.textContent = '☰';
       });
     });
+  }
+
+  /* ── Hero Typing Effect ──────────────────────────────────────────────── */
+  const typedEl = document.getElementById('hero-typed');
+  const cursorEl = document.getElementById('typed-cursor');
+  if (typedEl) {
+    const phrases = [
+      'Fully autonomous.',
+      'Self-healing.',
+      'Zero intervention.',
+      'Production ready.',
+      'Always shipping.',
+    ];
+    let phraseIdx = 0;
+    let charIdx = 0;
+    let deleting = false;
+    let pauseTimer = 0;
+
+    function typeLoop() {
+      var phrase = phrases[phraseIdx];
+      if (!deleting) {
+        charIdx++;
+        typedEl.textContent = phrase.substring(0, charIdx);
+        if (charIdx === phrase.length) {
+          pauseTimer = 2200;
+          deleting = true;
+        }
+      } else {
+        if (pauseTimer > 0) {
+          pauseTimer -= 60;
+          requestAnimationFrame(function () { setTimeout(typeLoop, 60); });
+          return;
+        }
+        charIdx--;
+        typedEl.textContent = phrase.substring(0, charIdx);
+        if (charIdx === 0) {
+          deleting = false;
+          phraseIdx = (phraseIdx + 1) % phrases.length;
+        }
+      }
+
+      var speed = deleting ? 35 : 70 + Math.random() * 40;
+      setTimeout(typeLoop, speed);
+    }
+
+    // Start typing after a brief delay
+    setTimeout(typeLoop, 800);
+
+    // Cursor blink
+    if (cursorEl) {
+      setInterval(function () {
+        cursorEl.style.opacity = cursorEl.style.opacity === '0' ? '1' : '0';
+      }, 530);
+    }
   }
 
   /* ── Copy install command ────────────────────────────────────────────── */
@@ -84,6 +168,51 @@
     termObserver.observe(terminalBody);
   }
 
+  /* ── Demo Tab Switching ──────────────────────────────────────────────── */
+  var demoTabs = document.querySelectorAll('.demo-tab');
+  var demoPanels = document.querySelectorAll('.demo-panel');
+  var tgChatInitialized = false;
+  var securityInitialized = false;
+
+  demoTabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      var target = tab.dataset.demo;
+
+      // Update active tab
+      demoTabs.forEach(function (t) { t.classList.remove('demo-tab--active'); });
+      tab.classList.add('demo-tab--active');
+
+      // Switch panel
+      demoPanels.forEach(function (p) { p.classList.remove('demo-panel--active'); });
+      var panel = document.getElementById('demo-panel-' + target);
+      if (panel) panel.classList.add('demo-panel--active');
+
+      // Lazy-init Telegram chat on first reveal
+      if (target === 'telegram' && !tgChatInitialized && typeof window.initTelegramChatDemo === 'function') {
+        tgChatInitialized = true;
+        window.initTelegramChatDemo('#telegram-chat-container');
+      }
+    });
+  });
+
+  /* ── Security Section Initialization (lazy on scroll) ────────────────── */
+  var securityContainer = document.getElementById('security-visualizer');
+  if (securityContainer && 'IntersectionObserver' in window) {
+    var secObserver = new IntersectionObserver(
+      function (entries) {
+        if (entries[0].isIntersecting && !securityInitialized) {
+          securityInitialized = true;
+          if (typeof window.initSecurityVisualizer === 'function') {
+            window.initSecurityVisualizer('#security-visualizer');
+          }
+          secObserver.disconnect();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    secObserver.observe(securityContainer);
+  }
+
   /* ── Smooth scroll for anchor links ──────────────────────────────────── */
   document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
     anchor.addEventListener('click', (e) => {
@@ -127,6 +256,37 @@
     statValues.forEach((el) => counterObserver.observe(el));
   }
 
+  /* ── Code Showcase Tabs ──────────────────────────────────────────────── */
+  var tabs = document.querySelectorAll('.code-tab');
+  var panels = document.querySelectorAll('.code-showcase__panel');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      var target = tab.dataset.tab;
+      tabs.forEach(function (t) { t.classList.remove('code-tab--active'); });
+      panels.forEach(function (p) { p.classList.remove('code-showcase__panel--active'); });
+      tab.classList.add('code-tab--active');
+      var panel = document.querySelector('[data-panel="' + target + '"]');
+      if (panel) panel.classList.add('code-showcase__panel--active');
+    });
+  });
+
+  /* ── Tilt effect on feature cards ────────────────────────────────────── */
+  document.querySelectorAll('.feature-card').forEach(function (card) {
+    card.addEventListener('mousemove', function (e) {
+      var rect = card.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var y = e.clientY - rect.top;
+      var centerX = rect.width / 2;
+      var centerY = rect.height / 2;
+      var rotateX = ((y - centerY) / centerY) * -4;
+      var rotateY = ((x - centerX) / centerX) * 4;
+      card.style.transform = 'perspective(800px) rotateX(' + rotateX + 'deg) rotateY(' + rotateY + 'deg) translateY(-4px)';
+    });
+    card.addEventListener('mouseleave', function () {
+      card.style.transform = '';
+    });
+  });
+
   /* ── Docs sidebar toggle (mobile) ────────────────────────────────────── */
   const sidebarToggle = document.querySelector('.docs-sidebar-toggle');
   const sidebar = document.querySelector('.docs-sidebar');
@@ -138,6 +298,32 @@
     };
     sidebarToggle.addEventListener('click', toggleSidebar);
     if (backdrop) backdrop.addEventListener('click', toggleSidebar);
+  }
+
+  /* ── Docs search (filters sidebar links) ─────────────────────────────── */
+  var searchInput = document.querySelector('.docs-search__input');
+  if (searchInput) {
+    var sidebarLinks = document.querySelectorAll('.sidebar-nav a');
+    searchInput.addEventListener('input', function () {
+      var query = searchInput.value.toLowerCase().trim();
+      sidebarLinks.forEach(function (link) {
+        var text = link.textContent.toLowerCase();
+        var item = link.closest('li') || link;
+        if (!query || text.indexOf(query) !== -1) {
+          item.style.display = '';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    });
+
+    // Keyboard shortcut: Ctrl+K or / to focus search
+    document.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey && e.key === 'k') || (e.key === '/' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA')) {
+        e.preventDefault();
+        searchInput.focus();
+      }
+    });
   }
 
   /* ── PR Showcase — fetch real PRs from VirtEngine repo ───────────────── */
@@ -159,7 +345,7 @@
     }
 
     function labelColor(color) {
-      return `background: #${color}22; color: #${color}; border-color: #${color}44;`;
+      return 'background: #' + color + '22; color: #' + color + '; border-color: #' + color + '44;';
     }
 
     function prStateIcon(pr) {
@@ -170,10 +356,9 @@
 
     async function fetchPRs() {
       try {
-        // Fetch both open and recently closed/merged
         const [openRes, closedRes] = await Promise.all([
-          fetch(`${API}?state=open&sort=updated&direction=desc&per_page=${MAX_PRS}`),
-          fetch(`${API}?state=closed&sort=updated&direction=desc&per_page=${MAX_PRS}`),
+          fetch(API + '?state=open&sort=updated&direction=desc&per_page=' + MAX_PRS),
+          fetch(API + '?state=closed&sort=updated&direction=desc&per_page=' + MAX_PRS),
         ]);
 
         if (!openRes.ok && !closedRes.ok) throw new Error('GitHub API rate limited');
@@ -181,9 +366,8 @@
         const openPRs = openRes.ok ? await openRes.json() : [];
         const closedPRs = closedRes.ok ? await closedRes.json() : [];
 
-        // Merge and sort by updated_at, take top N
-        const all = [...openPRs, ...closedPRs]
-          .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+        const all = [].concat(openPRs, closedPRs)
+          .sort(function (a, b) { return new Date(b.updated_at) - new Date(a.updated_at); })
           .slice(0, MAX_PRS);
 
         if (all.length === 0) {
@@ -191,26 +375,24 @@
           return;
         }
 
-        prContainer.innerHTML = all.map((pr) => {
-          const state = prStateIcon(pr);
-          const labels = (pr.labels || [])
+        prContainer.innerHTML = all.map(function (pr) {
+          var state = prStateIcon(pr);
+          var labels = (pr.labels || [])
             .slice(0, 3)
-            .map((l) => `<span class="pr-card__label" style="${labelColor(l.color)}">${l.name}</span>`)
+            .map(function (l) { return '<span class="pr-card__label" style="' + labelColor(l.color) + '">' + l.name + '</span>'; })
             .join('');
-          const updatedAt = pr.merged_at || pr.closed_at || pr.updated_at;
-          return `
-            <a class="pr-card" href="${pr.html_url}" target="_blank" rel="noopener">
-              <div class="pr-card__state pr-card__state--${state.cls}">${state.icon}</div>
-              <div class="pr-card__body">
-                <div class="pr-card__title">${pr.title}</div>
-                <div class="pr-card__meta">
-                  <span>#${pr.number}</span>
-                  <span>by ${pr.user?.login || 'unknown'}</span>
-                  <span>${timeAgo(updatedAt)}</span>
-                </div>
-                ${labels ? `<div class="pr-card__labels">${labels}</div>` : ''}
-              </div>
-            </a>`;
+          var updatedAt = pr.merged_at || pr.closed_at || pr.updated_at;
+          return '<a class="pr-card" href="' + pr.html_url + '" target="_blank" rel="noopener">' +
+            '<div class="pr-card__state pr-card__state--' + state.cls + '">' + state.icon + '</div>' +
+            '<div class="pr-card__body">' +
+            '<div class="pr-card__title">' + pr.title + '</div>' +
+            '<div class="pr-card__meta">' +
+            '<span>#' + pr.number + '</span>' +
+            '<span>by ' + (pr.user ? pr.user.login : 'unknown') + '</span>' +
+            '<span>' + timeAgo(updatedAt) + '</span>' +
+            '</div>' +
+            (labels ? '<div class="pr-card__labels">' + labels + '</div>' : '') +
+            '</div></a>';
         }).join('');
 
       } catch (err) {

@@ -105,7 +105,7 @@
 }
 
 .sidebar-nav a.active {
-  background: rgba(0, 212, 255, 0.08);
+  background: rgba(96, 204, 93, 0.08);
   color: var(--cyan);
   font-weight: 500;
 }
@@ -197,7 +197,7 @@
   border-left: 3px solid var(--cyan);
   padding: 1rem 1.5rem;
   margin: 1.5rem 0;
-  background: rgba(0, 212, 255, 0.04);
+  background: rgba(96, 204, 93, 0.04);
   border-radius: 0 8px 8px 0;
 }
 
@@ -292,8 +292,8 @@
 }
 
 .callout--info {
-  background: rgba(0, 212, 255, 0.06);
-  border: 1px solid rgba(0, 212, 255, 0.15);
+  background: rgba(96, 204, 93, 0.06);
+  border: 1px solid rgba(96, 204, 93, 0.15);
 }
 
 .callout--warning {
@@ -373,7 +373,7 @@
 
 .docs-nav-link:hover {
   border-color: var(--cyan);
-  background: rgba(0, 212, 255, 0.04);
+  background: rgba(96, 204, 93, 0.04);
 }
 
 .docs-nav-link--next {

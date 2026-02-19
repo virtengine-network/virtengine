@@ -9,7 +9,7 @@
 
   /* ── Color helpers ───────────────────────────────────────────────────── */
   const C = {
-    cyan: (t) => `[[;#00d4ff;]${t}]`,
+    cyan: (t) => `[[;#60cc5d;]${t}]`,
     green: (t) => `[[;#10b981;]${t}]`,
     amber: (t) => `[[;#f59e0b;]${t}]`,
     red: (t) => `[[;#ef4444;]${t}]`,
@@ -84,6 +84,8 @@
       `  ${C.cyan('openfleet --agents')}     Show agent pool`,
       `  ${C.cyan('openfleet --daemon')}     Run as background daemon`,
       `  ${C.cyan('openfleet --shell')}      Interactive shell mode`,
+      `  ${C.cyan('openfleet --metrics')}    Show fleet metrics (24h)`,
+      `  ${C.cyan('openfleet --logs')}       Tail recent logs`,
       `  ${C.cyan('openfleet --version')}    Show version`,
       '',
       `  ${C.dim('Type any command to try it out.')}`,
@@ -317,6 +319,43 @@
       `${C.dim('SHARED_STATE_ENABLED=')}${C.green('true')}`,
       `${C.dim('...')}`,
     ],
+
+    'openfleet --metrics': () => [
+      '',
+      `  ${C.bold('Fleet Metrics')} ${C.dim('(last 24h)')}`,
+      '',
+      `  ${C.dim('Tasks')}`,
+      `    Completed    ${C.green('47')}  ${C.dim('████████████████████░░  89%')}`,
+      `    Failed       ${C.red('3')}   ${C.dim('██░░░░░░░░░░░░░░░░░░░░   6%')}`,
+      `    Retried      ${C.amber('5')}   ${C.dim('█░░░░░░░░░░░░░░░░░░░░░   5%')}`,
+      '',
+      `  ${C.dim('PRs')}`,
+      `    Created      ${C.cyan('52')}`,
+      `    Merged       ${C.green('44')}  ${C.dim('avg merge time: 14m')}`,
+      `    CI failures  ${C.amber('8')}   ${C.dim('auto-fixed: 6')}`,
+      '',
+      `  ${C.dim('Executors')}`,
+      `    copilot-claude  ${C.dim('uptime:')} ${C.green('99.8%')}  ${C.dim('avg task:')} 12m`,
+      `    codex-default   ${C.dim('uptime:')} ${C.green('98.2%')}  ${C.dim('avg task:')} 18m`,
+      '',
+    ],
+    '--metrics': () => COMMANDS['openfleet --metrics'](),
+    metrics: () => COMMANDS['openfleet --metrics'](),
+
+    'openfleet --logs': () => [
+      `${C.dim('[14:32:01]')} ${C.dim('[monitor]')} polling github for new tasks...`,
+      `${C.dim('[14:32:03]')} ${C.dim('[kanban]')} found 2 new tasks in backlog`,
+      `${C.dim('[14:32:04]')} ${C.dim('[TASK]')}  ${C.bold('#47')} feat(provider): add health check → ${C.cyan('copilot-claude')}`,
+      `${C.dim('[14:32:04]')} ${C.dim('[TASK]')}  ${C.bold('#48')} fix(escrow): decimal rounding    → ${C.cyan('codex-default')}`,
+      `${C.dim('[14:33:12]')} ${C.dim('[worktree]')} created ve/47-provider-health-check`,
+      `${C.dim('[14:33:14]')} ${C.dim('[copilot]')} session started for #47`,
+      `${C.dim('[14:35:22]')} ${C.dim('[codex]')} session started for #48`,
+      `${C.dim('[14:41:18]')} ${C.dim('[ OK ]')}  ${C.bold('#48')} PR #201 created — CI running...`,
+      `${C.dim('[14:44:02]')} ${C.dim('[  ✓ ]')}  ${C.bold('#48')} PR #201 — ${C.green('all checks passed')}`,
+      `${C.dim('[14:44:05]')} ${C.dim('[MERGE]')} ${C.bold('#48')} PR #201 merged to main ${C.green('✓')}`,
+    ],
+    '--logs': () => COMMANDS['openfleet --logs'](),
+    logs: () => COMMANDS['openfleet --logs'](),
 
     neofetch: () => [
       '',
