@@ -53,9 +53,9 @@ describe("hook-profiles", () => {
 
   it("builds scaffold options from env", () => {
     const opts = buildHookScaffoldOptionsFromEnv({
-      CODEX_MONITOR_HOOK_PROFILE: "balanced",
-      CODEX_MONITOR_HOOK_TARGETS: "codex,copilot",
-      CODEX_MONITOR_HOOK_PREPUSH: "go test ./...;;go build ./...",
+      OPENFLEET_HOOK_PROFILE: "balanced",
+      OPENFLEET_HOOK_TARGETS: "codex,copilot",
+      OPENFLEET_HOOK_PREPUSH: "go test ./...;;go build ./...",
     });
 
     expect(opts.profile).toBe("balanced");
@@ -75,7 +75,7 @@ describe("hook-profiles", () => {
     expect(written).toContain(".codex/hooks.json");
     expect(written).toContain(".claude/settings.local.json");
     expect(written).toContain(".github/hooks/openfleet.hooks.json");
-    expect(result.env.CODEX_MONITOR_HOOKS_BUILTINS_MODE).toBe("auto");
+    expect(result.env.OPENFLEET_HOOKS_BUILTINS_MODE).toBe("auto");
 
     const codexHooks = JSON.parse(
       await readFile(resolve(rootDir, ".codex", "hooks.json"), "utf8"),
@@ -185,8 +185,8 @@ describe("hook-profiles", () => {
       targets: ["codex"],
     });
 
-    expect(result.env.CODEX_MONITOR_HOOKS_BUILTINS_MODE).toBe("off");
-    expect(result.env.CODEX_MONITOR_HOOKS_DISABLE_PREPUSH).toBe("1");
-    expect(result.env.CODEX_MONITOR_HOOKS_DISABLE_TASK_COMPLETE).toBe("1");
+    expect(result.env.OPENFLEET_HOOKS_BUILTINS_MODE).toBe("off");
+    expect(result.env.OPENFLEET_HOOKS_DISABLE_PREPUSH).toBe("1");
+    expect(result.env.OPENFLEET_HOOKS_DISABLE_TASK_COMPLETE).toBe("1");
   });
 });

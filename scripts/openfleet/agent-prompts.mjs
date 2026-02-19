@@ -119,7 +119,7 @@ export const AGENT_PROMPT_DEFINITIONS = Object.freeze(
   PROMPT_DEFS.map((item) =>
     Object.freeze({
       ...item,
-      envVar: `CODEX_MONITOR_PROMPT_${toEnvSuffix(item.key)}`,
+      envVar: `OPENFLEET_PROMPT_${toEnvSuffix(item.key)}`,
       defaultRelativePath: `${PROMPT_WORKSPACE_DIR}/${item.filename}`,
     }),
   ),
@@ -562,7 +562,7 @@ export function getAgentPromptDefinitions() {
 
 export function getDefaultPromptWorkspace(repoRoot) {
   const override = String(
-    process.env.CODEX_MONITOR_PROMPT_WORKSPACE || "",
+    process.env.OPENFLEET_PROMPT_WORKSPACE || "",
   ).trim();
   if (override) {
     return isAbsolute(override)
@@ -607,13 +607,13 @@ export function ensureAgentPromptWorkspace(repoRoot) {
     mkdirSync(workspaceDir, { recursive: true });
   } catch (err) {
     const fallbackRoot = resolve(
-      process.env.CODEX_MONITOR_HOME ||
+      process.env.OPENFLEET_HOME ||
         process.env.HOME ||
         process.env.USERPROFILE ||
         homedir(),
     );
     const fallbackDir = resolve(fallbackRoot, PROMPT_WORKSPACE_DIR);
-    process.env.CODEX_MONITOR_PROMPT_WORKSPACE = fallbackDir;
+    process.env.OPENFLEET_PROMPT_WORKSPACE = fallbackDir;
     workspaceDir = fallbackDir;
     mkdirSync(workspaceDir, { recursive: true });
     console.warn(

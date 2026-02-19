@@ -140,9 +140,9 @@ function showHelp() {
     5. Built-in defaults
 
     Auto-update environment variables:
-      CODEX_MONITOR_SKIP_UPDATE_CHECK=1     Disable startup version check
-      CODEX_MONITOR_SKIP_AUTO_UPDATE=1      Disable background polling
-      CODEX_MONITOR_UPDATE_INTERVAL_MS=N    Override poll interval (default: 600000)
+      OPENFLEET_SKIP_UPDATE_CHECK=1     Disable startup version check
+      OPENFLEET_SKIP_AUTO_UPDATE=1      Disable background polling
+      OPENFLEET_UPDATE_INTERVAL_MS=N    Override poll interval (default: 600000)
 
     See .env.example for all environment variables.
 
@@ -199,23 +199,23 @@ const SENTINEL_SCRIPT_PATH = fileURLToPath(
   new URL("./telegram-sentinel.mjs", import.meta.url),
 );
 const IS_DAEMON_CHILD =
-  args.includes("--daemon-child") || process.env.CODEX_MONITOR_DAEMON === "1";
+  args.includes("--daemon-child") || process.env.OPENFLEET_DAEMON === "1";
 const DAEMON_RESTART_DELAY_MS = Math.max(
   1000,
-  Number(process.env.CODEX_MONITOR_DAEMON_RESTART_DELAY_MS || 5000) || 5000,
+  Number(process.env.OPENFLEET_DAEMON_RESTART_DELAY_MS || 5000) || 5000,
 );
 const DAEMON_MAX_RESTARTS = Math.max(
   0,
-  Number(process.env.CODEX_MONITOR_DAEMON_MAX_RESTARTS || 0) || 0,
+  Number(process.env.OPENFLEET_DAEMON_MAX_RESTARTS || 0) || 0,
 );
 const DAEMON_INSTANT_CRASH_WINDOW_MS = Math.max(
   1000,
-  Number(process.env.CODEX_MONITOR_DAEMON_INSTANT_CRASH_WINDOW_MS || 15000) ||
+  Number(process.env.OPENFLEET_DAEMON_INSTANT_CRASH_WINDOW_MS || 15000) ||
     15000,
 );
 const DAEMON_MAX_INSTANT_RESTARTS = Math.max(
   1,
-  Number(process.env.CODEX_MONITOR_DAEMON_MAX_INSTANT_RESTARTS || 3) || 3,
+  Number(process.env.OPENFLEET_DAEMON_MAX_INSTANT_RESTARTS || 3) || 3,
 );
 let daemonRestartCount = 0;
 const daemonCrashTracker = createDaemonCrashTracker({
@@ -283,7 +283,7 @@ async function ensureSentinelRunning(options = {}) {
     windowsHide: process.platform === "win32",
     env: {
       ...process.env,
-      CODEX_MONITOR_SENTINEL_COMPANION: "1",
+      OPENFLEET_SENTINEL_COMPANION: "1",
     },
     cwd: process.cwd(),
   });
@@ -380,7 +380,7 @@ function startDaemon() {
       detached: true,
       stdio: "ignore",
       windowsHide: process.platform === "win32",
-      env: { ...process.env, CODEX_MONITOR_DAEMON: "1" },
+      env: { ...process.env, OPENFLEET_DAEMON: "1" },
       cwd: process.cwd(),
     },
   );
@@ -510,7 +510,7 @@ async function main() {
   // Write PID file if running as daemon child
   if (
     args.includes("--daemon-child") ||
-    process.env.CODEX_MONITOR_DAEMON === "1"
+    process.env.OPENFLEET_DAEMON === "1"
   ) {
     writePidFile(process.pid);
     // Redirect console to log file on daemon child
@@ -556,15 +556,15 @@ async function main() {
 
   const sentinelRequested =
     args.includes("--sentinel") ||
-    parseBoolEnv(process.env.CODEX_MONITOR_SENTINEL_AUTO_START, false);
+    parseBoolEnv(process.env.OPENFLEET_SENTINEL_AUTO_START, false);
   if (sentinelRequested) {
     const sentinel = await ensureSentinelRunning({ quiet: false });
     if (!sentinel.ok) {
       const mode = args.includes("--sentinel")
         ? "requested by --sentinel"
-        : "requested by CODEX_MONITOR_SENTINEL_AUTO_START";
+        : "requested by OPENFLEET_SENTINEL_AUTO_START";
       const strictSentinel = parseBoolEnv(
-        process.env.CODEX_MONITOR_SENTINEL_STRICT,
+        process.env.OPENFLEET_SENTINEL_STRICT,
         false,
       );
       const prefix = strictSentinel ? "✖" : "⚠";
@@ -649,7 +649,7 @@ async function main() {
 
   // Propagate --no-auto-update to env for monitor.mjs to pick up
   if (args.includes("--no-auto-update")) {
-    process.env.CODEX_MONITOR_SKIP_AUTO_UPDATE = "1";
+    process.env.OPENFLEET_SKIP_AUTO_UPDATE = "1";
   }
 
   // Mark all child processes as openfleet managed.
@@ -661,7 +661,7 @@ async function main() {
   if (args.includes("--setup") || args.includes("setup")) {
     const configDirArg = getArgValue("--config-dir");
     if (configDirArg) {
-      process.env.CODEX_MONITOR_DIR = configDirArg;
+      process.env.OPENFLEET_DIR = configDirArg;
     }
     const { runSetup } = await import("./setup.mjs");
     await runSetup();
@@ -682,11 +682,73 @@ async function main() {
     console.log("\n  🚀 First run detected — launching setup wizard...\n");
     const configDirArg = getArgValue("--config-dir");
     if (configDirArg) {
-      process.env.CODEX_MONITOR_DIR = configDirArg;
+      process.env.OPENFLEET_DIR = configDirArg;
     }
     const { runSetup } = await import("./setup.mjs");
     await runSetup();
     console.log("\n  Setup complete! Starting openfleet...\n");
+  }
+
+  // ── Handle --echo-logs: tail the active monitor's log instead of spawning a new instance ──
+  if (args.includes("--echo-logs")) {
+    // Search for the monitor PID file in common cache locations
+    const candidatePidFiles = [
+      process.env.OPENFLEET_DIR
+        ? resolve(process.env.OPENFLEET_DIR, ".cache", "openfleet.pid")
+        : null,
+      resolve(__dirname, "..", ".cache", "openfleet.pid"),
+      resolve(process.cwd(), ".cache", "openfleet.pid"),
+    ].filter(Boolean);
+
+    let activePidFile = null;
+    for (const f of candidatePidFiles) {
+      if (existsSync(f)) {
+        activePidFile = f;
+        break;
+      }
+    }
+
+    if (activePidFile) {
+      try {
+        const pidData = JSON.parse(readFileSync(activePidFile, "utf8"));
+        const monitorPid = Number(pidData.pid);
+        const monitorPath = (pidData.argv || [])[1] || "";
+
+        let isAlive = false;
+        try {
+          process.kill(monitorPid, 0);
+          isAlive = true;
+        } catch {}
+
+        if (isAlive && monitorPath) {
+          const logDir = resolve(dirname(monitorPath), "logs");
+          const daemonLog = resolve(logDir, "daemon.log");
+          const monitorLog = resolve(logDir, "monitor.log");
+          const logFile = existsSync(daemonLog) ? daemonLog : monitorLog;
+
+          if (existsSync(logFile)) {
+            console.log(
+              `\n  Tailing logs for active openfleet (PID ${monitorPid}):\n  ${logFile}\n`,
+            );
+            await new Promise((res) => {
+              const tail = spawn("tail", ["-f", "-n", "200", logFile], {
+                stdio: "inherit",
+              });
+              tail.on("exit", res);
+              process.on("SIGINT", () => {
+                tail.kill();
+                res();
+              });
+            });
+            process.exit(0);
+          }
+        }
+      } catch {
+        // best-effort — fall through to normal start
+      }
+    }
+
+    // No active monitor found — start normally; echoLogs will be picked up by config.mjs
   }
 
   // Fork monitor as a child process — enables self-restart on source changes.

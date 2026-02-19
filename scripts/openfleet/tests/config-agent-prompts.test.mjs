@@ -19,7 +19,7 @@ describe("loadAgentPrompts generic prompt loading", () => {
     if (rootDir) {
       await rm(rootDir, { recursive: true, force: true });
     }
-    delete process.env.CODEX_MONITOR_PROMPT_MONITOR_MONITOR;
+    delete process.env.OPENFLEET_PROMPT_MONITOR_MONITOR;
   });
 
   it("loads monitor-monitor prompt from .openfleet/agents when present", async () => {
@@ -56,7 +56,7 @@ describe("loadAgentPrompts generic prompt loading", () => {
       "utf8",
     );
 
-    process.env.CODEX_MONITOR_PROMPT_MONITOR_MONITOR =
+    process.env.OPENFLEET_PROMPT_MONITOR_MONITOR =
       "env-prompts/monitor.md";
 
     const prompts = loadAgentPrompts(rootDir, rootDir, {

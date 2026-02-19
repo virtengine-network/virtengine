@@ -617,7 +617,7 @@ export async function executeBlockingHooks(event, context = {}) {
 export function registerBuiltinHooks(options = {}) {
   const modeRaw =
     options.mode ??
-    process.env.CODEX_MONITOR_HOOKS_BUILTINS_MODE ??
+    process.env.OPENFLEET_HOOKS_BUILTINS_MODE ??
     process.env.VE_HOOK_BUILTINS_MODE ??
     "force";
   const mode = String(modeRaw).trim().toLowerCase();
@@ -633,12 +633,12 @@ export function registerBuiltinHooks(options = {}) {
     (hook) => !hook.builtin,
   );
   const skipPrePush =
-    envFlag("CODEX_MONITOR_HOOKS_DISABLE_PREPUSH", false) ||
+    envFlag("OPENFLEET_HOOKS_DISABLE_PREPUSH", false) ||
     envFlag("VE_HOOK_DISABLE_PREPUSH", false) ||
     (mode === "auto" && hasCustomPrePush);
   const skipTaskComplete =
-    envFlag("CODEX_MONITOR_HOOKS_DISABLE_TASK_COMPLETE", false) ||
-    envFlag("CODEX_MONITOR_HOOKS_DISABLE_VALIDATION", false) ||
+    envFlag("OPENFLEET_HOOKS_DISABLE_TASK_COMPLETE", false) ||
+    envFlag("OPENFLEET_HOOKS_DISABLE_VALIDATION", false) ||
     envFlag("VE_HOOK_DISABLE_TASK_COMPLETE", false) ||
     (mode === "auto" && hasCustomTaskComplete);
 
@@ -680,7 +680,7 @@ export function registerBuiltinHooks(options = {}) {
   // ── SessionStart: worktree health check ──
   // Verifies the worktree directory exists, is a valid git repo,
   // and the expected branch is checked out. Retryable for transient git issues.
-  const skipHealthCheck = envFlag("CODEX_MONITOR_HOOKS_DISABLE_HEALTH_CHECK", false);
+  const skipHealthCheck = envFlag("OPENFLEET_HOOKS_DISABLE_HEALTH_CHECK", false);
   if (!skipHealthCheck) {
     const healthCmd = IS_WINDOWS
       ? 'powershell -NoProfile -Command "if (-not (Test-Path .git)) { if (-not (git rev-parse --git-dir 2>$null)) { Write-Error \'Not a git repository\'; exit 1 } }; git status --porcelain 2>&1 | Out-Null; if ($LASTEXITCODE -ne 0) { Write-Error \'git status failed\'; exit 1 }; Write-Host \'OK: worktree healthy\'"'

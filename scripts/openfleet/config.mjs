@@ -726,7 +726,7 @@ export function loadConfig(argv = process.argv, options = {}) {
   // Determine config directory (where openfleet stores its config)
   const configDir =
     cli["config-dir"] ||
-    process.env.CODEX_MONITOR_DIR ||
+    process.env.OPENFLEET_DIR ||
     resolveConfigDir(repoRootForConfig);
 
   const configFile = loadConfigFile(configDir);
@@ -740,8 +740,8 @@ export function loadConfig(argv = process.argv, options = {}) {
   const repoSelection =
     cli["repo-name"] ||
     cli.repository ||
-    process.env.CODEX_MONITOR_REPO ||
-    process.env.CODEX_MONITOR_REPO_NAME ||
+    process.env.OPENFLEET_REPO ||
+    process.env.OPENFLEET_REPO_NAME ||
     process.env.REPO_NAME ||
     configData.defaultRepository ||
     configData.defaultRepo ||
@@ -774,8 +774,8 @@ export function loadConfig(argv = process.argv, options = {}) {
     (profiles.default ? "default" : "");
   const profileName =
     cli.profile ||
-    process.env.CODEX_MONITOR_PROFILE ||
-    process.env.CODEX_MONITOR_ENV_PROFILE ||
+    process.env.OPENFLEET_PROFILE ||
+    process.env.OPENFLEET_ENV_PROFILE ||
     selectedRepository?.profile ||
     selectedRepository?.envProfile ||
     defaultProfile ||
@@ -838,7 +838,7 @@ export function loadConfig(argv = process.argv, options = {}) {
   const mode =
     (
       cli.mode ||
-      process.env.CODEX_MONITOR_MODE ||
+      process.env.OPENFLEET_MODE ||
       configData.mode ||
       selectedRepository?.mode ||
       ""
@@ -943,20 +943,20 @@ export function loadConfig(argv = process.argv, options = {}) {
   const interactiveShellEnabled =
     flags.has("shell") ||
     flags.has("interactive") ||
-    isEnvEnabled(process.env.CODEX_MONITOR_SHELL, false) ||
-    isEnvEnabled(process.env.CODEX_MONITOR_INTERACTIVE, false) ||
+    isEnvEnabled(process.env.OPENFLEET_SHELL, false) ||
+    isEnvEnabled(process.env.OPENFLEET_INTERACTIVE, false) ||
     configData.interactiveShellEnabled === true ||
     configData.shellEnabled === true;
   const preflightEnabled = flags.has("no-preflight")
     ? false
     : configData.preflightEnabled !== undefined
       ? configData.preflightEnabled
-      : isEnvEnabled(process.env.CODEX_MONITOR_PREFLIGHT_DISABLED, false)
+      : isEnvEnabled(process.env.OPENFLEET_PREFLIGHT_DISABLED, false)
         ? false
         : true;
   const preflightRetryMs = Number(
     cli["preflight-retry"] ||
-      process.env.CODEX_MONITOR_PREFLIGHT_RETRY_MS ||
+      process.env.OPENFLEET_PREFLIGHT_RETRY_MS ||
       configData.preflightRetryMs ||
       "300000",
   );
@@ -1656,7 +1656,7 @@ function detectProjectName(configDir, repoRoot) {
 }
 
 function findOrchestratorScript(configDir, repoRoot) {
-  const shellModeEnv = String(process.env.CODEX_MONITOR_SHELL_MODE || "")
+  const shellModeEnv = String(process.env.OPENFLEET_SHELL_MODE || "")
     .trim()
     .toLowerCase();
   const shellModeRequested = ["1", "true", "yes", "on"].includes(shellModeEnv);

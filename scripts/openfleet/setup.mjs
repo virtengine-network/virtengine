@@ -97,7 +97,7 @@ function isPathInside(parent, child) {
 }
 
 function resolveConfigDir(repoRoot) {
-  const explicit = process.env.CODEX_MONITOR_DIR;
+  const explicit = process.env.OPENFLEET_DIR;
   if (explicit) return resolve(explicit);
   const repoPath = resolve(repoRoot || process.cwd());
   const packageDir = resolve(__dirname);
@@ -2488,7 +2488,7 @@ async function main() {
 
       const canonicalLabel = "openfleet";
       const existingScopeLabels = String(
-        process.env.CODEX_MONITOR_TASK_LABELS || "",
+        process.env.OPENFLEET_TASK_LABELS || "",
       )
         .split(",")
         .map((entry) => entry.trim().toLowerCase())
@@ -2499,9 +2499,9 @@ async function main() {
       if (!existingScopeLabels.includes("codex-mointor")) {
         existingScopeLabels.push("codex-mointor");
       }
-      env.CODEX_MONITOR_TASK_LABEL = canonicalLabel;
-      env.CODEX_MONITOR_TASK_LABELS = existingScopeLabels.join(",");
-      env.CODEX_MONITOR_ENFORCE_TASK_LABEL = "true";
+      env.OPENFLEET_TASK_LABEL = canonicalLabel;
+      env.OPENFLEET_TASK_LABELS = existingScopeLabels.join(",");
+      env.OPENFLEET_ENFORCE_TASK_LABEL = "true";
 
       if (githubTaskMode === "kanban") {
         env.GITHUB_PROJECT_OWNER =
@@ -2546,7 +2546,7 @@ async function main() {
           projectTitle: env.GITHUB_PROJECT_TITLE || "OpenFleet",
           projectOwner: env.GITHUB_PROJECT_OWNER || env.GITHUB_REPO_OWNER || "",
           projectNumber: env.GITHUB_PROJECT_NUMBER || "",
-          taskLabel: env.CODEX_MONITOR_TASK_LABEL || "openfleet",
+          taskLabel: env.OPENFLEET_TASK_LABEL || "openfleet",
         },
       };
       info(
@@ -2789,7 +2789,7 @@ async function main() {
       const canonicalLabel = "openfleet";
       const jiraScopeLabels = String(
         process.env.JIRA_TASK_LABELS ||
-          process.env.CODEX_MONITOR_TASK_LABELS ||
+          process.env.OPENFLEET_TASK_LABELS ||
           "",
       )
         .split(",")
@@ -2801,10 +2801,10 @@ async function main() {
       if (!jiraScopeLabels.includes("codex-mointor")) {
         jiraScopeLabels.push("codex-mointor");
       }
-      env.CODEX_MONITOR_TASK_LABEL = canonicalLabel;
-      env.CODEX_MONITOR_TASK_LABELS = jiraScopeLabels.join(",");
-      env.CODEX_MONITOR_ENFORCE_TASK_LABEL = "true";
-      env.JIRA_TASK_LABELS = env.CODEX_MONITOR_TASK_LABELS;
+      env.OPENFLEET_TASK_LABEL = canonicalLabel;
+      env.OPENFLEET_TASK_LABELS = jiraScopeLabels.join(",");
+      env.OPENFLEET_ENFORCE_TASK_LABEL = "true";
+      env.JIRA_TASK_LABELS = env.OPENFLEET_TASK_LABELS;
       env.JIRA_ENFORCE_TASK_LABEL = "true";
 
       if (hasJiraCreds) {
@@ -3244,9 +3244,9 @@ async function main() {
       const profileMap = ["strict", "balanced", "lightweight", "none"];
       let profile = "balanced";
       let targets = ["codex", "claude", "copilot"];
-      let prePushRaw = process.env.CODEX_MONITOR_HOOK_PREPUSH || "";
-      let preCommitRaw = process.env.CODEX_MONITOR_HOOK_PRECOMMIT || "";
-      let taskCompleteRaw = process.env.CODEX_MONITOR_HOOK_TASK_COMPLETE || "";
+      let prePushRaw = process.env.OPENFLEET_HOOK_PREPUSH || "";
+      let preCommitRaw = process.env.OPENFLEET_HOOK_PRECOMMIT || "";
+      let taskCompleteRaw = process.env.OPENFLEET_HOOK_TASK_COMPLETE || "";
       let overwriteHooks = false;
 
       if (isAdvancedSetup) {
@@ -3294,15 +3294,15 @@ async function main() {
 
         prePushRaw = await prompt.ask(
           "Pre-push command override",
-          process.env.CODEX_MONITOR_HOOK_PREPUSH || "",
+          process.env.OPENFLEET_HOOK_PREPUSH || "",
         );
         preCommitRaw = await prompt.ask(
           "Pre-commit command override",
-          process.env.CODEX_MONITOR_HOOK_PRECOMMIT || "",
+          process.env.OPENFLEET_HOOK_PRECOMMIT || "",
         );
         taskCompleteRaw = await prompt.ask(
           "Task-complete command override",
-          process.env.CODEX_MONITOR_HOOK_TASK_COMPLETE || "",
+          process.env.OPENFLEET_HOOK_TASK_COMPLETE || "",
         );
 
         overwriteHooks = await prompt.confirm(

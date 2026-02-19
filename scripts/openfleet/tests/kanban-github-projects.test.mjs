@@ -47,8 +47,8 @@ const ENV_KEYS = [
   "GITHUB_PROJECT_STATUS_INREVIEW",
   "GITHUB_PROJECT_STATUS_DONE",
   "GITHUB_PROJECT_STATUS_CANCELLED",
-  "CODEX_MONITOR_ENFORCE_TASK_LABEL",
-  "CODEX_MONITOR_TASK_LABEL",
+  "OPENFLEET_ENFORCE_TASK_LABEL",
+  "OPENFLEET_TASK_LABEL",
 ];
 
 function snapshotEnv() {
@@ -80,7 +80,7 @@ describe("GitHub Projects v2 integration", () => {
     delete process.env.GITHUB_REPO_NAME;
     process.env.GITHUB_PROJECT_MODE = "kanban";
     process.env.GITHUB_PROJECT_NUMBER = "7";
-    process.env.CODEX_MONITOR_ENFORCE_TASK_LABEL = "false";
+    process.env.OPENFLEET_ENFORCE_TASK_LABEL = "false";
     delete process.env.GITHUB_PROJECT_AUTO_SYNC;
     delete process.env.GITHUB_PROJECT_STATUS_TODO;
     delete process.env.GITHUB_PROJECT_STATUS_INPROGRESS;

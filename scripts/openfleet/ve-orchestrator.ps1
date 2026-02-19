@@ -969,7 +969,7 @@ function Initialize-CISweepConfig {
     $script:CopilotCloudDisableOnRateLimit = Get-EnvBool -Name "COPILOT_CLOUD_DISABLE_ON_RATE_LIMIT" -Default $true
     $envCopilotLocalResolution = Get-EnvFallback -Name "COPILOT_LOCAL_RESOLUTION"
     $script:CopilotLocalResolution = if ($envCopilotLocalResolution) { $envCopilotLocalResolution } else { "agent" }
-    $script:CodexMonitorTaskUpstream = Get-EnvString -Name "CODEX_MONITOR_TASK_UPSTREAM" -Default "origin/ve/openfleet-generic"
+    $script:CodexMonitorTaskUpstream = Get-EnvString -Name "OPENFLEET_TASK_UPSTREAM" -Default "origin/ve/openfleet-generic"
 
     # Branch routing scope map (v0.8) — maps conventional commit scopes to upstream branches
     $script:BranchRoutingScopeMap = @{}

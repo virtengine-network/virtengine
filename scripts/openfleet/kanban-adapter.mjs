@@ -862,13 +862,13 @@ class GitHubIssuesAdapter {
     };
 
     this._canonicalTaskLabel =
-      process.env.CODEX_MONITOR_TASK_LABEL || "openfleet";
+      process.env.OPENFLEET_TASK_LABEL || "openfleet";
     this._taskScopeLabels = normalizeLabels(
-      process.env.CODEX_MONITOR_TASK_LABELS ||
+      process.env.OPENFLEET_TASK_LABELS ||
         `${this._canonicalTaskLabel},codex-mointor`,
     );
     this._enforceTaskLabel = parseBooleanEnv(
-      process.env.CODEX_MONITOR_ENFORCE_TASK_LABEL,
+      process.env.OPENFLEET_ENFORCE_TASK_LABEL,
       true,
     );
 
@@ -3010,17 +3010,17 @@ class JiraAdapter {
       process.env.JIRA_SUBTASK_PARENT_KEY || "",
     ).trim();
     this._canonicalTaskLabel = String(
-      process.env.CODEX_MONITOR_TASK_LABEL || "openfleet",
+      process.env.OPENFLEET_TASK_LABEL || "openfleet",
     )
       .trim()
       .toLowerCase();
     this._taskScopeLabels = normalizeLabels(
       process.env.JIRA_TASK_LABELS ||
-        process.env.CODEX_MONITOR_TASK_LABELS ||
+        process.env.OPENFLEET_TASK_LABELS ||
         `${this._canonicalTaskLabel},openfleet`,
     ).map((label) => this._sanitizeJiraLabel(label));
     this._enforceTaskLabel = parseBooleanEnv(
-      process.env.JIRA_ENFORCE_TASK_LABEL ?? process.env.CODEX_MONITOR_ENFORCE_TASK_LABEL,
+      process.env.JIRA_ENFORCE_TASK_LABEL ?? process.env.OPENFLEET_ENFORCE_TASK_LABEL,
       true,
     );
     this._codexLabels = {

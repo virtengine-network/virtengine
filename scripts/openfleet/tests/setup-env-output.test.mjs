@@ -35,16 +35,16 @@ describe("setup env output", () => {
   it("loads existing .env values into process env for setup defaults", async () => {
     const dir = await mkdtemp(resolve(tmpdir(), "openfleet-setup-env-"));
     const envPath = resolve(dir, ".env");
-    delete process.env.CODEX_MONITOR_TEST_KEY;
+    delete process.env.OPENFLEET_TEST_KEY;
 
     try {
-      await writeFile(envPath, "CODEX_MONITOR_TEST_KEY=from-file\n", "utf8");
+      await writeFile(envPath, "OPENFLEET_TEST_KEY=from-file\n", "utf8");
       const result = applyEnvFileToProcess(envPath, { override: true });
       expect(result.found).toBe(true);
       expect(result.loaded).toBe(1);
-      expect(process.env.CODEX_MONITOR_TEST_KEY).toBe("from-file");
+      expect(process.env.OPENFLEET_TEST_KEY).toBe("from-file");
     } finally {
-      delete process.env.CODEX_MONITOR_TEST_KEY;
+      delete process.env.OPENFLEET_TEST_KEY;
       await rm(dir, { recursive: true, force: true });
     }
   });

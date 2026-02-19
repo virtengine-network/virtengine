@@ -6109,9 +6109,9 @@ async function actOnAssessment(ctx, decision) {
 // Use config-driven branch routing instead of hardcoded defaults
 const DEFAULT_TARGET_BRANCH =
   branchRouting?.defaultBranch || process.env.VK_TARGET_BRANCH || "origin/main";
-const DEFAULT_CODEX_MONITOR_UPSTREAM =
+const DEFAULT_OPENFLEET_UPSTREAM =
   branchRouting?.scopeMap?.["openfleet"] ||
-  process.env.CODEX_MONITOR_TASK_UPSTREAM ||
+  process.env.OPENFLEET_TASK_UPSTREAM ||
   "origin/ve/openfleet-generic";
 
 /**
@@ -6303,7 +6303,7 @@ function resolveUpstreamFromTask(task) {
     text.includes("@virtengine/openfleet") ||
     text.includes("scripts/openfleet")
   ) {
-    return DEFAULT_CODEX_MONITOR_UPSTREAM;
+    return DEFAULT_OPENFLEET_UPSTREAM;
   }
 
   return null;

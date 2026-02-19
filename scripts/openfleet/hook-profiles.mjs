@@ -11,13 +11,13 @@ const LEGACY_BRIDGE_SNIPPET = "scripts/openfleet/agent-hook-bridge.mjs";
 const DEFAULT_BRIDGE_SCRIPT_PATH = resolve(__dirname, "agent-hook-bridge.mjs");
 
 function getHookNodeBinary() {
-  const configured = String(process.env.CODEX_MONITOR_HOOK_NODE_BIN || "").trim();
+  const configured = String(process.env.OPENFLEET_HOOK_NODE_BIN || "").trim();
   return configured || "node";
 }
 
 function getHookBridgeScriptPath() {
   const configured = String(
-    process.env.CODEX_MONITOR_HOOK_BRIDGE_PATH || "",
+    process.env.OPENFLEET_HOOK_BRIDGE_PATH || "",
   ).trim();
   return configured || DEFAULT_BRIDGE_SCRIPT_PATH;
 }
@@ -242,23 +242,23 @@ export function normalizeHookTargets(value) {
 }
 
 export function buildHookScaffoldOptionsFromEnv(env = process.env) {
-  const profile = normalizeProfile(env.CODEX_MONITOR_HOOK_PROFILE);
+  const profile = normalizeProfile(env.OPENFLEET_HOOK_PROFILE);
   return {
-    enabled: parseBoolean(env.CODEX_MONITOR_HOOKS_ENABLED, true),
+    enabled: parseBoolean(env.OPENFLEET_HOOKS_ENABLED, true),
     profile,
-    targets: normalizeHookTargets(env.CODEX_MONITOR_HOOK_TARGETS),
-    overwriteExisting: parseBoolean(env.CODEX_MONITOR_HOOKS_OVERWRITE, false),
+    targets: normalizeHookTargets(env.OPENFLEET_HOOK_TARGETS),
+    overwriteExisting: parseBoolean(env.OPENFLEET_HOOKS_OVERWRITE, false),
     commands: {
       SessionStart: normalizeOverrideCommands(
-        env.CODEX_MONITOR_HOOK_SESSION_START,
+        env.OPENFLEET_HOOK_SESSION_START,
       ),
       SessionStop: normalizeOverrideCommands(
-        env.CODEX_MONITOR_HOOK_SESSION_STOP,
+        env.OPENFLEET_HOOK_SESSION_STOP,
       ),
-      PrePush: normalizeOverrideCommands(env.CODEX_MONITOR_HOOK_PREPUSH),
-      PreCommit: normalizeOverrideCommands(env.CODEX_MONITOR_HOOK_PRECOMMIT),
+      PrePush: normalizeOverrideCommands(env.OPENFLEET_HOOK_PREPUSH),
+      PreCommit: normalizeOverrideCommands(env.OPENFLEET_HOOK_PRECOMMIT),
       TaskComplete: normalizeOverrideCommands(
-        env.CODEX_MONITOR_HOOK_TASK_COMPLETE,
+        env.OPENFLEET_HOOK_TASK_COMPLETE,
       ),
     },
   };
@@ -545,10 +545,10 @@ function buildDisableEnv(hookConfig) {
   const hasTaskComplete = Array.isArray(hookConfig.hooks?.TaskComplete);
 
   return {
-    CODEX_MONITOR_HOOKS_BUILTINS_MODE:
+    OPENFLEET_HOOKS_BUILTINS_MODE:
       hasPrePush || hasTaskComplete ? "auto" : "off",
-    CODEX_MONITOR_HOOKS_DISABLE_PREPUSH: hasPrePush ? "0" : "1",
-    CODEX_MONITOR_HOOKS_DISABLE_TASK_COMPLETE: hasTaskComplete ? "0" : "1",
+    OPENFLEET_HOOKS_DISABLE_PREPUSH: hasPrePush ? "0" : "1",
+    OPENFLEET_HOOKS_DISABLE_TASK_COMPLETE: hasTaskComplete ? "0" : "1",
   };
 }
 
@@ -571,9 +571,9 @@ export function scaffoldAgentHookFiles(repoRoot, options = {}) {
 
   if (!enabled) {
     result.env = {
-      CODEX_MONITOR_HOOKS_BUILTINS_MODE: "off",
-      CODEX_MONITOR_HOOKS_DISABLE_PREPUSH: "1",
-      CODEX_MONITOR_HOOKS_DISABLE_TASK_COMPLETE: "1",
+      OPENFLEET_HOOKS_BUILTINS_MODE: "off",
+      OPENFLEET_HOOKS_DISABLE_PREPUSH: "1",
+      OPENFLEET_HOOKS_DISABLE_TASK_COMPLETE: "1",
     };
     return result;
   }

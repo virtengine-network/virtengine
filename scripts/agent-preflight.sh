@@ -22,13 +22,13 @@ fi
 HAS_GO=false
 HAS_PORTAL=false
 HAS_GOMOD=false
-HAS_CODEX_MONITOR=false
+HAS_OPENFLEET=false
 ERRORS=0
 
 echo "$CHANGED_FILES" | grep -q '\.go$' && HAS_GO=true || true
 echo "$CHANGED_FILES" | grep -q '^portal/' && HAS_PORTAL=true || true
 echo "$CHANGED_FILES" | grep -qE '^go\.(mod|sum)$' && HAS_GOMOD=true || true
-echo "$CHANGED_FILES" | grep -q '^scripts/openfleet/' && HAS_CODEX_MONITOR=true || true
+echo "$CHANGED_FILES" | grep -q '^scripts/openfleet/' && HAS_OPENFLEET=true || true
 
 if $HAS_GO || $HAS_GOMOD; then
     echo "--- Go checks ---"
@@ -76,7 +76,7 @@ if $HAS_PORTAL; then
     pnpm -C portal test 2>&1 || { echo "FAIL: portal tests"; ERRORS=$((ERRORS+1)); }
 fi
 
-if $HAS_CODEX_MONITOR; then
+if $HAS_OPENFLEET; then
     echo "--- Codex Monitor checks ---"
 
     if [ ! -d "scripts/openfleet/node_modules" ]; then

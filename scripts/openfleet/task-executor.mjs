@@ -97,7 +97,7 @@ const NO_COMMIT_MAX_COOLDOWN_MS = 2 * 60 * 60 * 1000;
 const CLAIM_CONFLICT_COMMENT_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 const CODEX_TASK_LABELS = (() => {
   const raw = String(
-    process.env.CODEX_MONITOR_TASK_LABELS || "openfleet,codex-mointor",
+    process.env.OPENFLEET_TASK_LABELS || "openfleet,codex-mointor",
   );
   const labels = raw
     .split(",")
@@ -1010,11 +1010,11 @@ class TaskExecutor {
     this._claimConflictNotifiedAt = new Map();
     this._instanceIdExplicit =
       String(process.env.VE_INSTANCE_ID || "").trim() !== "" ||
-      String(process.env.CODEX_MONITOR_INSTANCE_ID || "").trim() !== "";
+      String(process.env.OPENFLEET_INSTANCE_ID || "").trim() !== "";
     this._instanceId =
       String(
         process.env.VE_INSTANCE_ID ||
-          process.env.CODEX_MONITOR_INSTANCE_ID ||
+          process.env.OPENFLEET_INSTANCE_ID ||
           `${os.hostname() || "host"}-${process.pid}`,
       ).trim() || `executor-${process.pid}`;
     this.taskClaimOwnerStaleTtlMs = Math.max(

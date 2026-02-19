@@ -64,7 +64,7 @@ describe("kanban-adapter github backend", () => {
   const originalOwner = process.env.GITHUB_REPO_OWNER;
   const originalName = process.env.GITHUB_REPO_NAME;
   const originalProjectMode = process.env.GITHUB_PROJECT_MODE;
-  const originalTaskLabelEnforce = process.env.CODEX_MONITOR_ENFORCE_TASK_LABEL;
+  const originalTaskLabelEnforce = process.env.OPENFLEET_ENFORCE_TASK_LABEL;
 
   beforeEach(() => {
     execFileMock.mockReset();
@@ -73,7 +73,7 @@ describe("kanban-adapter github backend", () => {
     delete process.env.GITHUB_REPO_OWNER;
     delete process.env.GITHUB_REPO_NAME;
     process.env.GITHUB_PROJECT_MODE = "issues";
-    process.env.CODEX_MONITOR_ENFORCE_TASK_LABEL = "true";
+    process.env.OPENFLEET_ENFORCE_TASK_LABEL = "true";
     loadConfigMock.mockReturnValue({
       repoSlug: "acme/widgets",
       kanban: { backend: "github" },
@@ -103,9 +103,9 @@ describe("kanban-adapter github backend", () => {
       process.env.GITHUB_PROJECT_MODE = originalProjectMode;
     }
     if (originalTaskLabelEnforce === undefined) {
-      delete process.env.CODEX_MONITOR_ENFORCE_TASK_LABEL;
+      delete process.env.OPENFLEET_ENFORCE_TASK_LABEL;
     } else {
-      process.env.CODEX_MONITOR_ENFORCE_TASK_LABEL = originalTaskLabelEnforce;
+      process.env.OPENFLEET_ENFORCE_TASK_LABEL = originalTaskLabelEnforce;
     }
   });
 
@@ -223,7 +223,7 @@ describe("kanban-adapter github backend", () => {
   });
 
   it("does not filter by codex labels when enforcement is disabled", async () => {
-    process.env.CODEX_MONITOR_ENFORCE_TASK_LABEL = "false";
+    process.env.OPENFLEET_ENFORCE_TASK_LABEL = "false";
     setKanbanBackend("github");
     mockGh(
       JSON.stringify([

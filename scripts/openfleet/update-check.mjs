@@ -8,9 +8,9 @@
  *       auto-installs updates and restarts the process. Zero user interaction.
  *
  * Respects:
- *   - CODEX_MONITOR_SKIP_UPDATE_CHECK=1 — disable startup check
- *   - CODEX_MONITOR_SKIP_AUTO_UPDATE=1 — disable polling auto-update
- *   - CODEX_MONITOR_UPDATE_INTERVAL_MS — override poll interval (default 10 min)
+ *   - OPENFLEET_SKIP_UPDATE_CHECK=1 — disable startup check
+ *   - OPENFLEET_SKIP_AUTO_UPDATE=1 — disable polling auto-update
+ *   - OPENFLEET_UPDATE_INTERVAL_MS — override poll interval (default 10 min)
  *   - Caches the last check timestamp so we don't query npm too aggressively
  */
 
@@ -124,7 +124,7 @@ async function fetchLatestVersion() {
  * Called on startup — must never throw or delay the main process.
  */
 export async function checkForUpdate(currentVersion) {
-  if (process.env.CODEX_MONITOR_SKIP_UPDATE_CHECK) return;
+  if (process.env.OPENFLEET_SKIP_UPDATE_CHECK) return;
 
   try {
     // Rate-limit: at most once per hour
@@ -240,13 +240,13 @@ let cleanupHandlersRegistered = false;
  * @param {number}   [opts.parentPid]  - Parent process PID to monitor (default: process.ppid)
  */
 export function startAutoUpdateLoop(opts = {}) {
-  if (process.env.CODEX_MONITOR_SKIP_AUTO_UPDATE === "1") {
-    console.log("[auto-update] Disabled via CODEX_MONITOR_SKIP_AUTO_UPDATE=1");
+  if (process.env.OPENFLEET_SKIP_AUTO_UPDATE === "1") {
+    console.log("[auto-update] Disabled via OPENFLEET_SKIP_AUTO_UPDATE=1");
     return;
   }
 
   const intervalMs =
-    Number(process.env.CODEX_MONITOR_UPDATE_INTERVAL_MS) ||
+    Number(process.env.OPENFLEET_UPDATE_INTERVAL_MS) ||
     opts.intervalMs ||
     AUTO_UPDATE_INTERVAL_MS;
   const onRestart = opts.onRestart || (() => process.exit(0));

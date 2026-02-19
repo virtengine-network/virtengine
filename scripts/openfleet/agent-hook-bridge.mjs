@@ -166,7 +166,7 @@ async function run() {
   // openfleet sets VE_MANAGED=1 in all spawned agent environments.
   // If this env var is missing, we're running inside a standalone agent session
   // that just happens to have the hook files in its config — exit silently.
-  if (!process.env.VE_MANAGED && !process.env.CODEX_MONITOR_HOOKS_FORCE) {
+  if (!process.env.VE_MANAGED && !process.env.OPENFLEET_HOOKS_FORCE) {
     process.exit(0);
   }
 

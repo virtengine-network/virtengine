@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import os from "node:os";
 
 const isWindows = process.platform === "win32";
-const MIN_FREE_GB = Number(process.env.CODEX_MONITOR_MIN_FREE_GB || "10");
+const MIN_FREE_GB = Number(process.env.OPENFLEET_MIN_FREE_GB || "10");
 const MIN_FREE_BYTES = MIN_FREE_GB * 1024 * 1024 * 1024;
 
 function runCommand(command, args, options = {}) {
@@ -167,7 +167,7 @@ function isShellModeRequested() {
     .toLowerCase();
   if (script.endsWith(".sh")) return true;
   if (script.endsWith(".ps1")) return false;
-  if (parseEnvBool(process.env.CODEX_MONITOR_SHELL_MODE, false)) return true;
+  if (parseEnvBool(process.env.OPENFLEET_SHELL_MODE, false)) return true;
   return !isWindows;
 }
 

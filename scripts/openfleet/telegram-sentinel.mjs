@@ -1365,7 +1365,7 @@ async function startAndWaitForMonitor(reason) {
     {
       detached: true,
       stdio: "ignore",
-      env: { ...process.env, CODEX_MONITOR_DAEMON: "1" },
+      env: { ...process.env, OPENFLEET_DAEMON: "1" },
       cwd: repoRoot,
     },
   );

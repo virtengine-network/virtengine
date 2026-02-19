@@ -82,7 +82,7 @@ function isWslInteropRuntime() {
 }
 
 function resolveConfigDir(repoRoot) {
-  const explicit = process.env.CODEX_MONITOR_DIR;
+  const explicit = process.env.OPENFLEET_DIR;
   if (explicit) return resolve(explicit);
 
   const repoPath = resolve(repoRoot || process.cwd());

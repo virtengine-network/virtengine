@@ -103,7 +103,7 @@ const RECOMMENDED = [
 
 function main() {
   // Skip in CI environments
-  if (process.env.CI || process.env.CODEX_MONITOR_SKIP_POSTINSTALL) {
+  if (process.env.CI || process.env.OPENFLEET_SKIP_POSTINSTALL) {
     return;
   }
 
