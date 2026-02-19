@@ -311,7 +311,7 @@ gh workflow run release.yaml
 ## Configuration
 
 - Toolchain defaults live in `.github/workflows/ci.yaml:1` (`GO_VERSION`, `NODE_VERSION`, `PNPM_VERSION`, `PYTHON_VERSION`).
-- OIDC publish is required for `.github/workflows/bosun-publish.yaml:1` (see `_docs/operations/ci-troubleshooting.md:1`).
+- Release publishing uses `.github/workflows/release.yaml:1` and SDK releases use `.github/workflows/sdk-publish.yaml:1` (see `_docs/operations/ci-troubleshooting.md:1`).
 
 ## Local Testing
 

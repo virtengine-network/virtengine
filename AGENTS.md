@@ -25,14 +25,13 @@ If you are COPILOT & HAVE ACCESS TO COPILOT SUBAGENT: MAKE SURE YOU USE SUBAGENT
 
 ## NEVER PLAN AND NOT EXECUTE THE TASKS MADE IN THE PLAN
 
-DO NOT ASK USER FOR CONFIRMATION TO CONTINUE WITH THE PLAN YOU JUST MADE, IF YOU USED [[PLAN]] FIRST -> THEN CONTINUE AND
-EXECUTE THE TASK IMMEDIATELY.
+DO NOT ASK USER FOR CONFIRMATION TO CONTINUE WITH THE PLAN YOU JUST MADE, IF YOU USED [[PLAN]] FIRST -> THEN CONTINUE AND EXECUTE THE TASK IMMEDIATELY.
 
 ### Completing a TASK <IMPORTANT GIT INFO>
 
 Before finishing a task - ensure that you create a commit based on following convention (Ensuring Linting and Formatting are done precommit, such as gofmt, prettier, golangci-lint) & git merge origin <<upstream branch>> --no-edit & trigger a git push --set-upstream origin ve/branch-name & git push passess all prepush hooks! <<upstream branch>> is the default branch that your branch was created from - MAKE sure that you have MERGED any upstream changes before pushing as otherwise there could be an unaddressed CONFLICT. <<URGENT>>
 
-If you are running **outside** vibe-kanban (no `VE_TASK_TITLE` env var), you do not need to push changes.
+If you are running **outside** Bosun (no `BOSUN_TITLE` env var), you do not need to push changes.
 
 You might notice that your task instructions might have already been implemented by another agent previously - if this is the case, your goal switches to analyzing if the previous agent has completed the task END TO END sufficiently - and if not, fix any issues or problems the previous agent might have missed.
 
@@ -45,6 +44,8 @@ If you notice unexpected modified/untracked files, assume another agent/subagent
   - Template: `docs/templates/AGENTS.template.md`
   - Standards: `docs/AGENTS_STANDARDS.md`
   - Index: `docs/AGENTS_INDEX.md`
+  - Internal docs index: `_docs/INDEX.md`
+  - Internal docs rules: `_docs/AGENTS.md`
 - Module-specific docs (examples):
   - `api/AGENTS.md`
   - `sdk/ts/AGENTS.md`
@@ -56,6 +57,7 @@ If you notice unexpected modified/untracked files, assume another agent/subagent
 - Every module AGENTS.md uses the required sections listed in the template.
 - Code references use `path/to/file.ext:line` format to anchor guidance.
 - Update AGENTS.md in the same PR as code changes to keep documentation in sync.
+- Internal-only documentation must live under `_docs/` (see `_docs/AGENTS.md` and `_docs/INDEX.md`).
 
 ## Usage Examples
 
@@ -76,9 +78,9 @@ If you notice unexpected modified/untracked files, assume another agent/subagent
   3. Add the file to `docs/AGENTS_INDEX.md`.
   4. Run `node scripts/validate-agents-docs.mjs`.
 
-### PR Creation & Merge (vibe-kanban automation)
+### PR Creation & Merge (Bosun automation)
 
-If you are running as a vibe-kanban task agent (you'll have `VE_TASK_TITLE` and `VE_BRANCH_NAME` env vars set), you are responsible for **creating the PR** after your push. The **orchestrator handles merges** when CI passes. In this case:
+If you are running as a Bosun task agent (you'll have `BOSUN_TASK_TITLE` and `BOSUN_BRANCH_NAME` env vars set), you are responsible for **creating the PR** after your push. The **orchestrator handles merges** when CI passes. In this case:
 
 - Focus on code quality, tests, and a clean commit
 - Before commiting - always run auto formatting tools such as prettier, lint, etc.
@@ -86,7 +88,7 @@ If you are running as a vibe-kanban task agent (you'll have `VE_TASK_TITLE` and 
 - Ensure you consistently merge upstream changes (from the original branch your branch was created from) before any git push, and fix conflicts if they exist <IMPORTANT>
 - Run `gh pr create` after your push to open the PR (do not bypass prepush hooks, if the issue is caused by an upstream branch - fix it)
 - Do NOT manually run `gh pr merge` (orchestrator merges after CI)
-  If you are running **outside** vibe-kanban (no `VE_TASK_TITLE` env var), you do not need to push changes.
+  If you are running **outside** Bosun (no `BOSUN_TASK_TITLE` env var), you do not need to push changes.
 
 You should have all commands as needed available in shell, for example any powershell commands or any go, gh, pip, npm, git, etc. Consider increasing time outs when running long running commands such as git push, go test when running large test packages (running test on all packages could need more than 20minute timeout, only run tests on modules you actually changed instead), etc. Avoid running long CLI tasks when unnecessary, do not bypass verifications for git commit & git push - resolve any lint or unit test errors that you may encounter with these hooks.
 

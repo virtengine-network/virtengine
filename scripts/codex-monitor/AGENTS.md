@@ -1,12 +1,12 @@
 # Bosun Shim — AGENTS Guide
 
 ## Module Overview
-- Purpose: Provide a legacy npm shim that forwards `bosun` CLI commands to `@virtengine/bosun`.
+- Purpose: Provide a legacy npm shim that forwards `bosun` CLI commands to `bosun`.
 - Use when: Updating the deprecation redirect behavior or adding legacy command aliases.
 - Key entry points: `scripts/bosun/bin/bosun.mjs:1`, `scripts/bosun/package.json:1`.
 
 ## Architecture
-- Single entrypoint script resolves the installed `@virtengine/bosun` package
+- Single entrypoint script resolves the installed `bosun` package
   and launches the appropriate bosun CLI script based on the invoked command.
 - Directory layout:
   - `bin/` shim launcher(s)
@@ -15,7 +15,7 @@
 
 ```mermaid
 flowchart TD
-  Shim[bosun bin] --> Resolve[resolve @virtengine/bosun]
+  Shim[bosun bin] --> Resolve[resolve bosun]
   Resolve --> Bosun[bosun CLI script]
 ```
 
@@ -55,5 +55,5 @@ bosun --help
 
 ## Troubleshooting
 - Shim cannot find bosun:
-  - Cause: `@virtengine/bosun` dependency not installed.
-  - Fix: `npm install -g @virtengine/bosun` or reinstall `bosun`.
+  - Cause: `bosun` dependency not installed.
+  - Fix: `npm install -g bosun` or reinstall `bosun`.

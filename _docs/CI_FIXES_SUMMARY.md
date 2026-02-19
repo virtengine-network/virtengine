@@ -66,7 +66,7 @@ when the default setup is enabled
 **Problem**: Workflow failing with:
 ```
 npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fbosun
-npm error 404  '@virtengine/bosun@0.8.0' is not in this registry.
+npm error 404  'bosun@0.8.0' is not in this registry.
 ```
 
 **Root Cause**: npm OIDC trusted publishing not configured
@@ -77,7 +77,7 @@ npm error 404  '@virtengine/bosun@0.8.0' is not in this registry.
 
 #### Part 1: On npmjs.com
 1. Log in to [npmjs.com](https://www.npmjs.com/)
-2. Navigate to package: `@virtengine/bosun`
+2. Navigate to package: `bosun`
    - If package doesn't exist, create it first (manual publish v0.1.0)
 3. Go to **Settings** → **Publishing Access**
 4. Click **Add Trusted Publisher**

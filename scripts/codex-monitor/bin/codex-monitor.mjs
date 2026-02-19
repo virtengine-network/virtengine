@@ -15,13 +15,13 @@ const COMMAND_MAP = new Map([
 
 function resolveBosunDir() {
   try {
-    const monitorPath = require.resolve("@virtengine/bosun");
+    const monitorPath = require.resolve("bosun");
     return dirname(monitorPath);
   } catch (err) {
     const message = err && typeof err.message === "string" ? err.message : String(err);
     console.error(
-      "[bosun] Failed to locate @virtengine/bosun. " +
-      "Install it with: npm install -g @virtengine/bosun\n" +
+      "[bosun] Failed to locate bosun. " +
+      "Install it with: npm install -g bosun\n" +
       `Details: ${message}`,
     );
     process.exit(1);

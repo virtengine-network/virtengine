@@ -1,20 +1,20 @@
 # codex-monitor (deprecated)
 
-This package has been renamed to `@virtengine/bosun`.
+This package has been renamed to `bosun`.
 
 You can find bosun at : https://github.com/virtengine/virtengine/tree/main/scripts/bosun
 
-Or in NPM: http://npmjs.com/package/@virtengine/bosun
+Or in NPM: http://npmjs.com/package/bosun
 
 `bosun` now acts as a legacy shim that forwards all CLI commands to the
-latest `@virtengine/bosun` binaries.
+latest `bosun` binaries.
 
 bosun is a contuation of the initial codex-monitor project.
 
 ## Install (recommended)
 
 ```bash
-npm install -g @virtengine/bosun
+npm install -g bosun
 ```
 
 ## Legacy install

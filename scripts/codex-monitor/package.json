@@ -1,7 +1,7 @@
 {
   "name": "bosun",
   "version": "0.25.0",
-  "description": "Deprecated legacy shim. Renamed to @virtengine/bosun; this package forwards CLI commands to bosun.",
+  "description": "Deprecated legacy shim. Renamed to bosun; this package forwards CLI commands to bosun.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "VirtEngine <dev@virtengine.com>",
@@ -35,7 +35,7 @@
     "LICENSE"
   ],
   "dependencies": {
-    "@virtengine/bosun": "latest"
+    "bosun": "latest"
   },
   "engines": {
     "node": ">=18"

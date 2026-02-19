@@ -83,14 +83,14 @@ once binary compiled it exempts system-wide installed virtengine within virtengi
 
 ## Bosun — AI Agent Orchestrator
 
-[Bosun](https://github.com/virtengine/bosun) is VirtEngine's autonomous AI agent orchestrator. It supervises fleets of AI coding agents (Codex, Copilot, Claude) with failover, crash analysis, auto-restarts, and Telegram/WhatsApp notifications.
+[Bosun](https://github.com/virtengine/bosun#virtenginebosun) is VirtEngine's autonomous AI agent orchestrator. It supervises fleets of AI coding agents (Codex, Copilot, Claude) with failover, crash analysis, auto-restarts, and Telegram/WhatsApp notifications.
 
 ```bash
 npm install -g bosun
 bosun --daemon
 ```
 
-See the [Bosun repo](https://github.com/virtengine/bosun) for full documentation, or install from [npm](https://www.npmjs.com/package/bosun).
+See the [Bosun repo](https://github.com/virtengine/bosun#virtenginebosun) for full documentation, or install from [npm](https://www.npmjs.com/package/bosun).
 
 ## Running
 

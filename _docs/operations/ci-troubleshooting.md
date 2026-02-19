@@ -108,7 +108,7 @@ If using default setup, these additional scans would need separate workflows.
 **Symptom:**
 ```
 npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fbosun
-npm error 404  '@virtengine/bosun@X.Y.Z' is not in this registry.
+npm error 404  'bosun@X.Y.Z' is not in this registry.
 ```
 OR
 ```
@@ -125,7 +125,7 @@ The workflow uses npm's OIDC Trusted Publishing, which requires:
 
 #### Step 1: Verify Package Exists
 ```bash
-npm view @virtengine/bosun
+npm view bosun
 ```
 
 If package doesn't exist, create it first:
@@ -135,7 +135,7 @@ If package doesn't exist, create it first:
 #### Step 2: Configure Trusted Publisher on npmjs.com
 
 1. Log in to [npmjs.com](https://www.npmjs.com/)
-2. Navigate to package: `@virtengine/bosun`
+2. Navigate to package: `bosun`
 3. Go to **Settings** → **Publishing Access**
 4. Click **Add Trusted Publisher**
 5. Select **GitHub Actions**
