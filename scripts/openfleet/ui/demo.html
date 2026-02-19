@@ -608,31 +608,33 @@
   <!-- Demo mode banner -->
   <div class="demo-banner">⚡ OpenFleet Demo Mode — Seed Data</div>
 
-  <!-- Boot loader (same as real app) -->
-  <div id="boot-loader" style="
-    position: fixed; inset: 0; z-index: 9999;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--bg-primary, #0b0f14);
-    transition: opacity .3s ease;
-  ">
-    <div style="text-align: center;">
-      <div style="
-        width: 36px; height: 36px; margin: 0 auto 12px;
-        border: 3px solid rgba(76,201,240,.15);
-        border-top-color: var(--accent, #4cc9f0);
-        border-radius: 50%;
-        animation: spin .7s linear infinite;
-      "></div>
-      <div style="font-size: 13px; color: var(--text-secondary, #94a3b8); font-family: 'Inter', sans-serif;">
-        Loading demo...
+  <!-- App root — boot loader lives INSIDE #app so Preact's render() replaces it -->
+  <div id="app">
+    <div id="boot-loader" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:'Inter',sans-serif;color:#9aa3b8;background:#0b0f14;overflow:hidden">
+      <style>
+        .boot-ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(76,201,240,.15);animation:boot-spin 3s linear infinite}
+        .boot-ring-inner{position:absolute;inset:8px;border-radius:50%;border:2px solid transparent;border-top-color:#4cc9f0;border-right-color:rgba(76,201,240,.4);animation:boot-spin 1.5s linear infinite reverse}
+        .boot-dot{position:absolute;top:50%;left:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:linear-gradient(135deg,#4cc9f0,#60cc5d);box-shadow:0 0 20px rgba(76,201,240,.5);animation:boot-pulse 2s ease-in-out infinite}
+        @keyframes boot-spin{to{transform:rotate(360deg)}}
+        @keyframes boot-pulse{0%,100%{transform:scale(1);opacity:.8}50%{transform:scale(1.2);opacity:1}}
+      </style>
+      <div style="position:relative;width:60px;height:60px;margin-bottom:16px">
+        <div class="boot-ring"></div>
+        <div class="boot-ring-inner"></div>
+        <div class="boot-dot"></div>
       </div>
+      <div style="font-size:13px;color:#64748b">Loading demo...</div>
     </div>
-    <style>@keyframes spin { to { transform: rotate(360deg) } }</style>
   </div>
-
-  <div id="app"></div>
 
   <!-- Load the REAL app.js (it uses ES modules + importmap) -->
   <script type="module" src="app.js"></script>
+  <script>
+    // Fallback: if ES modules fail to load within 12s, show an error
+    setTimeout(function() {
+      var el = document.getElementById('boot-loader');
+      if (el) el.innerHTML = '<div style="text-align:center;padding:40px;font-family:Inter,sans-serif;color:#94a3b8"><div style="font-size:18px;margin-bottom:8px">⚠️ Failed to load</div><div style="font-size:12px;color:#64748b">Check connection (CDN: esm.sh) or refresh</div></div>';
+    }, 12000);
+  </script>
 </body>
 </html>
