@@ -8,7 +8,7 @@ This guide covers common issues with GitHub Actions workflows and how to resolve
 |----------|--------------|------------|
 | standardize-yaml | `.yml` files detected | Rename to `.yaml` extension |
 | Security (CodeQL) | Default setup conflict | Disable default setup in GitHub UI |
-| Codex Monitor: Publish | npm authentication | Configure OIDC trusted publisher |
+| OpenFleet: Publish | npm authentication | Configure OIDC trusted publisher |
 
 ## Detailed Solutions
 
@@ -103,7 +103,7 @@ If using default setup, these additional scans would need separate workflows.
 
 ---
 
-### 3. Codex Monitor: Publish Workflow Failures
+### 3. OpenFleet: Publish Workflow Failures
 
 **Symptom:**
 ```

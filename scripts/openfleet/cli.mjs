@@ -27,6 +27,11 @@ import { fileURLToPath } from "node:url";
 import { fork, spawn } from "node:child_process";
 import os from "node:os";
 import { createDaemonCrashTracker } from "./daemon-restart-policy.mjs";
+import {
+  applyAllCompatibility,
+  detectLegacySetup,
+  migrateFromLegacy,
+} from "./compat.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -456,6 +461,9 @@ function daemonStatus() {
 }
 
 async function main() {
+  // Apply legacy CODEX_MONITOR_* → OPENFLEET_* env aliases before any config ops
+  applyAllCompatibility();
+
   // Handle --help
   if (args.includes("--help") || args.includes("-h")) {
     showHelp();
@@ -689,6 +697,23 @@ async function main() {
     console.log("\n  Setup complete! Starting openfleet...\n");
   }
 
+  // Legacy migration: if ~/openfleet exists with config, auto-migrate to ~/openfleet
+  const legacyInfo = detectLegacySetup();
+  if (legacyInfo.hasLegacy && !legacyInfo.alreadyMigrated) {
+    console.log(
+      `\n  📦 Detected legacy openfleet config at ${legacyInfo.legacyDir}`,
+    );
+    console.log(`     Auto-migrating to ${legacyInfo.newDir}...\n`);
+    const result = migrateFromLegacy(legacyInfo.legacyDir, legacyInfo.newDir);
+    if (result.migrated.length > 0) {
+      console.log(`  ✅  Migrated: ${result.migrated.join(", ")}`);
+      console.log(`\n  Config is now at ${legacyInfo.newDir}\n`);
+    }
+    for (const err of result.errors) {
+      console.log(`  ⚠️   Migration warning: ${err}`);
+    }
+  }
+
   // ── Handle --echo-logs: tail the active monitor's log instead of spawning a new instance ──
   if (args.includes("--echo-logs")) {
     // Search for the monitor PID file in common cache locations
@@ -731,24 +756,40 @@ async function main() {
               `\n  Tailing logs for active openfleet (PID ${monitorPid}):\n  ${logFile}\n`,
             );
             await new Promise((res) => {
+              // Spawn tail in its own process group (detached) so that
+              // Ctrl+C in this terminal only kills the tailing session,
+              // never the running daemon.
               const tail = spawn("tail", ["-f", "-n", "200", logFile], {
-                stdio: "inherit",
+                stdio: ["ignore", "inherit", "inherit"],
+                detached: true,
               });
               tail.on("exit", res);
               process.on("SIGINT", () => {
-                tail.kill();
+                try { process.kill(-tail.pid, "SIGTERM"); } catch { tail.kill(); }
                 res();
               });
             });
             process.exit(0);
+          } else {
+            console.error(
+              `\n  No log file found for active openfleet (PID ${monitorPid}).\n  Expected: ${logFile}\n`,
+            );
+            process.exit(1);
           }
         }
-      } catch {
-        // best-effort — fall through to normal start
+      } catch (e) {
+        console.error(`\n  --echo-logs: failed to read PID file — ${e.message}\n`);
+        process.exit(1);
       }
+    } else {
+      console.error(
+        "\n  --echo-logs: no active openfleet found (PID file missing).\n  Start openfleet first with: openfleet --daemon\n",
+      );
+      process.exit(1);
     }
 
-    // No active monitor found — start normally; echoLogs will be picked up by config.mjs
+    // Should not reach here — all paths above exit
+    process.exit(0);
   }
 
   // Fork monitor as a child process — enables self-restart on source changes.

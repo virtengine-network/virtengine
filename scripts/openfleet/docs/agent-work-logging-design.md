@@ -800,4 +800,4 @@ echo "Agent work logs rotated: $(date)"
 
 **Document version:** 1.0
 **Last updated:** 2026-02-09
-**Owner:** VirtEngine Codex Monitor Team
+**Owner:** VirtEngine OpenFleet Team

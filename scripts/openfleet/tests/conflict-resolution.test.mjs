@@ -133,7 +133,7 @@ describe("conflict resolution strategy", () => {
     // Documents the expected resolution order used in the orchestrator:
     // 1. PR's declared baseRefName (most authoritative)
     // 2. Stored target_branch from submission
-    // 3. Task-level upstream detection (Test-IsCodexMonitorTask → CodexMonitorTaskUpstream)
+    // 3. Task-level upstream detection (Test-IsOpenFleetTask → OpenFleetTaskUpstream)
     // 4. Fallback to VK_TARGET_BRANCH
     //
     // For openfleet tasks, step 3 returns "origin/ve/openfleet-generic"

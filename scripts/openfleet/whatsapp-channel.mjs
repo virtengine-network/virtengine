@@ -33,7 +33,7 @@ const whatsappChatId = process.env.WHATSAPP_CHAT_ID || "";
 const assistantName =
   process.env.WHATSAPP_ASSISTANT_NAME ||
   process.env.PROJECT_NAME ||
-  "Codex Monitor";
+  "OpenFleet";
 const storeDir = resolve(
   process.env.WHATSAPP_STORE_DIR ||
     resolve(repoRoot, ".cache", "whatsapp-store"),
@@ -229,7 +229,7 @@ async function connectInternal(onFirstOpen) {
     },
     printQRInTerminal: false,
     logger: silentLogger,
-    browser: b.Browsers?.macOS?.("Chrome") || ["Codex Monitor", "Chrome", "1.0"],
+    browser: b.Browsers?.macOS?.("Chrome") || ["OpenFleet", "Chrome", "1.0"],
   });
 
   sock.ev.on("connection.update", (update) => {
@@ -452,7 +452,7 @@ export async function runWhatsAppAuth(mode = "qr") {
     },
     printQRInTerminal: false,
     logger: silentLogger,
-    browser: b.Browsers?.macOS?.("Chrome") || ["Codex Monitor", "Chrome", "1.0"],
+    browser: b.Browsers?.macOS?.("Chrome") || ["OpenFleet", "Chrome", "1.0"],
   });
 
   let pairingRequested = false;

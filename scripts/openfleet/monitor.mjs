@@ -3401,6 +3401,14 @@ async function fetchTasksByStatus(status) {
   const backend = getActiveKanbanBackend();
   if (backend !== "vk") {
     try {
+      // Internal backend uses file-based storage — no project ID required.
+      if (backend === "internal") {
+        const tasks = status
+          ? getInternalTasksByStatus(status)
+          : getAllInternalTasks();
+        return Array.isArray(tasks) ? tasks : [];
+      }
+
       const projectId = getConfiguredKanbanProjectId(backend);
       if (!projectId) {
         console.warn(
@@ -6299,7 +6307,7 @@ function resolveUpstreamFromTask(task) {
   const text = getTaskTextBlob(task).toLowerCase();
   if (
     text.includes("openfleet") ||
-    text.includes("codex monitor") ||
+    text.includes("OpenFleet") ||
     text.includes("@virtengine/openfleet") ||
     text.includes("scripts/openfleet")
   ) {
@@ -7795,6 +7803,10 @@ async function sendTelegramMessage(text, options = {}) {
       category = "git";
     }
   }
+
+  // Allow caller to explicitly override the computed priority (e.g. auto-update
+  // restart notifications should always arrive as direct messages, not digest).
+  if (options.priority !== undefined) priority = Number(options.priority);
 
   // Route through batching system — apply verbosity filter first.
   // minimal: only priority 1-2 (critical + error)
@@ -11466,7 +11478,9 @@ startAutoUpdateLoop({
   onRestart: (reason) => restartSelf(reason),
   onNotify: (msg) => {
     try {
-      void sendTelegramMessage(msg);
+      // Priority 1 (critical) bypasses the live digest so the user gets a
+      // direct push notification for update-detected and restarting events.
+      void sendTelegramMessage(msg, { priority: 1, skipDedup: true });
     } catch {
       /* best-effort */
     }

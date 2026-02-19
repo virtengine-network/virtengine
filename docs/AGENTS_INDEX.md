@@ -13,7 +13,7 @@ This index lists every AGENTS.md file in the repo and highlights how modules rel
 | Provider module | [x/provider/AGENTS.md](../x/provider/AGENTS.md) (line 1) | On-chain provider lifecycle, domain verification, and keys. |
 | Chain SDK (TS) | [sdk/ts/AGENTS.md](../sdk/ts/AGENTS.md) (line 1) | TypeScript SDK for chain and provider clients. |
 | OpenFleet | [scripts/openfleet/AGENTS.md](../scripts/openfleet/AGENTS.md) (line 1) | Multi-agent orchestration supervisor and tooling. |
-| Codex Monitor shim | [scripts/codex-monitor/AGENTS.md](../scripts/codex-monitor/AGENTS.md) (line 1) | Legacy npm shim that forwards `codex-monitor` commands to openfleet. |
+| OpenFleet shim | [scripts/openfleet/AGENTS.md](../scripts/openfleet/AGENTS.md) (line 1) | Legacy npm shim that forwards `openfleet` commands to openfleet. |
 | Scripts | [scripts/AGENTS.md](../scripts/AGENTS.md) (line 1) | Operational scripts, automation, and developer utilities. |
 
 ## Dependency Graph

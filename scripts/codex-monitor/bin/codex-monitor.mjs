@@ -7,10 +7,10 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const COMMAND_MAP = new Map([
-  ["codex-monitor", "cli.mjs"],
-  ["codex-monitor-setup", "setup.mjs"],
-  ["codex-monitor-chat-id", "get-telegram-chat-id.mjs"],
-  ["codex-monitor-shared-workspaces", "shared-workspace-cli.mjs"],
+  ["openfleet", "cli.mjs"],
+  ["openfleet-setup", "setup.mjs"],
+  ["openfleet-chat-id", "get-telegram-chat-id.mjs"],
+  ["openfleet-shared-workspaces", "shared-workspace-cli.mjs"],
 ]);
 
 function resolveOpenfleetDir() {
@@ -20,7 +20,7 @@ function resolveOpenfleetDir() {
   } catch (err) {
     const message = err && typeof err.message === "string" ? err.message : String(err);
     console.error(
-      "[codex-monitor] Failed to locate @virtengine/openfleet. " +
+      "[openfleet] Failed to locate @virtengine/openfleet. " +
       "Install it with: npm install -g @virtengine/openfleet\n" +
       `Details: ${message}`,
     );
@@ -28,7 +28,7 @@ function resolveOpenfleetDir() {
   }
 }
 
-const invoked = basename(process.argv[1] || "codex-monitor");
+const invoked = basename(process.argv[1] || "openfleet");
 const scriptName = COMMAND_MAP.get(invoked) || "cli.mjs";
 const openfleetDir = resolveOpenfleetDir();
 const scriptPath = resolve(openfleetDir, scriptName);
@@ -39,7 +39,7 @@ const child = spawn(process.execPath, [scriptPath, ...process.argv.slice(2)], {
 });
 
 child.on("error", (err) => {
-  console.error(`[codex-monitor] Failed to launch openfleet: ${err.message}`);
+  console.error(`[openfleet] Failed to launch openfleet: ${err.message}`);
   process.exit(1);
 });
 

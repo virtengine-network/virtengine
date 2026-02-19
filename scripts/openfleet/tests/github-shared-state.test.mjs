@@ -300,7 +300,7 @@ Old comment`,
             body: `<!-- openfleet-state
 ${JSON.stringify(stateData, null, 2)}
 -->
-**Codex Monitor Status**: Working on this task`,
+**OpenFleet Status**: Working on this task`,
           },
         ]),
       );

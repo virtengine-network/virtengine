@@ -62,17 +62,18 @@
     "./startup-service": "./startup-service.mjs",
     "./telegram-sentinel": "./telegram-sentinel.mjs",
     "./whatsapp-channel": "./whatsapp-channel.mjs",
-    "./container-runner": "./container-runner.mjs"
+    "./container-runner": "./container-runner.mjs",
+    "./compat": "./compat.mjs"
   },
   "bin": {
     "openfleet": "cli.mjs",
     "openfleet-setup": "setup.mjs",
     "openfleet-chat-id": "get-telegram-chat-id.mjs",
     "openfleet-shared-workspaces": "shared-workspace-cli.mjs",
-    "codex-monitor": "cli.mjs",
-    "codex-monitor-setup": "setup.mjs",
-    "codex-monitor-chat-id": "get-telegram-chat-id.mjs",
-    "codex-monitor-shared-workspaces": "shared-workspace-cli.mjs",
+    "openfleet": "cli.mjs",
+    "openfleet-setup": "setup.mjs",
+    "openfleet-chat-id": "get-telegram-chat-id.mjs",
+    "openfleet-shared-workspaces": "shared-workspace-cli.mjs",
     "vibe-kanban": "vibe-kanban-wrapper.mjs",
     "telegram-sentinel": "telegram-sentinel.mjs"
   },
@@ -110,6 +111,7 @@
     "autofix.mjs",
     "claude-shell.mjs",
     "cli.mjs",
+    "compat.mjs",
     "codex-config.mjs",
     "openfleet.config.example.json",
     "openfleet.schema.json",

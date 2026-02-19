@@ -84,7 +84,7 @@ pwsh scripts/openfleet/ve-kanban.ps1 status
 
 ## Telegram bot configuration
 
-The codex monitor posts important status updates to Telegram.
+The OpenFleet posts important status updates to Telegram.
 
 ### Required environment variables
 

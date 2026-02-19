@@ -96,7 +96,7 @@ import {
 
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const repoRoot = resolveRepoRoot();
-const codexMonitorDir = __dirname;
+const OpenFleetDir = __dirname;
 const statusPath = resolve(repoRoot, ".cache", "ve-orchestrator-status.json");
 const telegramPollLockPath = resolve(
   repoRoot,
@@ -108,7 +108,7 @@ const fwCooldownPath = resolve(repoRoot, ".cache", "ve-fw-cooldown.json");
 const FW_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function resolveVeKanbanPs1Path() {
-  const modulePath = resolve(codexMonitorDir, "ve-kanban.ps1");
+  const modulePath = resolve(OpenFleetDir, "ve-kanban.ps1");
   if (existsSync(modulePath)) return modulePath;
   return resolve(repoRoot, "scripts", "openfleet", "ve-kanban.ps1");
 }

@@ -77,7 +77,7 @@ if $HAS_PORTAL; then
 fi
 
 if $HAS_OPENFLEET; then
-    echo "--- Codex Monitor checks ---"
+    echo "--- OpenFleet checks ---"
 
     if [ ! -d "scripts/openfleet/node_modules" ]; then
         echo "  npm install..."

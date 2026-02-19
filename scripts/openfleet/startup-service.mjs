@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const SERVICE_LABEL = "com.openfleet.service";
-const TASK_NAME = "CodexMonitor";
+const TASK_NAME = "OpenFleet";
 const SYSTEMD_UNIT = "openfleet.service";
 
 // ── Platform Detection ───────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ function generateTaskSchedulerXml({ daemon = true } = {}) {
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>Auto-start openfleet AI orchestrator on login</Description>
-    <Author>Codex Monitor</Author>
+    <Author>OpenFleet</Author>
     <URI>\\${TASK_NAME}</URI>
   </RegistrationInfo>
   <Triggers>

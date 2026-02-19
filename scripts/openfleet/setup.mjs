@@ -44,6 +44,7 @@ import {
   normalizeHookTargets,
   scaffoldAgentHookFiles,
 } from "./hook-profiles.mjs";
+import { detectLegacySetup, applyAllCompatibility } from "./compat.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -115,7 +116,7 @@ function resolveConfigDir(repoRoot) {
 
 function printBanner() {
   const ver = getVersion();
-  const title = `Codex Monitor — Setup Wizard  v${ver}`;
+  const title = `OpenFleet — Setup Wizard  v${ver}`;
   const pad = Math.max(0, 57 - title.length);
   const left = Math.floor(pad / 2);
   const right = pad - left;
@@ -1980,7 +1981,7 @@ async function main() {
     // ── Step 5: AI Provider ────────────────────────────────
     heading("Step 5 of 9 — AI / Codex Provider");
     console.log(
-      "  Codex Monitor uses the Codex SDK for crash analysis & autofix.\n",
+      "  OpenFleet uses the Codex SDK for crash analysis & autofix.\n",
     );
 
     const providerIdx = await prompt.choose(
@@ -3418,9 +3419,9 @@ async function main() {
       env.WHATSAPP_ASSISTANT_NAME = isAdvancedSetup
         ? await prompt.ask(
             "WhatsApp assistant display name",
-            env.PROJECT_NAME || "Codex Monitor",
+            env.PROJECT_NAME || "OpenFleet",
           )
-        : env.PROJECT_NAME || "Codex Monitor";
+        : env.PROJECT_NAME || "OpenFleet";
       info(
         "Run `openfleet --whatsapp-auth` after setup to authenticate with WhatsApp.",
       );
@@ -3904,6 +3905,14 @@ async function writeConfigFiles({ env, configJson, repoRoot, configDir }) {
  * Called from monitor.mjs before starting the main loop.
  */
 export function shouldRunSetup() {
+  // Apply legacy compat so OPENFLEET_DIR is set before resolveConfigDir is called
+  applyAllCompatibility();
+
+  // If a legacy openfleet setup exists and the user hasn't migrated yet,
+  // skip the setup wizard — they are already configured.
+  const legacyInfo = detectLegacySetup();
+  if (legacyInfo.hasLegacy) return false;
+
   const repoRoot = detectRepoRoot();
   const configDir = resolveConfigDir(repoRoot);
   return !hasSetupMarkers(configDir);

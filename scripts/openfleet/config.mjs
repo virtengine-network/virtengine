@@ -23,6 +23,7 @@ import {
   getAgentPromptDefinitions,
   resolveAgentPrompts,
 } from "./agent-prompts.mjs";
+import { applyAllCompatibility } from "./compat.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -719,6 +720,9 @@ function loadAgentPrompts(configDir, repoRoot, configData) {
  * Returns a frozen config object used by all modules.
  */
 export function loadConfig(argv = process.argv, options = {}) {
+  // Apply legacy CODEX_MONITOR_* → OPENFLEET_* compatibility before anything else
+  applyAllCompatibility();
+
   const { reloadEnv = false } = options;
   const cli = parseArgs(argv);
 

@@ -225,9 +225,9 @@ function main() {
     if (status === 0 && !dryRun) {
       console.log(
         "\n[publish] REMINDER: deprecate the legacy npm package to redirect users:\n" +
-        "  npm deprecate codex-monitor@'*' \"Renamed to @virtengine/openfleet. Install: npm install -g @virtengine/openfleet\"\n" +
+        "  npm deprecate openfleet@'*' \"Renamed to @virtengine/openfleet. Install: npm install -g @virtengine/openfleet\"\n" +
         "  # If a scoped legacy package exists:\n" +
-        "  npm deprecate @virtengine/codex-monitor@'*' \"Renamed to @virtengine/openfleet. Install: npm install -g @virtengine/openfleet\"\n",
+        "  npm deprecate @virtengine/openfleet@'*' \"Renamed to @virtengine/openfleet. Install: npm install -g @virtengine/openfleet\"\n",
       );
     }
     process.exit(status);

@@ -61,7 +61,7 @@ when the default setup is enabled
 
 ---
 
-### 📚 Codex Monitor npm Publishing
+### 📚 OpenFleet npm Publishing
 
 **Problem**: Workflow failing with:
 ```
@@ -180,7 +180,7 @@ After merge to main:
 
 1. **standardize-yaml**: ✅ Will pass (file renamed)
 2. **Security (CodeQL)**: ⚠️ Will fail until admin configures
-3. **Codex Monitor Publish**: ⚠️ Will fail until admin configures
+3. **OpenFleet Publish**: ⚠️ Will fail until admin configures
 
 ---
 
@@ -197,7 +197,7 @@ After merge to main:
 - Configure trusted publisher on npmjs.com
 - Create GitHub environment
 - Required for automatic npm publishes
-- Blocks: Codex Monitor releases
+- Blocks: OpenFleet releases
 
 ### For Team
 - Review troubleshooting guide
@@ -211,7 +211,7 @@ After merge to main:
 **Workflows Fixed**: 1/3
 - ✅ standardize-yaml (100% fixed)
 - 📚 Security (documented, requires admin)
-- 📚 Codex Monitor Publish (documented, requires admin)
+- 📚 OpenFleet Publish (documented, requires admin)
 
 **Documentation Added**:
 - 1 comprehensive troubleshooting guide (357 lines)
@@ -229,7 +229,7 @@ After merge to main:
 **After admin configuration**:
 - [ ] standardize-yaml passes on main ✅ (already fixed)
 - [ ] Security workflow passes on main (after CodeQL config)
-- [ ] Codex Monitor publishes successfully (after npm config)
+- [ ] OpenFleet publishes successfully (after npm config)
 - [ ] All documentation is clear and actionable ✅
 
 **Long-term**:

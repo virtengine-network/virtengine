@@ -286,7 +286,7 @@ export function formatPresenceSummary({ nowMs, ttlMs } = {}) {
     return "No active instances reported.";
   }
   const coordinator = selectCoordinator({ nowMs, ttlMs });
-  const lines = ["🛰️ Codex Monitor Presence"];
+  const lines = ["🛰️ OpenFleet Presence"];
   for (const entry of active) {
     const name = entry.instance_label || entry.instance_id;
     const role = entry.workspace_role || "workspace";

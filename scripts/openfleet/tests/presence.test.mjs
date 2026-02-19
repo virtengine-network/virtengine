@@ -552,7 +552,7 @@ describe("formatPresenceSummary", () => {
 
     const result = formatPresenceSummary({ nowMs: now, ttlMs: 5000 });
 
-    expect(result).toContain("🛰️ Codex Monitor Presence");
+    expect(result).toContain("🛰️ OpenFleet Presence");
     expect(result).toContain("Primary Worker");
     expect(result).toContain("inst-2");
     expect(result).toContain("coordinator");

@@ -1,5 +1,5 @@
 /**
- * @fileoverview Shared State Manager for Codex Monitor Task Coordination
+ * @fileoverview Shared State Manager for OpenFleet Task Coordination
  *
  * Manages distributed task execution state across multiple agents and workstations.
  * Provides atomic operations for claiming, updating, and releasing task ownership

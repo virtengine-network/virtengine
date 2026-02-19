@@ -969,7 +969,7 @@ function Initialize-CISweepConfig {
     $script:CopilotCloudDisableOnRateLimit = Get-EnvBool -Name "COPILOT_CLOUD_DISABLE_ON_RATE_LIMIT" -Default $true
     $envCopilotLocalResolution = Get-EnvFallback -Name "COPILOT_LOCAL_RESOLUTION"
     $script:CopilotLocalResolution = if ($envCopilotLocalResolution) { $envCopilotLocalResolution } else { "agent" }
-    $script:CodexMonitorTaskUpstream = Get-EnvString -Name "OPENFLEET_TASK_UPSTREAM" -Default "origin/ve/openfleet-generic"
+    $script:OpenFleetTaskUpstream = Get-EnvString -Name "OPENFLEET_TASK_UPSTREAM" -Default "origin/ve/openfleet-generic"
 
     # Branch routing scope map (v0.8) — maps conventional commit scopes to upstream branches
     $script:BranchRoutingScopeMap = @{}
@@ -1530,10 +1530,10 @@ function Extract-UpstreamFromText {
     return Normalize-BranchName -Branch $match.Groups[1].Value
 }
 
-function Test-IsCodexMonitorTask {
+function Test-IsOpenFleetTask {
     param([Parameter(Mandatory)][object]$Task)
     $text = (Get-TaskTextBlob -Task $Task).ToLowerInvariant()
-    if ($text -match "openfleet|codex monitor|@virtengine/openfleet|scripts/openfleet") { return $true }
+    if ($text -match "openfleet|OpenFleet|@virtengine/openfleet|scripts/openfleet") { return $true }
     return $false
 }
 
@@ -1637,8 +1637,8 @@ function Get-TaskUpstreamBranch {
     $fromScope = Resolve-BranchFromScopeMap -Task $Task
     if ($fromScope) { return $fromScope }
 
-    if (Test-IsCodexMonitorTask -Task $Task) {
-        return $script:CodexMonitorTaskUpstream
+    if (Test-IsOpenFleetTask -Task $Task) {
+        return $script:OpenFleetTaskUpstream
     }
 
     return $script:VK_TARGET_BRANCH
@@ -5926,7 +5926,7 @@ function Test-DirtyPRFileOverlap {
         'ci'           = @('.github/', 'Makefile', 'make/')
         'ml'           = @('ml/')
         'deps'         = @('go.mod', 'go.sum', 'vendor/')
-        'codexmonitor' = @('scripts/openfleet/')
+        'OpenFleet' = @('scripts/openfleet/')
     }
 
     $titleLower = $TaskTitle.ToLower()

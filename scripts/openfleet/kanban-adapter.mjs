@@ -2581,7 +2581,7 @@ class GitHubIssuesAdapter {
       const commentBody = `<!-- openfleet-state
 ${stateJson}
 -->
-**Codex Monitor Status**: Agent \`${agentId}\` on \`${workstationId}\` is ${normalizedState.status === "working" ? "working on" : normalizedState.status === "claimed" ? "claiming" : "stale for"} this task.
+**OpenFleet Status**: Agent \`${agentId}\` on \`${workstationId}\` is ${normalizedState.status === "working" ? "working on" : normalizedState.status === "claimed" ? "claiming" : "stale for"} this task.
 *Last heartbeat: ${normalizedState.heartbeat || normalizedState.ownerHeartbeat}*`;
 
       if (stateCommentIndex >= 0) {
@@ -2709,7 +2709,7 @@ ${stateJson}
       );
 
       // Add comment explaining why
-      const commentBody = `**Codex Monitor**: This task has been marked as ignored.
+      const commentBody = `**OpenFleet**: This task has been marked as ignored.
 
 **Reason**: ${reason}
 
@@ -3581,7 +3581,7 @@ class JiraAdapter {
     const json = JSON.stringify(normalized, null, 2);
     return (
       `<!-- openfleet-state\n${json}\n-->\n` +
-      `Codex Monitor Status: Agent ${agentId} on ${workstationId} is ${normalized?.status} this task.\n` +
+      `OpenFleet Status: Agent ${agentId} on ${workstationId} is ${normalized?.status} this task.\n` +
       `Last heartbeat: ${normalized?.heartbeat || normalized?.ownerHeartbeat || ""}`
     );
   }
@@ -4245,7 +4245,7 @@ class JiraAdapter {
    *       {
    *         "type": "paragraph",
    *         "content": [
-   *           {"type": "text", "text": "Codex Monitor: Task marked as ignored."}
+   *           {"type": "text", "text": "OpenFleet: Task marked as ignored."}
    *         ]
    *       }
    *     ]
@@ -4294,7 +4294,7 @@ class JiraAdapter {
         });
       }
       const commentBody =
-        `Codex Monitor: This task has been marked as ignored.\n\n` +
+        `OpenFleet: This task has been marked as ignored.\n\n` +
         `Reason: ${ignoreReason}\n\n` +
         `To re-enable openfleet for this task, remove the ${this._codexLabels.ignore} label.`;
       await this.addComment(key, commentBody);

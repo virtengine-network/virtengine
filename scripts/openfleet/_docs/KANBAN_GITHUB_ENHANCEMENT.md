@@ -39,7 +39,7 @@ Agent state is persisted as HTML comments with embedded JSON:
 }
 -->
 
-**Codex Monitor Status**: Agent `agent-456` on `workstation-123` is working on this task.
+**OpenFleet Status**: Agent `agent-456` on `workstation-123` is working on this task.
 _Last heartbeat: 2026-02-14T17:30:00Z_
 ```
 

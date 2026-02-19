@@ -69,7 +69,7 @@ JIRA_DEFAULT_ASSIGNEE=5b10a2844c20165700ede21g
 
 ## Task Scoping + Tags
 
-Codex Monitor scopes Jira tasks using labels. These are effectively your tags.
+OpenFleet scopes Jira tasks using labels. These are effectively your tags.
 
 ```bash
 JIRA_TASK_LABELS=openfleet,codex-mointor
@@ -79,7 +79,7 @@ JIRA_ENFORCE_TASK_LABEL=true
 Notes:
 
 - Jira labels are sanitized to lowercase and non-alphanumeric characters become `-`.
-- If you set `JIRA_TASK_LABELS`, only issues with those labels are pulled into Codex Monitor.
+- If you set `JIRA_TASK_LABELS`, only issues with those labels are pulled into OpenFleet.
 - Extra tags can be applied in Jira as labels; they will be preserved and exposed in task metadata.
 
 ## Comments + Fetch Limits
@@ -122,7 +122,7 @@ JIRA_CUSTOM_FIELD_IGNORE_REASON=customfield_10047
 ```
 
 If custom fields are not configured, keep these unset and use structured-comment
-fallback. Codex Monitor will still update labels and comments.
+fallback. OpenFleet will still update labels and comments.
 
 ## Shared-State Labels
 
@@ -186,9 +186,9 @@ JIRA_CUSTOM_FIELD_IGNORE_REASON=customfield_10047
 }
 ```
 
-## Jira Capabilities Used by Codex Monitor
+## Jira Capabilities Used by OpenFleet
 
-Codex Monitor maps task metadata to Jira fields wherever possible:
+OpenFleet maps task metadata to Jira fields wherever possible:
 
 - Status: mapped via `JIRA_STATUS_*` to keep workflow states aligned.
 - Tags/labels: `JIRA_TASK_LABELS` scopes tasks; additional labels are preserved.
@@ -202,7 +202,7 @@ priority) where supported. VK currently exposes status/description only.
 
 ## Collaboration + Multi-Workstation Sync
 
-Codex Monitor coordinates multiple workstations via shared state stored in Jira:
+OpenFleet coordinates multiple workstations via shared state stored in Jira:
 
 - Each task claim writes `ownerId`, `attemptToken`, `heartbeat`, and status.
 - Heartbeats refresh periodically; stale heartbeats are marked `codex:stale`.

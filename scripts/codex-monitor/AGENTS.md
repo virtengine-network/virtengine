@@ -1,9 +1,9 @@
-# Codex Monitor Shim — AGENTS Guide
+# OpenFleet Shim — AGENTS Guide
 
 ## Module Overview
-- Purpose: Provide a legacy npm shim that forwards `codex-monitor` CLI commands to `@virtengine/openfleet`.
+- Purpose: Provide a legacy npm shim that forwards `openfleet` CLI commands to `@virtengine/openfleet`.
 - Use when: Updating the deprecation redirect behavior or adding legacy command aliases.
-- Key entry points: `scripts/codex-monitor/bin/codex-monitor.mjs:1`, `scripts/codex-monitor/package.json:1`.
+- Key entry points: `scripts/openfleet/bin/openfleet.mjs:1`, `scripts/openfleet/package.json:1`.
 
 ## Architecture
 - Single entrypoint script resolves the installed `@virtengine/openfleet` package
@@ -15,7 +15,7 @@
 
 ```mermaid
 flowchart TD
-  Shim[codex-monitor bin] --> Resolve[resolve @virtengine/openfleet]
+  Shim[openfleet bin] --> Resolve[resolve @virtengine/openfleet]
   Resolve --> OpenFleet[openfleet CLI script]
 ```
 
@@ -28,18 +28,18 @@ flowchart TD
 
 ### Install the legacy shim
 ```bash
-npm install -g codex-monitor
+npm install -g openfleet
 ```
 
 ### Run the shim (forwards to openfleet)
 ```bash
-codex-monitor --help
+openfleet --help
 ```
 
 ## Implementation Patterns
 - Add new legacy aliases by updating `bin` entries in
-  `scripts/codex-monitor/package.json:1` and mapping in
-  `scripts/codex-monitor/bin/codex-monitor.mjs:1`.
+  `scripts/openfleet/package.json:1` and mapping in
+  `scripts/openfleet/bin/openfleet.mjs:1`.
 - Keep the shim minimal and avoid embedding openfleet logic here.
 - Anti-patterns:
   - Duplicating openfleet implementation in the shim.
@@ -51,9 +51,9 @@ codex-monitor --help
 ## Testing
 - No automated tests for the shim.
 - Manual smoke check (requires published or local openfleet install):
-  - `node scripts/codex-monitor/bin/codex-monitor.mjs --help`
+  - `node scripts/openfleet/bin/openfleet.mjs --help`
 
 ## Troubleshooting
 - Shim cannot find openfleet:
   - Cause: `@virtengine/openfleet` dependency not installed.
-  - Fix: `npm install -g @virtengine/openfleet` or reinstall `codex-monitor`.
+  - Fix: `npm install -g @virtengine/openfleet` or reinstall `openfleet`.

@@ -23,7 +23,7 @@ if (-not $changedFiles) {
 $hasGo = $changedFiles | Where-Object { $_ -match '\.go$' }
 $hasPortal = $changedFiles | Where-Object { $_ -match '^portal/' }
 $hasGoMod = $changedFiles | Where-Object { $_ -match '^go\.(mod|sum)$' }
-$hasCodexMonitor = $changedFiles | Where-Object { $_ -match '^scripts/openfleet/' }
+$hasOpenFleet = $changedFiles | Where-Object { $_ -match '^scripts/openfleet/' }
 $errors = 0
 
 # ── Windows Firewall check (non-blocking) ──────────────────────────────────
@@ -102,8 +102,8 @@ if ($hasPortal) {
     if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: portal tests" -ForegroundColor Red; $errors++ }
 }
 
-if ($hasCodexMonitor) {
-    Write-Host "--- Codex Monitor checks ---" -ForegroundColor Yellow
+if ($hasOpenFleet) {
+    Write-Host "--- OpenFleet checks ---" -ForegroundColor Yellow
 
     if (-not (Test-Path "scripts/openfleet/node_modules")) {
         Write-Host "  npm install..."

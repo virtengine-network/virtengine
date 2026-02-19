@@ -161,7 +161,7 @@ else
     $HAS_DEPS_JS  && hook_step "JS dependencies changed"
     $HAS_DEPS_GO  && hook_step "Go dependencies changed"
     $HAS_TERRAFORM && hook_step "Terraform: $(echo "$TF_FILES" | wc -l | tr -d ' ') files"
-    [ -n "$OPENFLEET_FILES" ] && hook_step "Codex Monitor: $(echo "$OPENFLEET_FILES" | wc -l | tr -d ' ') files"
+    [ -n "$OPENFLEET_FILES" ] && hook_step "OpenFleet: $(echo "$OPENFLEET_FILES" | wc -l | tr -d ' ') files"
     $HAS_ONLY_DOCS && hook_step "Docs/workflows/tooling only — skipping code checks"
     echo ""
 fi
@@ -269,7 +269,7 @@ fi
 # Terraform formatting
 $HAS_TERRAFORM && RUN_TERRAFORM_FMT=true
 
-# Codex Monitor checks: Only if scripts/openfleet changed
+# OpenFleet checks: Only if scripts/openfleet changed
 if $HAS_OPENFLEET; then
     RUN_OPENFLEET_SYNTAX=true
     RUN_OPENFLEET_PREPUBLISH=true
@@ -367,12 +367,12 @@ ensure_portal_deps() {
 }
 
 # =========================================================================
-# CODEX MONITOR CHECKS
+# OpenFleet CHECKS
 # =========================================================================
 ensure_OPENFLEET_deps() {
     local monitor_dir="$REPO_ROOT/scripts/openfleet"
     if [ ! -f "$monitor_dir/package.json" ]; then
-        hook_warn "Codex Monitor package.json not found — skipping tests"
+        hook_warn "OpenFleet package.json not found — skipping tests"
         return 1
     fi
     if [ ! -d "$monitor_dir/node_modules" ]; then
@@ -803,10 +803,10 @@ else
     $RUN_PORTAL_BUILD   && { run_check "Portal build" VE_HOOK_SKIP_PORTAL check_portal_build || true; }
     # === JS dependency checks ===
     $RUN_PNPM_LOCK  && { run_check "pnpm lockfile" VE_HOOK_SKIP_PNPM check_pnpm_lock || true; }
-    # === Codex Monitor checks ===
-    $RUN_OPENFLEET_SYNTAX && { run_check "Codex Monitor syntax" VE_HOOK_SKIP_OPENFLEET check_OPENFLEET_syntax || true; }
-    $RUN_OPENFLEET_PREPUBLISH && { run_check "Codex Monitor prepublish validation" VE_HOOK_SKIP_OPENFLEET check_OPENFLEET_prepublish || true; }
-    $RUN_OPENFLEET_TEST && { run_check "Codex Monitor tests" VE_HOOK_SKIP_OPENFLEET check_OPENFLEET_test || true; }
+    # === OpenFleet checks ===
+    $RUN_OPENFLEET_SYNTAX && { run_check "OpenFleet syntax" VE_HOOK_SKIP_OPENFLEET check_OPENFLEET_syntax || true; }
+    $RUN_OPENFLEET_PREPUBLISH && { run_check "OpenFleet prepublish validation" VE_HOOK_SKIP_OPENFLEET check_OPENFLEET_prepublish || true; }
+    $RUN_OPENFLEET_TEST && { run_check "OpenFleet tests" VE_HOOK_SKIP_OPENFLEET check_OPENFLEET_test || true; }
     # === Terraform formatting ===
     $RUN_TERRAFORM_FMT && { run_check "terraform fmt" VE_HOOK_SKIP_TF check_terraform_fmt || true; }
 fi
