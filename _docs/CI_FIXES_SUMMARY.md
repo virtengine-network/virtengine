@@ -65,7 +65,7 @@ when the default setup is enabled
 
 **Problem**: Workflow failing with:
 ```
-npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fbosun
+npm error 404 Not Found - PUT https://registry.npmjs.org/bosun
 npm error 404  'bosun@0.8.0' is not in this registry.
 ```
 

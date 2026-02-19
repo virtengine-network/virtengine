@@ -107,7 +107,7 @@ If using default setup, these additional scans would need separate workflows.
 
 **Symptom:**
 ```
-npm error 404 Not Found - PUT https://registry.npmjs.org/@virtengine%2fbosun
+npm error 404 Not Found - PUT https://registry.npmjs.org/bosun
 npm error 404  'bosun@X.Y.Z' is not in this registry.
 ```
 OR
