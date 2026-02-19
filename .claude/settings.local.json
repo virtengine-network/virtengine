@@ -30,16 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'C:\\nvm4w\\nodejs\\node.exe' 'C:\\Users\\jON\\AppData\\Local\\nvm\\v24.11.1\\node_modules\\@virtengine\\codex-monitor\\agent-hook-bridge.mjs' --agent claude --event UserPromptSubmit"
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/jon/.nvm/versions/node/v24.13.1/bin/node '/home/jon/.nvm/versions/node/v24.13.1/lib/node_modules/@virtengine/codex-monitor/agent-hook-bridge.mjs' --agent claude --event UserPromptSubmit"
+            "command": "node '/home/jon/.nvm/versions/node/v24.13.1/lib/node_modules/@virtengine/openfleet/agent-hook-bridge.mjs' --agent claude --event UserPromptSubmit"
           }
         ]
       }
@@ -50,16 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'C:\\nvm4w\\nodejs\\node.exe' 'C:\\Users\\jON\\AppData\\Local\\nvm\\v24.11.1\\node_modules\\@virtengine\\codex-monitor\\agent-hook-bridge.mjs' --agent claude --event PreToolUse"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/jon/.nvm/versions/node/v24.13.1/bin/node '/home/jon/.nvm/versions/node/v24.13.1/lib/node_modules/@virtengine/codex-monitor/agent-hook-bridge.mjs' --agent claude --event PreToolUse"
+            "command": "node '/home/jon/.nvm/versions/node/v24.13.1/lib/node_modules/@virtengine/openfleet/agent-hook-bridge.mjs' --agent claude --event PreToolUse"
           }
         ]
       }
@@ -70,16 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'C:\\nvm4w\\nodejs\\node.exe' 'C:\\Users\\jON\\AppData\\Local\\nvm\\v24.11.1\\node_modules\\@virtengine\\codex-monitor\\agent-hook-bridge.mjs' --agent claude --event PostToolUse"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/jon/.nvm/versions/node/v24.13.1/bin/node '/home/jon/.nvm/versions/node/v24.13.1/lib/node_modules/@virtengine/codex-monitor/agent-hook-bridge.mjs' --agent claude --event PostToolUse"
+            "command": "node '/home/jon/.nvm/versions/node/v24.13.1/lib/node_modules/@virtengine/openfleet/agent-hook-bridge.mjs' --agent claude --event PostToolUse"
           }
         ]
       }
@@ -90,16 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'C:\\nvm4w\\nodejs\\node.exe' 'C:\\Users\\jON\\AppData\\Local\\nvm\\v24.11.1\\node_modules\\@virtengine\\codex-monitor\\agent-hook-bridge.mjs' --agent claude --event Stop"
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/jon/.nvm/versions/node/v24.13.1/bin/node '/home/jon/.nvm/versions/node/v24.13.1/lib/node_modules/@virtengine/codex-monitor/agent-hook-bridge.mjs' --agent claude --event Stop"
+            "command": "node '/home/jon/.nvm/versions/node/v24.13.1/lib/node_modules/@virtengine/openfleet/agent-hook-bridge.mjs' --agent claude --event Stop"
           }
         ]
       }
