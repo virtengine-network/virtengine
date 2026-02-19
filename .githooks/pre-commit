@@ -255,6 +255,28 @@ if git diff --cached --name-only | grep -qE '^go\.(mod|sum)$'; then
 fi
 
 # =========================================================================
+# Bosun prepublish check (when scripts/bosun/ files are staged)
+# =========================================================================
+BOSUN_STAGED=$(git diff --cached --name-only | grep -E '^scripts/bosun/.*\.(mjs|json)$' || true)
+if [ -n "$BOSUN_STAGED" ]; then
+    if [ "${VE_HOOK_SKIP_OPENFLEET:-}" = "1" ]; then
+        hook_warn "[pre-commit] Skipping bosun prepublish check (VE_HOOK_SKIP_OPENFLEET=1)"
+    else
+        hook_header "[pre-commit] Bosun files staged — running prepublish check..."
+        if [ ! -f "$REPO_ROOT/scripts/bosun/prepublish-check.mjs" ]; then
+            hook_warn "[pre-commit] prepublish-check.mjs not found — skipping"
+        elif ! (cd "$REPO_ROOT/scripts/bosun" && node prepublish-check.mjs 2>&1); then
+            hook_fail "[pre-commit] bosun prepublish check FAILED"
+            hook_fail "A .mjs file imports a module not listed in package.json 'files' array."
+            hook_fail "Add it to scripts/bosun/package.json and re-stage."
+            exit 1
+        else
+            hook_pass "[pre-commit] bosun prepublish check passed"
+        fi
+    fi
+fi
+
+# =========================================================================
 # Secret scanning with gitleaks (staged changes only)
 # =========================================================================
 if [ "${VE_HOOK_SKIP_SECRET_SCAN:-}" != "1" ]; then
