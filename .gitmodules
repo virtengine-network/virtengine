@@ -1,3 +1,4 @@
 [submodule "scripts/openfleet"]
 	path = scripts/openfleet
 	url = https://github.com/virtengine/openfleet.git
+	ignore = dirty
