@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * compat.mjs — Backward compatibility for users migrating from openfleet
+ * compat.mjs — Backward compatibility for users migrating from codex-monitor
  *
  * Handles:
  *   1. Legacy env var aliasing: CODEX_MONITOR_X → OPENFLEET_X
- *   2. Legacy config dir detection: ~/openfleet or $CODEX_MONITOR_DIR
+ *   2. Legacy config dir detection: ~/codex-monitor or $CODEX_MONITOR_DIR
  *   3. Migration: copy old config dir to new openfleet dir
  *
  * This module is intentionally dependency-free (only Node built-ins) and
@@ -14,9 +14,9 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 
-// ── Legacy config file names accepted from old openfleet installations ───
+// ── Legacy config file names accepted from old codex-monitor installations ───
 const LEGACY_CONFIG_NAMES = [
-  "openfleet.config.json",
+  "codex-monitor.config.json",
   "openfleet.config.json",
   ".openfleet.json",
   "openfleet.json",
@@ -24,7 +24,7 @@ const LEGACY_CONFIG_NAMES = [
 ];
 
 /**
- * Env vars the old openfleet package used that have been renamed.
+ * Env vars the old codex-monitor package used that have been renamed.
  * Format: [oldName, newName]
  * Rule: any CODEX_MONITOR_X maps to OPENFLEET_X by default, but some had
  * different names entirely — those are listed explicitly below.
@@ -112,14 +112,14 @@ export function applyLegacyEnvAliases() {
 }
 
 /**
- * Returns the legacy openfleet config directory if it exists and
+ * Returns the legacy codex-monitor config directory if it exists and
  * contains config files, null otherwise.
  *
  * Checks in priority order:
  *   1. $CODEX_MONITOR_DIR env var
- *   2. ~/openfleet
- *   3. ~/.openfleet
- *   4. ~/.config/openfleet
+ *   2. ~/codex-monitor
+ *   3. ~/.codex-monitor
+ *   4. ~/.config/codex-monitor
  */
 export function getLegacyConfigDir() {
   const home =
@@ -130,9 +130,9 @@ export function getLegacyConfigDir() {
 
   const candidates = [
     process.env.CODEX_MONITOR_DIR || null,
-    home ? join(home, "openfleet") : null,
-    home ? join(home, ".openfleet") : null,
-    home ? join(home, ".config", "openfleet") : null,
+    home ? join(home, "codex-monitor") : null,
+    home ? join(home, ".codex-monitor") : null,
+    home ? join(home, ".config", "codex-monitor") : null,
   ].filter(Boolean);
 
   for (const dir of candidates) {
@@ -165,7 +165,7 @@ export function getNewConfigDir() {
 }
 
 /**
- * Detect if the user has a legacy openfleet setup but no openfleet setup.
+ * Detect if the user has a legacy codex-monitor setup but no openfleet setup.
  * Returns { hasLegacy, legacyDir, newDir, alreadyMigrated }
  */
 export function detectLegacySetup() {
@@ -182,13 +182,13 @@ export function detectLegacySetup() {
 }
 
 /**
- * Migrate config files from old openfleet dir to new openfleet dir.
+ * Migrate config files from old codex-monitor dir to new openfleet dir.
  * Only copies; never deletes the old directory.
  *
  * Files copied:
  *   .env                            → .env  (with CODEX_MONITOR_ → OPENFLEET_ substitution)
  *   openfleet.config.json           → openfleet.config.json
- *   openfleet.config.json       → openfleet.config.json  (rename)
+ *   codex-monitor.config.json       → openfleet.config.json  (rename)
  *   .openfleet.json / openfleet.json → as-is
  *
  * Returns { migrated: string[], skipped: string[], errors: string[] }
@@ -207,7 +207,7 @@ export function migrateFromLegacy(legacyDir, newDir, { overwrite = false } = {})
   const filePairs = [
     [".env",                     ".env"],
     ["openfleet.config.json",    "openfleet.config.json"],
-    ["openfleet.config.json","openfleet.config.json"],
+    ["codex-monitor.config.json","openfleet.config.json"],
     [".openfleet.json",          ".openfleet.json"],
     ["openfleet.json",           "openfleet.json"],
   ];
@@ -271,7 +271,7 @@ export function autoApplyLegacyDir() {
 
   process.env.OPENFLEET_DIR = legacyDir;
   console.log(
-    `[compat] Legacy openfleet config detected at ${legacyDir} — using it as OPENFLEET_DIR.`,
+    `[compat] Legacy codex-monitor config detected at ${legacyDir} — using it as OPENFLEET_DIR.`,
   );
   return true;
 }

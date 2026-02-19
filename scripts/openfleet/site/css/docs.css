@@ -116,6 +116,23 @@
   text-align: center;
 }
 
+/* Dense sidebar nav (On This Page) */
+.sidebar-nav--dense {
+  gap: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) transparent;
+}
+
+.sidebar-nav--dense a {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── Docs Content ──────────────────────────────────────────────────────── */
 .docs-content {
   padding: 3rem 4rem;

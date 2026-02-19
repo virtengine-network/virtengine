@@ -139,4 +139,102 @@
     sidebarToggle.addEventListener('click', toggleSidebar);
     if (backdrop) backdrop.addEventListener('click', toggleSidebar);
   }
+
+  /* ── PR Showcase — fetch real PRs from VirtEngine repo ───────────────── */
+  const prContainer = document.getElementById('pr-showcase');
+  if (prContainer) {
+    const API = 'https://api.github.com/repos/virtengine/virtengine/pulls';
+    const MAX_PRS = 8;
+
+    function timeAgo(dateStr) {
+      const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+      if (seconds < 60) return 'just now';
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return minutes + 'm ago';
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return hours + 'h ago';
+      const days = Math.floor(hours / 24);
+      if (days < 30) return days + 'd ago';
+      return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    function labelColor(color) {
+      return `background: #${color}22; color: #${color}; border-color: #${color}44;`;
+    }
+
+    function prStateIcon(pr) {
+      if (pr.merged_at) return { cls: 'merged', icon: '⇄' };
+      if (pr.state === 'closed') return { cls: 'closed', icon: '✕' };
+      return { cls: 'open', icon: '⬆' };
+    }
+
+    async function fetchPRs() {
+      try {
+        // Fetch both open and recently closed/merged
+        const [openRes, closedRes] = await Promise.all([
+          fetch(`${API}?state=open&sort=updated&direction=desc&per_page=${MAX_PRS}`),
+          fetch(`${API}?state=closed&sort=updated&direction=desc&per_page=${MAX_PRS}`),
+        ]);
+
+        if (!openRes.ok && !closedRes.ok) throw new Error('GitHub API rate limited');
+
+        const openPRs = openRes.ok ? await openRes.json() : [];
+        const closedPRs = closedRes.ok ? await closedRes.json() : [];
+
+        // Merge and sort by updated_at, take top N
+        const all = [...openPRs, ...closedPRs]
+          .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+          .slice(0, MAX_PRS);
+
+        if (all.length === 0) {
+          prContainer.innerHTML = '<div class="pr-showcase__error">No PRs found. Check back later.</div>';
+          return;
+        }
+
+        prContainer.innerHTML = all.map((pr) => {
+          const state = prStateIcon(pr);
+          const labels = (pr.labels || [])
+            .slice(0, 3)
+            .map((l) => `<span class="pr-card__label" style="${labelColor(l.color)}">${l.name}</span>`)
+            .join('');
+          const updatedAt = pr.merged_at || pr.closed_at || pr.updated_at;
+          return `
+            <a class="pr-card" href="${pr.html_url}" target="_blank" rel="noopener">
+              <div class="pr-card__state pr-card__state--${state.cls}">${state.icon}</div>
+              <div class="pr-card__body">
+                <div class="pr-card__title">${pr.title}</div>
+                <div class="pr-card__meta">
+                  <span>#${pr.number}</span>
+                  <span>by ${pr.user?.login || 'unknown'}</span>
+                  <span>${timeAgo(updatedAt)}</span>
+                </div>
+                ${labels ? `<div class="pr-card__labels">${labels}</div>` : ''}
+              </div>
+            </a>`;
+        }).join('');
+
+      } catch (err) {
+        console.warn('[pr-showcase]', err);
+        prContainer.innerHTML =
+          '<div class="pr-showcase__error">Unable to load PRs. <a href="https://github.com/virtengine/virtengine/pulls" target="_blank" rel="noopener">View on GitHub →</a></div>';
+      }
+    }
+
+    // Lazy-load PRs when section scrolls into view
+    const showcaseSection = document.getElementById('showcase');
+    if (showcaseSection && 'IntersectionObserver' in window) {
+      const prObserver = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting) {
+            fetchPRs();
+            prObserver.disconnect();
+          }
+        },
+        { threshold: 0.1 }
+      );
+      prObserver.observe(showcaseSection);
+    } else {
+      fetchPRs();
+    }
+  }
 })();

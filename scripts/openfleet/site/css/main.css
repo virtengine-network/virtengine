@@ -29,12 +29,10 @@
   --pink: #ec4899;
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #00d4ff, #7c3aed);
-  --gradient-hero: linear-gradient(135deg, #00d4ff 0%, #7c3aed 50%, #ec4899 100%);
-  --gradient-card-border: linear-gradient(135deg, rgba(0,212,255,0.3), rgba(124,58,237,0.3));
-  --gradient-glow: radial-gradient(ellipse at 50% 0%, rgba(0,212,255,0.15) 0%, transparent 60%);
-  --gradient-bg-noise: radial-gradient(ellipse at 20% 50%, rgba(124,58,237,0.05), transparent 50%),
-                       radial-gradient(ellipse at 80% 20%, rgba(0,212,255,0.05), transparent 50%);
+  --gradient-primary: linear-gradient(135deg, #00d4ff, #00a3c7);
+  --gradient-hero: linear-gradient(135deg, #00d4ff 0%, #00a3c7 100%);
+  --gradient-card-border: linear-gradient(135deg, rgba(0,212,255,0.25), rgba(0,163,199,0.15));
+  --gradient-glow: radial-gradient(ellipse at 50% 0%, rgba(0,212,255,0.1) 0%, transparent 60%);
 
   /* Text */
   --text-primary: #f1f5f9;
@@ -79,15 +77,7 @@ body {
   min-height: 100vh;
 }
 
-/* Ambient background gradients */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: var(--gradient-bg-noise);
-  pointer-events: none;
-  z-index: 0;
-}
+/* Removed ambient background gradients for cleaner design */
 
 a {
   color: var(--cyan);
@@ -96,7 +86,7 @@ a {
 }
 
 a:hover {
-  color: var(--purple-light);
+  color: #4dd8ff;
 }
 
 ::selection {
@@ -144,10 +134,7 @@ h3 {
 }
 
 .gradient-text {
-  background: var(--gradient-hero);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--cyan);
 }
 
 .mono {
@@ -325,9 +312,10 @@ section {
 }
 
 .hero__glow--purple {
-  background: var(--purple);
+  background: var(--cyan-dim);
   bottom: -200px;
   left: -200px;
+  opacity: 0.06;
 }
 
 .hero__content {
@@ -510,10 +498,7 @@ section {
 .stat__value {
   font-size: 2rem;
   font-weight: 800;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--cyan);
   line-height: 1;
   margin-bottom: 0.25rem;
 }
@@ -1191,4 +1176,132 @@ section {
   .steps {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── PR Showcase ───────────────────────────────────────────────────────── */
+.pr-showcase {
+  max-width: 960px;
+  margin: 0 auto;
+  display: grid;
+  gap: 1rem;
+}
+
+.pr-showcase__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.pr-showcase__spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.pr-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  color: inherit;
+}
+
+.pr-card:hover {
+  border-color: var(--border-glow);
+  background: var(--bg-card-hover);
+  transform: translateY(-2px);
+  color: inherit;
+}
+
+.pr-card__state {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.85rem;
+  margin-top: 2px;
+}
+
+.pr-card__state--merged {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
+.pr-card__state--open {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.pr-card__state--closed {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.pr-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.pr-card__title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pr-card__meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.pr-card__meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.pr-card__labels {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+}
+
+.pr-card__label {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 100px;
+  font-weight: 500;
+  border: 1px solid;
+}
+
+.pr-showcase__error {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }

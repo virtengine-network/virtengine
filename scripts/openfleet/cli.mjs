@@ -697,11 +697,11 @@ async function main() {
     console.log("\n  Setup complete! Starting openfleet...\n");
   }
 
-  // Legacy migration: if ~/openfleet exists with config, auto-migrate to ~/openfleet
+  // Legacy migration: if ~/codex-monitor exists with config, auto-migrate to ~/openfleet
   const legacyInfo = detectLegacySetup();
   if (legacyInfo.hasLegacy && !legacyInfo.alreadyMigrated) {
     console.log(
-      `\n  📦 Detected legacy openfleet config at ${legacyInfo.legacyDir}`,
+      `\n  📦 Detected legacy codex-monitor config at ${legacyInfo.legacyDir}`,
     );
     console.log(`     Auto-migrating to ${legacyInfo.newDir}...\n`);
     const result = migrateFromLegacy(legacyInfo.legacyDir, legacyInfo.newDir);

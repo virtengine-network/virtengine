@@ -6307,7 +6307,7 @@ function resolveUpstreamFromTask(task) {
   const text = getTaskTextBlob(task).toLowerCase();
   if (
     text.includes("openfleet") ||
-    text.includes("OpenFleet") ||
+    text.includes("codex monitor") ||
     text.includes("@virtengine/openfleet") ||
     text.includes("scripts/openfleet")
   ) {
