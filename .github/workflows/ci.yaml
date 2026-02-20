@@ -34,6 +34,19 @@ on:
       - "release/**"
     tags:
       - "v*"
+  # Run full CI for PRs targeting protected branches (e.g. module branch → main merge PRs).
+  # PRs to module/ve/* branches intentionally skip full CI — they rely on pre-push hooks.
+  pull_request:
+    branches:
+      - main
+      - mainnet/main
+      - develop
+    # Exclude PRs from ve/* branches (agent worktrees) — these use pre-push quality gates
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '_docs/**'
+      - '.github/AGENTS.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

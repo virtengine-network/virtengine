@@ -13,6 +13,7 @@ on:
   pull_request:
     branches:
       - main
+      - mainnet/main
       - develop
     types:
       - opened
