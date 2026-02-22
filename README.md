@@ -98,3 +98,6 @@ Deployment, operations, and environment setup have been consolidated into a
 single guide:
 
 - [Deployment and Operations Guide](docs/operations/DEPLOYMENT_GUIDE.md)
+
+<!-- GitHub Analytics Pixel -->
+<img src="https://cloud.umami.is/p/12YNwo4Mv" alt="" width="1" height="1" style="display:none;" />
