@@ -101,3 +101,4 @@ single guide:
 
 <!-- GitHub Analytics Pixel -->
 <img src="https://cloud.umami.is/p/12YNwo4Mv" alt="" width="1" height="1" style="display:none;" />
+<img src="https://cloud.umami.is/p/iR78WZdwe" alt="" width="1" height="1" style="display:none;" />
